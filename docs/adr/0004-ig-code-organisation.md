@@ -34,8 +34,8 @@ Facts that shape the choice (evidence in
 ## Decision
 
 ### 1. igs has its own repository, which owns a copy of fbs's code
-* **Repository:** `Abdullah95k/securebrand-igs`, private. Go module
-  `github.com/abdullah95k/securebrand-igs`.
+* **Repository:** `Abdullah95k/securebrand-microservices-igs`, private. Go module
+  `github.com/abdullah95k/securebrand-microservices-igs`.
 * **Seed:** this repository's history up to main `f1377a9`, so `git blame`
   and cherry-picks keep working, plus one seed commit that marks the
   repository as igs and removes `.github/workflows/release.yml` (on a `v*`
