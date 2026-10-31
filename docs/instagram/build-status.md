@@ -19,7 +19,7 @@ The owner's decisions doc (rev 743) still shows the old D7 answer ("share code .
 | # | Milestone | State | PRs | Notes |
 |---|---|---|---|---|
 | M0 | Verify and decide (ADRs 0004, 0005, reuse matrix) | **done** (merged 2026-10-31) | [#1](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/1) (moved from fbs's #25, closed there) | Every package classified at `df76ce1`; all brief §5 defects confirmed; new findings below |
-| M1 | Seed and neutralise (igs repository) | in progress | M1a: PR_M1A | Seed done (`c996ec5`). M1a: module renamed to `github.com/abdullah95k/securebrand-microservices-igs`, `buf.yaml` excepts `FILE_SAME_GO_PACKAGE` for this one change (M1b removes it). Then M1b–M1d |
+| M1 | Seed and neutralise (igs repository) | in progress | M1a: [#2](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/2) | Seed done (`c996ec5`). M1a: module renamed to `github.com/abdullah95k/securebrand-microservices-igs`, `buf.yaml` excepts `FILE_SAME_GO_PACKAGE` for this one change (M1b removes it). Then M1b–M1d |
 | M2 | Fixes in igs's copy (§5 items 1–6, unknown-kind crash) | not started | | Item 6's Chrome 152 profile needs no dependency bump |
 | C1 | Owner: HARs of a grid click (post-detail query), reels tab, tagged tab | waiting for owner | | Re-share the Drive folder by link when recorded |
 | M3 | Contracts (protos, topics, migrations, config, metrics) | not started | | Follows ADR 0005; own database `igs`, schema `ig` |
