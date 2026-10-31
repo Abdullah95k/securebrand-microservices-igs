@@ -12,6 +12,7 @@ Each build session updates this file at the end of its work. The plan and rules 
 | Who merges the pull requests? | **The build session merges them** once CI is green (owner, 2026-10-31), and **never touches the fbs repository** | Sessions mark a PR ready and merge it on green CI; nothing is pushed, commented or changed in `securebrand-microservices` |
 | How often to refresh profile details (counts, bio, verified, highlights list)? | **Daily** | ADR 0005 §4 "Freshness": daily follower history; highlight items only when the list changed |
 | What may the probe's output hold? Where does it run? (owner, 2026-10-31) | **Everything it reads** (profile name, link, picture and details, posts, the newest post's first comments), and it runs on the **Phase 0 droplet**, like Facebook's Phase 0, not on the owner's Mac | `igs-spike probe` writes `profiles.csv`, `posts.csv`, `comments.csv`, `images/` and `report.json` under `phase0/out-ig/` (git-ignored, files 0600), plus a `.tar.gz` per tier; `make igs-probe` and `make igs-probe-dryrun`; runbook [`igs-probe.md`](../runbooks/igs-probe.md). The brief's rule against committing real usernames, names or text still holds for the repository: the output never goes into git |
+| Which proxy tier does the probe use? (owner, 2026-10-31, after residential failed every page load in the fourth run) | **ISP only; never residential** | `make igs-probe` defaults to `IGS_PROBE_TIERS=isp`, and the runbook no longer mentions residential runs. The full 348-account run is ISP only. C3's per-tier comparison (Phase 0) is untouched until the owner says otherwise |
 | Milestone order after M1? (owner's session prompt, 2026-10-31) | **M4 before M2 and M3**, so the probe reaches the owner sooner | M4's client builds on the M1 seams; M2's fixes and M3's contracts follow it |
 
 The owner's decisions doc (rev 743) still shows the old D7 answer ("share code ... make sure that does not produce any risks"); the answer above supersedes it.
@@ -103,7 +104,7 @@ From the M1d-2 to M1d-5a session:
 2. Rehearse with no traffic: `make igs-probe-dryrun` (its summary must say `bootstrapped 3/3`).
 3. Copy Facebook's proxies file: `cp ~/securebrand-microservices/phase0/proxies.yaml phase0/proxies.yaml` and `chmod 600 phase0/proxies.yaml`.
 4. List 5 to 10 public profiles: `cp phase0/ig-profiles.example.txt phase0/ig-profiles.txt`, then `nano phase0/ig-profiles.txt`, one per line.
-5. Run, inside `tmux new -s igs` so a dropped connection does not stop it: `make igs-probe` (ISP, then residential; 2 to 3 minutes per profile and tier).
+5. Run, inside `tmux new -s igs` so a dropped connection does not stop it: `make igs-probe` (ISP only, the owner's choice; 2 to 3 minutes per profile).
 6. On your Mac, download the bundles: `scp "root@YOUR_DROPLET_IP:securebrand-microservices-igs/phase0/out-ig/*.tar.gz" ~/Downloads/`, and attach them to the next build session or share them by Drive link.
 
 The output holds each profile's name, link, picture, details, posts and the newest post's first comments. It stays off git.

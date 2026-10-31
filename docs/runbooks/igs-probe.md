@@ -18,9 +18,10 @@ It also collects what it reads, for you to look at:
 - the newest post's first 10 comments: commenter, text, time and likes.
 
 It runs on the same machine as Facebook's Phase 0 (a droplet), with the
-same `phase0/proxies.yaml`. It paces like a person: one request every 3
-seconds or so, about 50 requests per profile, so **2 to 3 minutes per
-profile and tier**.
+same `phase0/proxies.yaml`, through the ISP proxies only (the owner's
+choice: it never uses the residential tier unless asked). It paces like a
+person: one request every 3 seconds or so, about 50 requests per profile, so
+**2 to 3 minutes per profile**.
 
 **The output holds personal data** (names, bios, comments). It stays in
 `phase0/`, which git ignores. Share it privately, and never commit it.
@@ -30,7 +31,7 @@ profile and tier**.
 | | |
 |---|---|
 | A machine | The Phase 0 droplet (Linux with Go 1.21 or later; the build fetches Go 1.27 itself) |
-| Proxies | The same `phase0/proxies.yaml` as Facebook's Phase 0: tiers `isp` and `residential` |
+| Proxies | The same `phase0/proxies.yaml` as Facebook's Phase 0; the probe uses its `isp` tier |
 | Profiles | 5 to 10 public profiles: a big brand, a small account, at least two with more than 50 posts, one with highlights |
 
 ## 1. Get the code on the droplet
@@ -109,8 +110,8 @@ tmux new -s igs
 make igs-probe
 ```
 
-This runs the ISP tier, then the residential tier. To also measure the
-droplet's own IP, run `make igs-probe IGS_PROBE_TIERS=direct,isp,residential`.
+This runs the ISP tier only. To also measure the droplet's own IP, run
+`make igs-probe IGS_PROBE_TIERS=direct,isp`.
 
 If the connection drops, log in again and reattach with `tmux attach -t igs`.
 Ctrl-C stops a run early; it still writes what it read.
@@ -156,7 +157,7 @@ themselves out of git.
 | Setting | Default | Change with |
 |---|---|---|
 | Profiles file | `phase0/ig-profiles.txt` | `IGS_PROBE_PROFILES=...` |
-| Tiers | `isp,residential` | `IGS_PROBE_TIERS=direct,isp` |
+| Tiers | `isp` | `IGS_PROBE_TIERS=direct,isp` |
 | Output | `phase0/out-ig/` | `IGS_PROBE_OUT=...` |
 | Proxies | `phase0/proxies.yaml` | `PHASE0_CONFIG=...` |
 | Grid depth | 32 pages after the first (396 posts) | `IGS_PROBE_ARGS="--max-grid-pages 100"` |
@@ -168,7 +169,7 @@ themselves out of git.
 make igs-probe IGS_PROBE_PROFILES=phase0/ig-profiles-all.txt IGS_PROBE_OUT=phase0/out-ig-all IGS_PROBE_ARGS="--max-age-days 365 --max-grid-pages 100"
 ```
 
-A busy news account posts 30 or more times a day, so it reaches the 1,200-post cap after a few weeks; a quieter one reaches the year first. At one request every 3 seconds, a capped account takes about 6 minutes, so plan on a day or more per tier.
+A busy news account posts 30 or more times a day, so it reaches the 1,200-post cap after a few weeks; a quieter one reaches the year first. At one request every 3 seconds, a capped account takes about 6 minutes, so plan on a day or more.
 
 The command behind it, for other options (pacing, grid depth, fingerprint):
 `go run ./cmd/igs-spike probe --help`.
