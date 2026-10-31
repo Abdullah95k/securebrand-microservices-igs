@@ -80,6 +80,15 @@ func TestProbeAgainstFakeig(t *testing.T) {
 				p.Index, p.GridFirst, p.GridByPK, p.CommentsRead, p.Highlights, p.Profile)
 		}
 		newest := want.Posts[0]
+		np := p.NewestPost
+		if np == nil || np.Class != "ok" || np.CommentsEmbedded != min(len(newest.Comments), fakeig.CommentPageSize) ||
+			np.LikeCount == nil || *np.LikeCount != newest.Likes || !np.TakenAt.Equal(newest.TakenAt) ||
+			np.CommentCount == nil || *np.CommentCount != int64(len(newest.Comments)) {
+			t.Fatalf("profile %d newest post page: %+v", p.Index, np)
+		}
+		if len(p.CommentsRead.Errors) != 0 {
+			t.Fatalf("profile %d comments errors: %v", p.Index, p.CommentsRead.Errors)
+		}
 		if len(p.Comments) != min(len(newest.Comments), fakeig.CommentPageSize) {
 			t.Fatalf("profile %d comments: %d of %d", p.Index, len(p.Comments), len(newest.Comments))
 		}

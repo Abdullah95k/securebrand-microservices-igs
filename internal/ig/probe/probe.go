@@ -37,6 +37,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/htmlx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
+	scrapehtml "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/htmlx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
@@ -77,6 +78,9 @@ type Step struct {
 	WireBytes int64  `json:"wire_bytes"`
 	Items     int    `json:"items,omitempty"`
 	HasNext   bool   `json:"has_next,omitempty"`
+	// Errors are the GraphQL error messages the answer carried beside its
+	// data (an answer classed OK can hold some), each once.
+	Errors []string `json:"errors,omitempty"`
 }
 
 // Grid is the U1 walk of one profile.
@@ -134,6 +138,16 @@ type Post struct {
 	ThumbnailURL string `json:"thumbnail_url,omitempty"`
 }
 
+// PostPage is what a post page held.
+type PostPage struct {
+	Step
+	URL              string    `json:"url"`
+	TakenAt          time.Time `json:"taken_at,omitzero"`
+	LikeCount        *int64    `json:"like_count,omitempty"`
+	CommentCount     *int64    `json:"comment_count,omitempty"`
+	CommentsEmbedded int       `json:"comments_embedded"`
+}
+
 // Comment is one top-level comment of the newest post.
 type Comment struct {
 	PostShortcode string    `json:"post_shortcode"`
@@ -147,24 +161,30 @@ type Comment struct {
 
 // Profile is one profile's results; Index is its 1-based line in the list.
 type Profile struct {
-	Index        int             `json:"index"`
-	Username     string          `json:"username"`
-	URL          string          `json:"url"`
-	Data         *ProfileData    `json:"data,omitempty"`
-	Posts        []Post          `json:"posts,omitempty"`
-	Comments     []Comment       `json:"comments,omitempty"`
-	Bootstrap    Step            `json:"bootstrap"`
-	TokensFound  map[string]bool `json:"tokens_found,omitempty"`
-	Cookies      []string        `json:"cookies,omitempty"`
-	CSRFCookie   bool            `json:"csrf_cookie,omitempty"`
-	Profile      *Step           `json:"profile,omitempty"`
-	GridFirst    *Step           `json:"grid_first,omitempty"`
-	Grid         *Grid           `json:"grid,omitempty"`
-	OtherCursor  *Step           `json:"cursor_other_identity,omitempty"`
-	GridByPK     *Step           `json:"grid_by_pk_no_cursor,omitempty"`
-	CommentsRead *Step           `json:"comments_read,omitempty"`
-	Highlights   *Step           `json:"highlights,omitempty"`
-	NoHighlights bool            `json:"no_highlights,omitempty"`
+	Index       int             `json:"index"`
+	Username    string          `json:"username"`
+	URL         string          `json:"url"`
+	Data        *ProfileData    `json:"data,omitempty"`
+	Posts       []Post          `json:"posts,omitempty"`
+	Comments    []Comment       `json:"comments,omitempty"`
+	Bootstrap   Step            `json:"bootstrap"`
+	TokensFound map[string]bool `json:"tokens_found,omitempty"`
+	Cookies     []string        `json:"cookies,omitempty"`
+	CSRFCookie  bool            `json:"csrf_cookie,omitempty"`
+	Profile     *Step           `json:"profile,omitempty"`
+	GridFirst   *Step           `json:"grid_first,omitempty"`
+	Grid        *Grid           `json:"grid,omitempty"`
+	OtherCursor *Step           `json:"cursor_other_identity,omitempty"`
+	// OtherBootstrap is the page load of the second identity, when this
+	// profile was the one that tried to start it.
+	OtherBootstrap *Step `json:"other_identity_bootstrap,omitempty"`
+	// NewestPost is the newest post's own page: what it holds that the grid
+	// does not (U2's baseline), and its embedded first comments.
+	NewestPost   *PostPage `json:"newest_post_page,omitempty"`
+	GridByPK     *Step     `json:"grid_by_pk_no_cursor,omitempty"`
+	CommentsRead *Step     `json:"comments_read,omitempty"`
+	Highlights   *Step     `json:"highlights,omitempty"`
+	NoHighlights bool      `json:"no_highlights,omitempty"`
 }
 
 // Report is the whole run.
@@ -333,6 +353,12 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 	r.keepRaw("profile", resp, 1)
 	out.Data = profileData(user)
+	// The grid's _connection query takes the user object's id (17841...),
+	// not its pk: with the pk it answers a null node (second probe run).
+	userID := user.Get("id").String()
+	if userID == "" {
+		userID = pk
+	}
 	if len(out.Data.Highlights) == 0 {
 		// The first run found no highlights on any profile: the list may
 		// come in another part of the answer.
@@ -359,15 +385,15 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	r.keepRaw("grid_first", resp, len(edges))
 	cursor := pi.EndCursor
 	out.Posts = append(out.Posts, r.posts(edges)...)
-	var mediaPK, newest string
+	var mediaPK, newest, newestURL string
 	if len(out.Posts) > 0 {
-		mediaPK, newest = out.Posts[0].PK, out.Posts[0].Shortcode
+		mediaPK, newest, newestURL = out.Posts[0].PK, out.Posts[0].Shortcode, out.Posts[0].URL
 	}
 
 	// U5: the first cursor, from another identity.
 	if cursor != "" {
-		if other := r.otherIdentity(ctx, page); other != nil {
-			resp, s := r.do(ctx, other, "grid", map[string]any{"user_pk": pk, "cursor": cursor}, page)
+		if other := r.otherIdentity(ctx, page, &out); other != nil {
+			resp, s := r.do(ctx, other, "grid", map[string]any{"user_id": userID, "cursor": cursor}, page)
 			s.Items = gridItems(resp)
 			r.keepRaw("grid_other_identity", resp, s.Items)
 			out.OtherCursor = ptr(s)
@@ -380,10 +406,11 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 
 	// U1: page the grid as far as it goes.
-	out.Grid = r.walk(ctx, id, pk, cursor, &out, page)
+	out.Grid = r.walk(ctx, id, userID, cursor, &out, page)
 
-	// U9: the grid by pk with no cursor.
-	resp, s = r.do(ctx, id, "grid", map[string]any{"user_pk": pk, "cursor": ""}, page)
+	// U9: the grid by the user's id with no cursor (an absent cursor
+	// renders as null; "" fails).
+	resp, s = r.do(ctx, id, "grid", map[string]any{"user_id": userID}, page)
 	s.Items = gridItems(resp)
 	r.keepRaw("grid_by_pk", resp, s.Items)
 	out.GridByPK = ptr(s)
@@ -395,7 +422,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 
 	// Comments of the newest post, and the first highlight.
 	if mediaPK != "" {
-		resp, s = r.do(ctx, id, "comments", map[string]any{"media_pk": mediaPK, "cursor": ""}, page)
+		resp, s = r.do(ctx, id, "comments", map[string]any{"media_pk": mediaPK}, page)
 		cedges, cpi := connection(respParts(resp), "comments_connection")
 		s.Items, s.HasNext = len(cedges), cpi.HasNext
 		r.keepRaw("comments", resp, s.Items)
@@ -406,6 +433,11 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 				Username: n.Get("user.username").String(), Verified: n.Get("user.is_verified").Bool(), Text: n.Get("text").String(),
 				CreatedAt: time.Unix(n.Get("created_at").Int(), 0).UTC(), Likes: n.Get("comment_like_count").Int()})
 		}
+	}
+	// The newest post's page: time and counts the grid lacks, and the first
+	// comments, which stand in when the comments query gave none.
+	if newestURL != "" {
+		out.NewestPost = r.postPage(ctx, id, newestURL, newest, &out)
 	}
 	if highlight != "" {
 		resp, s = r.do(ctx, id, "highlights", map[string]any{"reel_ids": []string{highlight}, "initial_reel_id": highlight}, page)
@@ -419,7 +451,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	return out
 }
 
-func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor string, out *Profile, page string) *Grid {
+func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor string, out *Profile, page string) *Grid {
 	firstPage := out.GridFirst
 	g := &Grid{Posts: firstPage.Items, Stop: "end"}
 	// A first page that names a cursor is followed even when it says no
@@ -435,7 +467,7 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor stri
 			g.Stop = "cap"
 			break
 		}
-		resp, s := r.do(ctx, id, "grid", map[string]any{"user_pk": pk, "cursor": cursor}, page)
+		resp, s := r.do(ctx, id, "grid", map[string]any{"user_id": userID, "cursor": cursor}, page)
 		if resp == nil || resp.Class != detect.OK {
 			g.Stop, g.Failed = "wall:"+s.Class, &s
 			break
@@ -476,20 +508,92 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor stri
 
 // otherIdentity is a second identity for U5, bootstrapped on the first
 // profile page it is needed for and reused after.
-func (r *runner) otherIdentity(ctx context.Context, page string) *session.Identity {
+func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *session.Identity {
 	if r.second != nil {
 		return r.second
 	}
 	id, err := r.o.Pool.Acquire(ctx, r.o.Tier)
 	if err != nil {
+		out.OtherBootstrap = &Step{Class: "no_identity", Reason: err.Error()}
 		return nil
 	}
-	if _, err := r.o.Loader.Bootstrap(ctx, id, page); err != nil {
+	start := time.Now()
+	pl, err := r.o.Loader.Bootstrap(ctx, id, page)
+	st := &Step{Ms: time.Since(start).Milliseconds()}
+	if pl != nil {
+		st.Class, st.Status, st.WireBytes, st.Reason = pl.Class.String(), pl.Status, pl.Bytes, pl.Reason
+	}
+	if err != nil {
+		if st.Class == "" {
+			st.Class = detect.Transport.String()
+		}
+		st.Reason = err.Error()
+		out.OtherBootstrap = st
 		r.o.Pool.Release(id)
 		return nil
 	}
+	out.OtherBootstrap = st
 	r.second = id
 	return id
+}
+
+// postPage loads a post's page and reads what it holds: the post's time,
+// like and comment counts, and the embedded first comments (used for
+// Comments when the comments query gave none).
+func (r *runner) postPage(ctx context.Context, id *session.Identity, url, shortcode string, out *Profile) *PostPage {
+	pp := &PostPage{URL: url}
+	start := time.Now()
+	pl, err := r.o.Loader.Load(ctx, id, url)
+	pp.Ms = time.Since(start).Milliseconds()
+	if err != nil {
+		pp.Class, pp.Reason = detect.Transport.String(), "page load failed"
+		r.cost("post_page", pp.Step)
+		return pp
+	}
+	pp.Class, pp.Status, pp.WireBytes, pp.Reason = pl.Class.String(), pl.Status, pl.Bytes, pl.Reason
+	r.cost("post_page", pp.Step)
+	if pl.Class != detect.OK {
+		return pp
+	}
+	if r.rawDir != "" && r.pages <= r.o.RawPages {
+		r.saveRaw("post-page.html", pl.HTML)
+	}
+	blobs := scrapehtml.JSONBlobs(pl.HTML)
+	for _, b := range blobs {
+		media := walk.Find(b, "xig_polaris_media")
+		if !media.Exists() {
+			media = b
+		}
+		if pp.TakenAt.IsZero() {
+			if t := walk.Find(media, "taken_at").Int(); t > 0 {
+				pp.TakenAt = time.Unix(t, 0).UTC()
+			}
+		}
+		if pp.LikeCount == nil {
+			if v := walk.Find(media, "like_count"); v.Exists() {
+				n := v.Int()
+				pp.LikeCount = &n
+			}
+		}
+		if pp.CommentCount == nil {
+			if v := walk.Find(media, "comment_count"); v.Exists() {
+				n := v.Int()
+				pp.CommentCount = &n
+			}
+		}
+	}
+	edges, _ := connection(blobs, "comments_connection")
+	pp.CommentsEmbedded = len(edges)
+	pp.Items = len(edges)
+	if len(out.Comments) == 0 {
+		for _, e := range edges {
+			n := e.Get("node")
+			out.Comments = append(out.Comments, Comment{PostShortcode: shortcode, PK: n.Get("pk").String(),
+				Username: n.Get("user.username").String(), Verified: n.Get("user.is_verified").Bool(), Text: n.Get("text").String(),
+				CreatedAt: time.Unix(n.Get("created_at").Int(), 0).UTC(), Likes: n.Get("comment_like_count").Int()})
+		}
+	}
+	return pp
 }
 
 func (r *runner) do(ctx context.Context, id *session.Identity, query string, vars map[string]any, referer string) (*graphql.Response, Step) {
@@ -502,6 +606,11 @@ func (r *runner) do(ctx context.Context, id *session.Identity, query string, var
 		return nil, s
 	}
 	s.Class, s.Status, s.WireBytes, s.Reason = resp.Class.String(), resp.Status, resp.BytesIn+resp.BytesOut, resp.Reason
+	for _, e := range resp.Errors {
+		if m := e.Message; m != "" && !slices.Contains(s.Errors, m) && len(s.Errors) < 5 {
+			s.Errors = append(s.Errors, m)
+		}
+	}
 	r.sum.QueriesWithoutClientState[s.Class]++
 	if resp.Class != detect.OK && r.rawDir != "" {
 		r.rawSeq++

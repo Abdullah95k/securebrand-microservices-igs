@@ -40,7 +40,7 @@ The owner's decisions doc (rev 743) still shows the old D7 answer ("share code .
 
 | # | Question | Status |
 |---|---|---|
-| U1 | Grid paging past 24 posts | open: the first probe run's grid counts were misread by the probe (see Findings); rerun after the fix |
+| U1 | Grid paging past 24 posts | open: the first two probe runs sent the grid query the user's `pk` instead of its `id`, so Instagram found no user (see Findings); rerun after the fix |
 | U2 | Cheap post-detail query | open: HAR (C1) |
 | U3 | Client-state form fields needed? | **answered (first probe run, 2026-10-31): no.** Residential tier, 5 profiles: all 30 queries (profile, grid, comments, highlights) answered OK without `__dyn`, `__csr`, `__hblp`, `__hsdp`, `__sjsp` |
 | U4 | Per-IP tolerance and wire bytes per tier | open: Phase 0 (C3) |
@@ -68,7 +68,13 @@ From M0 (details and evidence in the [reuse matrix](reuse-matrix.md)):
 From the owner's first probe run (2026-10-31, droplet, 5 profiles from the owner's list, ISP and residential):
 - **Logged-out pages bootstrap through both proxy tiers**: 5 of 5 page loads on ISP and on residential carried all 11 tokens the probe looks for (`lsd`, `csrf_token`, `app_id`, `jazoest`, `__spin_r/b/t`, `__rev`, `__hs`, `__hsi`, `rollout_hash`); no wall, no challenge, no rate limit in 59 queries.
 - **The profile query works**: follower and following counts, verified and private flags, biography, bio links and the profile picture (3 to 9 KB, so the small version) were read for every profile. The first grid page's 12 posts (link, caption, thumbnail, type) too, and it said there is a next page.
-- **Not read yet (the probe's fault, not Instagram's):** later grid pages, comments and highlights. Their queries answered OK, but the probe found no items in them, and no highlights list in the profile answer.
+- **Not read yet (the probe's fault, not Instagram's):** later grid pages and comments. The second run saved the raw answers and showed why:
+  - the grid's `_connection` query takes the user object's `id` (17841…), not its `pk`; with the pk it answers `{"data":{"node":null}}`;
+  - the comments query fails (`field_exception`) when `after` is an empty string; a first page needs `null`.
+
+  Both are fixed, and `fakeig` now behaves the same way, so tests catch a regression. The probe also loads the newest post's page now (time, like and comment counts, embedded first comments).
+- **Highlights:** none of the 5 profiles lists any (`lox_highlights_connection.edges` is empty in every profile answer), so none were requested.
+- **ISP, second run:** 3 of 5 profiles, then "every exit of the tier is cooling down". The failures that opened the breaker were not recorded: most likely the probe's second identity (the U5 check) failing its page load, retried on each profile. The probe now records that page load and Instagram's error messages.
 - **Cost on the wire** (ISP, means): profile page 138 KB, first grid page 10.4 KB, a later grid page 3.7 KB, profile query 5.1 KB, comments 4.1 KB, profile picture 7.4 KB; latency 2 to 3.5 s per request. Residential was within 10% on every figure.
 - **U3 and U8 are answered** (table above).
 - **The probe misread the grid**, so U1, U5 and U9 need a rerun. Every grid first page reported 12 posts and no next page, and the cursor and pk checks found no posts in answers classed OK. The likely cause: Instagram streams the connection in parts (edges and the real `page_info` after the first part), and the probe read only the first part. Fixed: the probe reads every part (and a deferred `page_info`), follows a first page's cursor even when it says no next page, and saves the raw answers under `raw/` so the shape can be checked. Also fixed: every per-profile step in `report.json` pointed at one shared variable, so each showed the last request (the summary counts were right).
