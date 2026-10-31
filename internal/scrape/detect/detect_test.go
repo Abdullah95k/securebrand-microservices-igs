@@ -40,3 +40,38 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+// TestPlatformWallRules checks that wall paths and page markers are rule
+// data: Facebook's defaults behave as before, and another platform's rules
+// (here Instagram-like paths and a synthetic marker) classify its walls.
+func TestPlatformWallRules(t *testing.T) {
+	fb := DefaultRules()
+	other := DefaultRules()
+	other.CheckpointPaths = append(other.CheckpointPaths, "/challenge")
+	other.LoginPaths = append(other.LoginPaths, "/accounts/login")
+	other.LoginPageMarkers = [][]byte{[]byte(`data-test-login-wall`)}
+
+	challenge := Input{Status: 302, Location: "https://www.example.com/challenge/?next=/p/", Expect: "html"}
+	loginPage := Input{Status: 200, ContentType: "text/html", Body: []byte(`<div data-test-login-wall>`), Expect: "html"}
+	checkpointPage := Input{Status: 200, ContentType: "text/html", Body: []byte(`<form action="/checkpoint/block/">`), Expect: "html"}
+
+	cases := []struct {
+		name  string
+		rules Rules
+		in    Input
+		want  Class
+	}{
+		{"fb: unknown redirect stays soft", fb, challenge, SoftError},
+		{"fb: no login page markers", fb, loginPage, OK},
+		{"fb: checkpoint page", fb, checkpointPage, Checkpoint},
+		{"other: challenge redirect", other, challenge, Checkpoint},
+		{"other: login redirect", other, Input{Status: 302, Location: "/accounts/login/?next=%2Fx%2F", Expect: "html"}, LoginWall},
+		{"other: login page", other, loginPage, LoginWall},
+		{"other: checkpoint page", other, checkpointPage, Checkpoint},
+	}
+	for _, c := range cases {
+		if got, why := c.rules.Classify(c.in); got != c.want {
+			t.Errorf("%s: got %v (%s), want %v", c.name, got, why, c.want)
+		}
+	}
+}

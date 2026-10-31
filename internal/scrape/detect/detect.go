@@ -56,16 +56,28 @@ type GQLError struct {
 	Summary  string
 }
 
-// Rules holds the Facebook error codes and markers. Defaults come from
-// public observations and must be confirmed in Phase 0; they are config so
-// they can change without a deploy.
+// Rules holds a platform's error codes, wall paths and markers. Facebook's
+// come from DefaultRules; another platform passes its own, so nothing here is
+// specific to one of them. Defaults come from public observations and must
+// be confirmed in Phase 0.
 type Rules struct {
 	RateLimitCodes []int64
 	SoftCodes      []int64
 	LoginCodes     []int64
 	StaleMessages  []*regexp.Regexp
-	LoginMarkers   [][]byte
-	BlockMarkers   [][]byte
+	// LoginMarkers mark an HTML login page returned where GraphQL JSON was
+	// expected; BlockMarkers a block page, on either kind of request.
+	LoginMarkers [][]byte
+	BlockMarkers [][]byte
+	// CheckpointPaths and LoginPaths classify a redirect whose Location
+	// contains one of them, checkpoints first.
+	CheckpointPaths []string
+	LoginPaths      []string
+	// CheckpointPageMarkers and LoginPageMarkers classify a page load (Expect
+	// "html") that came back as a challenge or a login wall. Facebook needs
+	// no login page markers: its logged-out pages carry a login form anyway.
+	CheckpointPageMarkers [][]byte
+	LoginPageMarkers      [][]byte
 }
 
 // DefaultRules returns the built-in rules.
@@ -80,8 +92,11 @@ func DefaultRules() Rules {
 			regexp.MustCompile(`(?i)unknown (query|operation)`),
 			regexp.MustCompile(`(?i)variable .* (is|was) (not|never) (defined|provided)`),
 		},
-		LoginMarkers: [][]byte{[]byte(`id="login_form"`), []byte(`"loginForm"`), []byte(`/login/?next=`), []byte(`login_required`)},
-		BlockMarkers: []([]byte){[]byte(`temporarily blocked`), []byte(`Temporarily Blocked`), []byte(`rate limit`)},
+		LoginMarkers:          [][]byte{[]byte(`id="login_form"`), []byte(`"loginForm"`), []byte(`/login/?next=`), []byte(`login_required`)},
+		BlockMarkers:          []([]byte){[]byte(`temporarily blocked`), []byte(`Temporarily Blocked`), []byte(`rate limit`)},
+		CheckpointPaths:       []string{"/checkpoint"},
+		LoginPaths:            []string{"/login"},
+		CheckpointPageMarkers: [][]byte{[]byte(`action="/checkpoint`)},
 	}
 }
 
@@ -103,12 +118,17 @@ type Input struct {
 
 // Classify returns the class and a short reason.
 func (r Rules) Classify(in Input) (Class, string) {
-	loc := strings.ToLower(in.Location)
-	switch {
-	case strings.Contains(loc, "/checkpoint"):
-		return Checkpoint, "redirect to checkpoint"
-	case strings.Contains(loc, "/login"):
-		return LoginWall, "redirect to login"
+	if loc := strings.ToLower(in.Location); loc != "" {
+		for _, p := range r.CheckpointPaths {
+			if strings.Contains(loc, p) {
+				return Checkpoint, "redirect to checkpoint"
+			}
+		}
+		for _, p := range r.LoginPaths {
+			if strings.Contains(loc, p) {
+				return LoginWall, "redirect to login"
+			}
+		}
 	}
 	switch {
 	case in.Status == 429:
@@ -162,8 +182,15 @@ func (r Rules) Classify(in Input) (Class, string) {
 		if len(head) > 512<<10 {
 			head = head[:512<<10]
 		}
-		if bytes.Contains(head, []byte("checkpoint")) && bytes.Contains(head, []byte(`action="/checkpoint`)) {
-			return Checkpoint, "checkpoint page"
+		for _, m := range r.CheckpointPageMarkers {
+			if bytes.Contains(head, m) {
+				return Checkpoint, "checkpoint page"
+			}
+		}
+		for _, m := range r.LoginPageMarkers {
+			if bytes.Contains(head, m) {
+				return LoginWall, "login page"
+			}
 		}
 		for _, m := range r.BlockMarkers {
 			if bytes.Contains(head, m) {
