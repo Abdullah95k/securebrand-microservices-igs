@@ -92,8 +92,8 @@ type Grid struct {
 	Pages int `json:"pages"` // after the first
 	Posts int `json:"posts"` // including the first page
 	// Stop is "end" (has_next_page false), "cap" (MaxGridPages), "age"
-	// (MaxAge reached), or "wall:<class>" for the first page that did not
-	// answer.
+	// (MaxAge reached), "stopped" (the operator stopped the run), or
+	// "wall:<class>" for the first page that did not answer.
 	Stop     string `json:"stop"`
 	PastPage bool   `json:"past_24"` // read more than 24 posts
 	// Oldest is when the oldest post read was posted (from its pk).
@@ -195,6 +195,10 @@ type Profile struct {
 	CommentsRead *Step     `json:"comments_read,omitempty"`
 	Highlights   *Step     `json:"highlights,omitempty"`
 	NoHighlights bool      `json:"no_highlights,omitempty"`
+	// Stopped marks the profile being read when the operator stopped the
+	// run (Ctrl-C): what it holds is partial, and its unanswered steps
+	// count for no question.
+	Stopped bool `json:"stopped,omitempty"`
 }
 
 // Report is the whole run.
@@ -210,7 +214,10 @@ type Report struct {
 
 // Summary answers the questions over all profiles.
 type Summary struct {
-	Profiles     int            `json:"profiles"`
+	Profiles int `json:"profiles"`
+	// StoppedEarly: the operator stopped the run (Ctrl-C) before the last
+	// profile; the last profile in the report is partial.
+	StoppedEarly bool           `json:"stopped_early,omitempty"`
 	Bootstrapped int            `json:"bootstrapped"`
 	TokensFound  map[string]int `json:"tokens_found"`
 	// U1
@@ -246,6 +253,15 @@ type Cost struct {
 	sumBytes  int64
 }
 
+const (
+	// stopped is the class of a step cut short by the operator (Ctrl-C),
+	// and the grid's stop when that happens mid-walk.
+	stopped = "stopped"
+	// progressEvery is how often, in grid pages, a long walk reports
+	// progress (about every 30 seconds at the probe's pace).
+	progressEvery = 10
+)
+
 // Run probes every profile and returns the report.
 func Run(ctx context.Context, o Options) Report {
 	if o.Now == nil {
@@ -262,9 +278,16 @@ func Run(ctx context.Context, o Options) Report {
 			break
 		}
 		p := r.profile(ctx, i+1, username)
+		if ctx.Err() != nil {
+			p.Stopped, r.sum.StoppedEarly = true, true
+		}
 		rep.Profiles = append(rep.Profiles, p)
 		if o.Progress != nil {
-			o.Progress(fmt.Sprintf("profile %d/%d %s: bootstrap %s, grid %s", i+1, len(o.Profiles), username, p.Bootstrap.Class, gridLine(p.Grid)))
+			line := fmt.Sprintf("profile %d/%d %s: bootstrap %s, grid %s", i+1, len(o.Profiles), username, p.Bootstrap.Class, gridLine(p.Grid))
+			if p.Stopped {
+				line = fmt.Sprintf("profile %d/%d %s: stopped (Ctrl-C) after %d posts; the report keeps what was read", i+1, len(o.Profiles), username, len(p.Posts))
+			}
+			o.Progress(line)
 		}
 	}
 	if r.second != nil {
@@ -310,6 +333,9 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
 	if err != nil {
 		out.Bootstrap.Class, out.Bootstrap.Reason = detect.Transport.String(), redact(err.Error())
+		if ctx.Err() != nil {
+			out.Bootstrap.Class, out.Bootstrap.Reason = stopped, "stopped by the operator"
+		}
 		return out
 	}
 	out.Bootstrap.Class, out.Bootstrap.Status, out.Bootstrap.WireBytes = pl.Class.String(), pl.Status, pl.Bytes
@@ -408,9 +434,11 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 			s.Items = gridItems(resp)
 			r.keepRaw("grid_other_identity", resp, s.Items)
 			out.OtherCursor = ptr(s)
-			if s.Class == detect.OK.String() && s.Items > 0 {
+			switch {
+			case s.Class == stopped:
+			case s.Class == detect.OK.String() && s.Items > 0:
 				r.sum.CursorPortable++
-			} else {
+			default:
 				r.sum.CursorNotPortable++
 			}
 		}
@@ -418,6 +446,9 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 
 	// U1: page the grid as far as it goes.
 	out.Grid = r.walk(ctx, id, userID, cursor, &out, page)
+	if ctx.Err() != nil {
+		return out // stopped: the remaining steps would only fail
+	}
 
 	// U9: the grid by the user's id with no cursor (an absent cursor
 	// renders as null; "" fails).
@@ -425,9 +456,12 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	s.Items = gridItems(resp)
 	r.keepRaw("grid_by_pk", resp, s.Items)
 	out.GridByPK = ptr(s)
-	if s.Class == detect.OK.String() && s.Items > 0 {
+	switch {
+	case s.Class == stopped:
+		return out
+	case s.Class == detect.OK.String() && s.Items > 0:
 		r.sum.GridByPKWorks++
-	} else {
+	default:
 		r.sum.GridByPKFails++
 	}
 
@@ -479,6 +513,10 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor 
 			break
 		}
 		resp, s := r.do(ctx, id, "grid", map[string]any{"user_id": userID, "cursor": cursor}, page)
+		if s.Class == stopped {
+			g.Stop = stopped
+			break
+		}
 		if resp == nil || resp.Class != detect.OK {
 			g.Stop, g.Failed = "wall:"+s.Class, &s
 			break
@@ -491,6 +529,13 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor 
 		g.Pages++
 		g.Posts += len(edges)
 		out.Posts = append(out.Posts, r.posts(edges)...)
+		if r.o.Progress != nil && g.Pages%progressEvery == 0 {
+			line := fmt.Sprintf("  %s: %d posts so far", out.Username, g.Posts)
+			if t := out.Posts[len(out.Posts)-1].PostedAt; !t.IsZero() {
+				line += ", back to " + t.Format("2006-01-02")
+			}
+			r.o.Progress(line)
+		}
 		if r.o.MaxAge > 0 {
 			if last := out.Posts[len(out.Posts)-1].PostedAt; !last.IsZero() && last.Before(r.o.Now().Add(-r.o.MaxAge)) {
 				g.Stop = "age"
@@ -517,6 +562,7 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor 
 		r.sum.GridCaps++
 	case "age":
 		r.sum.GridAgeStops++
+	case stopped:
 	default:
 		r.sum.GridWalls[strings.TrimPrefix(g.Stop, "wall:")]++
 		r.sum.WalledAtPosts = append(r.sum.WalledAtPosts, g.Posts)
@@ -550,6 +596,9 @@ func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *
 			st.Class = detect.Transport.String()
 		}
 		st.Reason = redact(err.Error())
+		if ctx.Err() != nil {
+			st.Class, st.Reason = stopped, "stopped by the operator"
+		}
 		out.OtherBootstrap = st
 		r.o.Pool.Release(id)
 		return nil
@@ -623,6 +672,12 @@ func (r *runner) do(ctx context.Context, id *session.Identity, query string, var
 	resp, err := r.o.GQL.Do(ctx, id, graphql.Request{Query: query, Vars: vars, Referer: referer})
 	s := Step{Ms: time.Since(start).Milliseconds()}
 	if err != nil {
+		if ctx.Err() != nil {
+			// The operator stopped the run: not Instagram's answer, so it
+			// counts for no question and no cost.
+			s.Class, s.Reason = stopped, "stopped by the operator"
+			return nil, s
+		}
 		s.Class, s.Reason = detect.Transport.String(), "request failed"
 		r.cost(query, s)
 		return nil, s

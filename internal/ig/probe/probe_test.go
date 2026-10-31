@@ -243,3 +243,39 @@ func TestProbePostedAtAndAgeLimit(t *testing.T) {
 		t.Fatal("implausible pks must give no time")
 	}
 }
+
+// A long walk reports progress every 10 pages, and stopping the run
+// (Ctrl-C) mid-walk is recorded as a stop, not a wall: the profile is
+// marked partial and counts for no question.
+func TestProbeProgressAndStop(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 4, Profiles: 2, PostsPerProfile: 200, MaxComments: 2, PostSpacing: time.Hour}})
+	var names []string
+	for _, p := range env.World.Profiles() {
+		names = append(names, p.Username)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var lines []string
+	rep := probe.Run(ctx, probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 100,
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, Progress: func(line string) {
+			lines = append(lines, line)
+			if strings.Contains(line, "posts so far") {
+				cancel() // the operator presses Ctrl-C after the first progress line
+			}
+		}})
+	if len(lines) != 2 || !strings.Contains(lines[0], names[0]+": 132 posts so far, back to ") ||
+		!strings.Contains(lines[1], "profile 1/2 "+names[0]+": stopped (Ctrl-C) after 132 posts") {
+		t.Fatalf("progress %q", lines)
+	}
+	s := rep.Summary
+	if len(rep.Profiles) != 1 || !s.StoppedEarly || !rep.Profiles[0].Stopped || s.Profiles != 1 {
+		t.Fatalf("profiles %d, summary %+v", len(rep.Profiles), s)
+	}
+	g := rep.Profiles[0].Grid
+	if g.Stop != "stopped" || g.Failed != nil || len(s.GridWalls) != 0 || len(s.WalledAtPosts) != 0 || s.GridByPKFails != 0 || s.GridByPKWorks != 0 {
+		t.Fatalf("grid %+v, summary %+v", g, s)
+	}
+	if len(rep.Profiles[0].Posts) != 132 || rep.Profiles[0].GridByPK != nil || s.QueriesWithoutClientState["transport"] != 0 {
+		t.Fatalf("profile %+v", rep.Profiles[0])
+	}
+}
