@@ -30,7 +30,7 @@ var ErrBootstrap = errors.New("session: bootstrap failed")
 var ErrNoHooks = errors.New("session: no Extract hook: the platform's page hooks are not set")
 
 // ErrTransport marks a page load that got no response at all (a timeout, a
-// refused or reset connection): the exit failed, not Facebook.
+// refused or reset connection): the exit failed, not the platform.
 var ErrTransport = errors.New("transport")
 
 // BrowserFallback renders a page in a real browser for an identity whose

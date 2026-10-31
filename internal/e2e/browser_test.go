@@ -7,7 +7,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/browser"
 )
 
 // TestBrowserBootstrapCrawl: pages whose tokens only appear after their

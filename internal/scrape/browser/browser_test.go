@@ -18,9 +18,9 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	scrapeproxy "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 
@@ -251,7 +251,7 @@ func browserProcesses(t *testing.T) int {
 	n := 0
 	for _, e := range entries {
 		b, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
-		if err == nil && strings.Contains(string(b), "--user-data-dir="+filepath.Join(os.TempDir(), "fbs-browser-")) {
+		if err == nil && strings.Contains(string(b), "--user-data-dir="+filepath.Join(os.TempDir(), "igs-browser-")) {
 			stat, _ := os.ReadFile("/proc/" + e.Name() + "/stat")
 			if !strings.Contains(string(stat), ") Z ") { // zombies are reaped by the test's parent
 				n++

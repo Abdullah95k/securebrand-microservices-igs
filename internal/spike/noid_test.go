@@ -15,7 +15,7 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/fbtest"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 

@@ -8,15 +8,15 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
 	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/media"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/registrysync"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/browser"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/docids"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 )
 
 // NewRegistrySync builds the registry sync: its own small identity pool

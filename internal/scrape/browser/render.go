@@ -145,7 +145,8 @@ type Result struct {
 	Elapsed time.Duration
 }
 
-// IsGraphQL selects Facebook's GraphQL endpoint.
+// IsGraphQL selects Facebook's GraphQL endpoint (registry sync, M9, makes
+// the capture filter a parameter for Instagram's two endpoints).
 func IsGraphQL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	return err == nil && strings.HasPrefix(u.Path, "/api/graphql")

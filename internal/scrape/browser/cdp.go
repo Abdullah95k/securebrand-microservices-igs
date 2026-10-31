@@ -210,7 +210,7 @@ func launch(ctx context.Context, binary string, noSandbox bool, args []string) (
 }
 
 func launchOnce(ctx context.Context, binary string, noSandbox bool, args []string) (*process, error) {
-	profile, err := os.MkdirTemp("", "fbs-browser-")
+	profile, err := os.MkdirTemp("", "igs-browser-")
 	if err != nil {
 		return nil, err
 	}
