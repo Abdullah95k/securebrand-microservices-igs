@@ -55,12 +55,12 @@ The query ids in `configs/queries.seed.yaml` are placeholders, and the parsers w
 
 | Variable | Notes |
 |---|---|
-| `FBS_POSTGRES__DSN` | `sslmode=require` or stricter |
-| `FBS_POSTGRES__READ_DSN` | Optional read replica |
-| `FBS_REDIS__PASSWORD` | |
-| `FBS_KAFKA__SASL__USERNAME`, `FBS_KAFKA__SASL__PASSWORD` | When `kafka.sasl.mechanism` is set |
-| `FBS_S3__ACCESS_KEY`, `FBS_S3__SECRET_KEY` | |
-| `FBS_PRIVACY__AUTHOR_HMAC_KEY` | 32 or more random bytes, for example `openssl rand -hex 32`. Changing it later changes every author's pseudonymous key. |
+| `IGS_POSTGRES__DSN` | `sslmode=require` or stricter |
+| `IGS_POSTGRES__READ_DSN` | Optional read replica |
+| `IGS_REDIS__PASSWORD` | |
+| `IGS_KAFKA__SASL__USERNAME`, `IGS_KAFKA__SASL__PASSWORD` | When `kafka.sasl.mechanism` is set |
+| `IGS_S3__ACCESS_KEY`, `IGS_S3__SECRET_KEY` | |
+| `IGS_PRIVACY__AUTHOR_HMAC_KEY` | 32 or more random bytes, for example `openssl rand -hex 32`. Changing it later changes every author's pseudonymous key. |
 
 `secretFiles.existingSecret` (`fbs-proxies`) holds the key `proxies.yaml`: the `fb.proxy` tiers from your Phase 0 file.
 

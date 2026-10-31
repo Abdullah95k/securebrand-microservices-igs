@@ -1,6 +1,6 @@
 # Default configuration for every fbs binary. Values can be overridden by a
 # file passed with --config and by environment variables:
-#   FBS_<SECTION>__<KEY>=value   e.g. FBS_POSTGRES__DSN, FBS_CRAWLER__STAGES
+#   IGS_<SECTION>__<KEY>=value   e.g. IGS_POSTGRES__DSN, IGS_CRAWLER__STAGES
 service:
   name: fbs
   env: dev
@@ -41,7 +41,7 @@ kafka:
     key_file: ""
     server_name: ""
   # SASL: plain, scram-sha-256 or scram-sha-512 ("" = none). Put the
-  # password in FBS_KAFKA__SASL__PASSWORD, not here.
+  # password in IGS_KAFKA__SASL__PASSWORD, not here.
   sasl:
     mechanism: ""
     username: ""

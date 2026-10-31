@@ -234,7 +234,7 @@ func launchOnce(ctx context.Context, binary string, noSandbox bool, args []strin
 		"--password-store=basic", "--use-mock-keychain", "--no-service-autorun", "--disable-hang-monitor",
 		"--disable-component-extensions-with-background-pages", "--disable-search-engine-choice-screen",
 	}
-	if noSandbox || os.Geteuid() == 0 || os.Getenv("FBS_BROWSER_NO_SANDBOX") != "" {
+	if noSandbox || os.Geteuid() == 0 || os.Getenv("IGS_BROWSER_NO_SANDBOX") != "" {
 		flags = append(flags, "--no-sandbox") // Chromium refuses to run as root with its sandbox
 	}
 	flags = append(flags, args...)

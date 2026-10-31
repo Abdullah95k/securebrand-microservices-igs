@@ -62,7 +62,7 @@ object without a ready row). After this event the key no longer exists.
 
 ## Obligations of the analysis service
 
-1. Process before `delete_after`. Watch `fbs_media_deleted_total{reason="ttl_expired"}`:
+1. Process before `delete_after`. Watch `igs_media_deleted_total{reason="ttl_expired"}`:
    a rising rate means you are lagging.
 2. Ack every `MediaReady` exactly with your configured consumer name.
 3. Do not copy media to long-term storage unless your own retention and

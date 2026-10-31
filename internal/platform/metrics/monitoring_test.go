@@ -19,8 +19,8 @@ const chartFiles = "../../../deploy/helm/fbs/files"
 
 var (
 	fqName    = regexp.MustCompile(`fqName: "([^"]+)"`)
-	fbsMetric = regexp.MustCompile(`\bfbs_[a-z0-9_]+`)
-	fbsRecord = regexp.MustCompile(`\bfbs:[a-z0-9_:]+`)
+	igsMetric = regexp.MustCompile(`\bigs_[a-z0-9_]+`)
+	igsRecord = regexp.MustCompile(`\bigs:[a-z0-9_:]+`)
 )
 
 // known returns every series name the registry can expose: histograms add
@@ -42,8 +42,8 @@ func known(t *testing.T) map[string]bool {
 			out[m[1]+suffix] = true
 		}
 	}
-	if !out["fbs_fb_requests_total"] {
-		t.Fatal("registry description lacks fbs_fb_requests_total")
+	if !out["igs_ig_requests_total"] {
+		t.Fatal("registry description lacks igs_ig_requests_total")
 	}
 	return out
 }
@@ -120,12 +120,12 @@ func checkExpr(t *testing.T, where, expr string, metrics, recs map[string]bool) 
 	if !balanced(expr) {
 		t.Errorf("%s: unbalanced brackets or quotes: %s", where, expr)
 	}
-	for _, m := range fbsMetric.FindAllString(expr, -1) {
+	for _, m := range igsMetric.FindAllString(expr, -1) {
 		if !metrics[m] {
 			t.Errorf("%s: unknown metric %s", where, m)
 		}
 	}
-	for _, r := range fbsRecord.FindAllString(expr, -1) {
+	for _, r := range igsRecord.FindAllString(expr, -1) {
 		if !recs[r] {
 			t.Errorf("%s: unknown recording rule %s", where, r)
 		}
@@ -141,8 +141,8 @@ func TestAlertRules(t *testing.T) {
 		for _, r := range g.Rules {
 			switch {
 			case r.Record != "":
-				if !strings.HasPrefix(r.Record, "fbs:") {
-					t.Errorf("recording rule %s must be named fbs:...", r.Record)
+				if !strings.HasPrefix(r.Record, "igs:") {
+					t.Errorf("recording rule %s must be named igs:...", r.Record)
 				}
 				checkExpr(t, r.Record, r.Expr, ms, recs)
 			case r.Alert != "":
@@ -260,5 +260,16 @@ func TestDashboards(t *testing.T) {
 			}
 		}
 		walk(d.Panels)
+	}
+}
+
+// TestNoFbsSeries guards ADR 0004 §5: fbs's alert rules select by metric
+// name alone and some of its gauges are always exported, so a single fbs_
+// series from an igs pod on a shared Prometheus would feed fbs's alerts.
+func TestNoFbsSeries(t *testing.T) {
+	for name := range known(t) {
+		if !strings.HasPrefix(name, "igs_") && !strings.HasPrefix(name, "go_") && !strings.HasPrefix(name, "process_") {
+			t.Errorf("series %s is not in the igs_ namespace", name)
+		}
 	}
 }

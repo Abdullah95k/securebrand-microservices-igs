@@ -105,7 +105,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	}
 	return run.Group(ctx, ops.Run, func(ctx context.Context) error {
 		return leader.Run(ctx, db, leaderKey, func(ctx context.Context) error {
-			// Leader-only gauges are read joined on fbs_scheduler_leader, so a
+			// Leader-only gauges are read joined on igs_scheduler_leader, so a
 			// former leader's last values do not linger in dashboards.
 			metrics.SchedulerLeader.Set(1)
 			defer func() {

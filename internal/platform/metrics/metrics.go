@@ -1,5 +1,7 @@
 // Package metrics holds the Prometheus registry and the service metrics
-// shared across binaries. Metric names are prefixed with fbs_.
+// shared across binaries. Metric names are prefixed with igs_, never fbs_:
+// fbs's alert rules select by metric name alone, so an igs pod exporting
+// fbs_ series would feed fbs's alerts (ADR 0004 §5).
 package metrics
 
 import (
@@ -18,34 +20,34 @@ func init() {
 }
 
 func counterVec(name, help string, labels ...string) *prometheus.CounterVec {
-	c := prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "fbs", Name: name, Help: help}, labels)
+	c := prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "igs", Name: name, Help: help}, labels)
 	Registry.MustRegister(c)
 	return c
 }
 
 func histVec(name, help string, buckets []float64, labels ...string) *prometheus.HistogramVec {
-	h := prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "fbs", Name: name, Help: help, Buckets: buckets}, labels)
+	h := prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "igs", Name: name, Help: help, Buckets: buckets}, labels)
 	Registry.MustRegister(h)
 	return h
 }
 
 func gauge(name, help string) prometheus.Gauge {
-	g := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: "fbs", Name: name, Help: help})
+	g := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: "igs", Name: name, Help: help})
 	Registry.MustRegister(g)
 	return g
 }
 
 func gaugeVec(name, help string, labels ...string) *prometheus.GaugeVec {
-	g := prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "fbs", Name: name, Help: help}, labels)
+	g := prometheus.NewGaugeVec(prometheus.GaugeOpts{Namespace: "igs", Name: name, Help: help}, labels)
 	Registry.MustRegister(g)
 	return g
 }
 
 var (
-	// Facebook requests.
-	FBRequests      = counterVec("fb_requests_total", "Facebook requests by query and response class.", "query", "class", "tier")
-	FBRequestSecs   = histVec("fb_request_seconds", "Facebook request latency.", prometheus.ExponentialBuckets(0.05, 2, 10), "query", "tier")
-	FBResponseBytes = histVec("fb_response_bytes", "Decoded Facebook response size.", prometheus.ExponentialBuckets(1024, 2, 12), "query")
+	// Requests to the scraped platform.
+	FBRequests      = counterVec("ig_requests_total", "Platform requests by query and response class.", "query", "class", "tier")
+	FBRequestSecs   = histVec("ig_request_seconds", "Platform request latency.", prometheus.ExponentialBuckets(0.05, 2, 10), "query", "tier")
+	FBResponseBytes = histVec("ig_response_bytes", "Decoded platform response size.", prometheus.ExponentialBuckets(1024, 2, 12), "query")
 	ProxyBytes      = counterVec("proxy_bytes_total", "Wire bytes through each proxy tier.", "tier", "dir")
 
 	// Parsing.
@@ -84,7 +86,7 @@ var (
 	PageTier             = gaugeVec("scheduled_pages", "Scheduled pages per adaptive tier.", "tier")
 	PostRefreshes        = counterVec("post_refreshes_total", "Post comment refreshes dispatched, by kind (refresh, recrawl).", "kind")
 	BreakerState         = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
-	QueryShortCircuit    = counterVec("fb_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
+	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")
 	AIMDCeiling          = gauge("aimd_ceiling_rps", "Fleet-wide Facebook request ceiling set by AIMD.")
 	AIMDAdjustments      = counterVec("aimd_adjustments_total", "AIMD ceiling changes by direction.", "direction")

@@ -48,8 +48,8 @@ config:
     canary_pages: []
 
 # Existing Secret whose keys become environment variables, e.g.
-#   FBS_POSTGRES__DSN, FBS_POSTGRES__READ_DSN, FBS_REDIS__PASSWORD,
-#   FBS_S3__ACCESS_KEY, FBS_S3__SECRET_KEY, FBS_PRIVACY__AUTHOR_HMAC_KEY
+#   IGS_POSTGRES__DSN, IGS_POSTGRES__READ_DSN, IGS_REDIS__PASSWORD,
+#   IGS_S3__ACCESS_KEY, IGS_S3__SECRET_KEY, IGS_PRIVACY__AUTHOR_HMAC_KEY
 secretEnv:
   existingSecret: fbs-env
 # Existing Secret with a "proxies.yaml" key holding fb.proxy.tiers (proxy

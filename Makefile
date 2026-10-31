@@ -2,7 +2,7 @@ SHELL := /bin/bash
 GO ?= go
 IMAGE ?= fbs:dev
 PG_DSN ?= postgres://fbs:fbs@localhost:5432/fbs?sslmode=disable
-TEST_ENV = FBS_TEST_PG_DSN="$(PG_DSN)" FBS_TEST_REDIS_ADDR=localhost:6379 FBS_TEST_KAFKA_BROKERS=localhost:19092 FBS_TEST_SCHEMA_REGISTRY=http://localhost:18081
+TEST_ENV = IGS_TEST_PG_DSN="$(PG_DSN)" IGS_TEST_REDIS_ADDR=localhost:6379 IGS_TEST_KAFKA_BROKERS=localhost:19092 IGS_TEST_SCHEMA_REGISTRY=http://localhost:18081
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 
 .PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin chart-check chart-smoke clean
@@ -48,15 +48,15 @@ test-integration:
 	$(TEST_ENV) $(GO) test -count=1 ./internal/persist/... ./internal/e2e/... ./internal/spike/... ./internal/registrysync/... ./internal/platform/schemareg/...
 
 ## Load tests against fakefb (opt-in; prints a report). Size with
-## FBS_LOADTEST_PAGES, _POSTS, _COMMENTS, _ROWS, _LATENCY; FBS_LOADTEST_OUT=file.
+## IGS_LOADTEST_PAGES, _POSTS, _COMMENTS, _ROWS, _LATENCY; IGS_LOADTEST_OUT=file.
 loadtest:
-	$(TEST_ENV) FBS_LOADTEST=1 $(GO) test -count=1 -v -timeout 45m -run 'TestLoad' ./internal/e2e/
+	$(TEST_ENV) IGS_LOADTEST=1 $(GO) test -count=1 -v -timeout 45m -run 'TestLoad' ./internal/e2e/
 
 ## Soak test (opt-in): scheduled crawls of a changing fakefb world with
-## component restarts. FBS_SOAK_DURATION (20m), FBS_SOAK_PAGES (6),
-## FBS_SOAK_RESTART_EVERY (90s, 0 = none), FBS_SOAK_OUT=file for the report.
+## component restarts. IGS_SOAK_DURATION (20m), IGS_SOAK_PAGES (6),
+## IGS_SOAK_RESTART_EVERY (90s, 0 = none), IGS_SOAK_OUT=file for the report.
 soak:
-	$(TEST_ENV) FBS_SOAK=1 $(GO) test -count=1 -v -timeout 6h -run 'TestSoak' ./internal/e2e/
+	$(TEST_ENV) IGS_SOAK=1 $(GO) test -count=1 -v -timeout 6h -run 'TestSoak' ./internal/e2e/
 
 ## Full pipeline end-to-end test only.
 e2e:
