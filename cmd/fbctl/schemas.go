@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	protosrc "github.com/abdullah95k/securebrand-microservices/api/proto"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/schemareg"
-	"github.com/abdullah95k/securebrand-microservices/internal/topics"
+	protosrc "github.com/abdullah95k/securebrand-microservices-igs/api/proto"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/schemareg"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
 // schemasApply registers the public topics' schemas, or with check only

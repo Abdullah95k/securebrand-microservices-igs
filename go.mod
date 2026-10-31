@@ -1,4 +1,4 @@
-module github.com/abdullah95k/securebrand-microservices
+module github.com/abdullah95k/securebrand-microservices-igs
 
 go 1.27.2
 

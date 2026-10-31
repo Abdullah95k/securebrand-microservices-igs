@@ -13,7 +13,7 @@ import (
 	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
 )
 
 // Report lists fields that could not be found.

@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/fbtest"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/htmlx"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/fbtest"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 )
 
 func chromium(t *testing.T) string {

@@ -7,16 +7,16 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/api"
-	"github.com/abdullah95k/securebrand-microservices/internal/app"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/jobs"
-	"github.com/abdullah95k/securebrand-microservices/internal/dispatch"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/httpserver"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/kafka"
-	plog "github.com/abdullah95k/securebrand-microservices/internal/platform/log"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/pg"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/run"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/dispatch"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
 )
 
 func main() {

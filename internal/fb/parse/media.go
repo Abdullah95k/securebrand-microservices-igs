@@ -3,7 +3,7 @@ package parse
 import (
 	"github.com/tidwall/gjson"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
 )
 
 // Media typenames collected by the parsers.

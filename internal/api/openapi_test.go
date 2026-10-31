@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"gopkg.in/yaml.v3"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 )
 
 // TestRoutesMatchOpenAPI keeps api/openapi/fbs.v1.yaml and the router in sync.

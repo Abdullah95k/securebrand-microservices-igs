@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/htmlx"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/transport"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/transport"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 )
 
 // PageLoad is the result of loading a page's HTML.

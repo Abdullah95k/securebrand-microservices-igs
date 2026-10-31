@@ -9,3 +9,9 @@ lint:
 breaking:
   use:
     - FILE
+  # The Go module moved to github.com/abdullah95k/securebrand-microservices-igs,
+  # so every go_package changed. That only moves the generated Go code; the
+  # wire format (plain protobuf, full message names in the type header) is
+  # unchanged. Remove this once main carries the new paths (next M1 PR).
+  except:
+    - FILE_SAME_GO_PACKAGE

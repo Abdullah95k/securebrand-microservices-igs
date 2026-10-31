@@ -3,8 +3,8 @@ package stage
 import (
 	"testing"
 
-	taskv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fbs/task/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/checkpoint"
+	taskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fbs/task/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/checkpoint"
 )
 
 // Only a saved checkpoint that moved counts as progress.

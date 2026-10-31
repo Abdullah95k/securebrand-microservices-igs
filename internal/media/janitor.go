@@ -15,10 +15,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/kafka"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/metrics"
-	"github.com/abdullah95k/securebrand-microservices/internal/topics"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
 // Janitor deletes stored media once every required consumer acknowledged

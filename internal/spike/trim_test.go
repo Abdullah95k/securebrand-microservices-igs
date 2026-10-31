@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 )
 
 // flagged serves the timeline with two provider flags on, as Facebook's

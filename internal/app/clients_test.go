@@ -17,7 +17,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 )
 
 func TestKafkaClientSecurity(t *testing.T) {

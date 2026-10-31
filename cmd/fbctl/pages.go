@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/spike"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/spike"
 )
 
 // pagesImport registers the pages of a file through the API: one page per

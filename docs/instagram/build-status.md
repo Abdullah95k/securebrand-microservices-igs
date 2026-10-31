@@ -2,13 +2,14 @@
 
 Each build session updates this file at the end of its work. The plan and rules are in [`build-brief.md`](build-brief.md).
 
-**Next step:** the owner reviews and merges the M0 pull request in this repository (ADRs 0004 and 0005, the reuse matrix). The next session then starts M1 here: rename the module and every fbs name that would collide on shared infrastructure, then move the neutral code (ADR 0004 §7). C1 (the owner's extra HARs) can happen at any time.
+**Next step:** M1 continues in this repository, one pull request per step (ADR 0004 §7): M1a renames the Go module (in review); M1b gives every name that would collide on fbs's shared infrastructure its igs value; M1c moves the neutral code to `internal/scrape/*`; M1d adds the Instagram seams. C1 (the owner's extra HARs) can happen at any time.
 
 ## Decisions taken in the M0 session (2026-10-31)
 
 | Question | Owner's answer | Effect |
 |---|---|---|
 | How should M1's moves fit with ongoing fbs work? | igs gets **its own repository**, so fbs work is never impacted. The owner created it as `Abdullah95k/securebrand-microservices-igs` (the session could not: HTTP 403); the session seeded it | D7 changed (brief §2); ADR 0004 rewritten; M1 and M2 now happen in igs's copy |
+| Who merges the pull requests? | **The build session merges them** once CI is green (owner, 2026-10-31), and **never touches the fbs repository** | Sessions mark a PR ready and merge it on green CI; nothing is pushed, commented or changed in `securebrand-microservices` |
 | How often to refresh profile details (counts, bio, verified, highlights list)? | **Daily** | ADR 0005 §4 "Freshness": daily follower history; highlight items only when the list changed |
 
 The owner's decisions doc (rev 743) still shows the old D7 answer ("share code ... make sure that does not produce any risks"); the answer above supersedes it.
@@ -17,8 +18,8 @@ The owner's decisions doc (rev 743) still shows the old D7 answer ("share code .
 
 | # | Milestone | State | PRs | Notes |
 |---|---|---|---|---|
-| M0 | Verify and decide (ADRs 0004, 0005, reuse matrix) | in review: waiting for the owner to merge it | [#1](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/1) (moved from fbs's [#25](https://github.com/Abdullah95k/securebrand-microservices/pull/25), now closed) | Every package classified at `df76ce1`; all brief §5 defects confirmed; new findings below |
-| M1 | Seed and neutralise (igs repository) | seeded; the rest not started | | Step 1 done (`c996ec5`, below); next ADR 0004 §7 steps 2–4 |
+| M0 | Verify and decide (ADRs 0004, 0005, reuse matrix) | **done** (merged 2026-10-31) | [#1](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/1) (moved from fbs's #25, closed there) | Every package classified at `df76ce1`; all brief §5 defects confirmed; new findings below |
+| M1 | Seed and neutralise (igs repository) | in progress | M1a: PR_M1A | Seed done (`c996ec5`). M1a: module renamed to `github.com/abdullah95k/securebrand-microservices-igs`, `buf.yaml` excepts `FILE_SAME_GO_PACKAGE` for this one change (M1b removes it). Then M1b–M1d |
 | M2 | Fixes in igs's copy (§5 items 1–6, unknown-kind crash) | not started | | Item 6's Chrome 152 profile needs no dependency bump |
 | C1 | Owner: HARs of a grid click (post-detail query), reels tab, tagged tab | waiting for owner | | Re-share the Drive folder by link when recorded |
 | M3 | Contracts (protos, topics, migrations, config, metrics) | not started | | Follows ADR 0005; own database `igs`, schema `ig` |
@@ -59,6 +60,7 @@ From M0 (details and evidence in the [reuse matrix](reuse-matrix.md)):
 - **The pinned tls-client (v1.17.1) already ships `chrome_150` and `chrome_152`**; fbs's `fingerprints.yaml` only has 146, 144 and 133.
 - **`SplitParts` already reads Instagram's NDJSON**; the HTML loader would follow a redirect to `/accounts/login` or `/challenge` as if it were the page (fixed by igs's wall paths in M4).
 - **Go cannot import another module's `internal/` packages**, which is why a separate repository means a copy (ADR 0004).
+- **A flaky test in the copied suite:** `TestBlockedIdentitiesRetryAndTruncation` (`internal/e2e`) failed once in PR #1's CI (a thread task used up its 5 stalled retries under fakefb's rate-limit fault; job `partial`, 329/349 comments) and passed on re-run, with identical code. It is part of the regression net for M1 and M2; make it deterministic before relying on it for M2's retry fixes.
 - The GitHub integration in build sessions cannot create repositories (HTTP 403); the owner creates them, and a session attaches one with `add_repo`.
 
 ## Seeding (done 2026-10-31)
@@ -77,3 +79,4 @@ From M0 (details and evidence in the [reuse matrix](reuse-matrix.md)):
 
 - **2026-10-31:** brief written. Evidence so far: `har-findings-2026-10-30.md` (9 recordings). Owner decisions are in the Claude doc "Instagram scraper (igs): owner questions" and summarised in brief §2.
 - **2026-10-31 (M0 session, in `securebrand-microservices`):** reuse matrix verified at `df76ce1` with `scripts/import-graph.sh` and a read of every package; ADRs 0004 and 0005 proposed; `.local/` git-ignored for HARs. fbs unit suite green at HEAD (33 packages); no Go code changed. The owner then chose a separate repository and daily profile refreshes; brief D7, M1, M2, §5, §7 and the session prompt updated, ADR 0004 rewritten. Creating the repository from the session failed (HTTP 403); the owner created `securebrand-microservices-igs`, and the session attached it, seeded `main` (`c996ec5`) and moved M0 there.
+- **2026-10-31 (M1 session):** the owner asked the session to merge its PRs and never touch the fbs repository. PR #1 (M0) merged on green CI after one re-run of the flaky e2e test above. M1a renames the Go module.

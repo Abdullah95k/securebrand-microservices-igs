@@ -9,17 +9,17 @@ import (
 	"os"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/app"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/media"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/httpserver"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/kafka"
-	plog "github.com/abdullah95k/securebrand-microservices/internal/platform/log"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/pg"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/run"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/s3x"
-	"github.com/abdullah95k/securebrand-microservices/internal/scheduler"
-	"github.com/abdullah95k/securebrand-microservices/internal/topics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/media"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scheduler"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
 func main() {
