@@ -9,6 +9,8 @@ import (
 
 	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
+	scrapehtml "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/htmlx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
 )
 
 // PageVersion is recorded in Observation.parser_version.
@@ -34,14 +36,14 @@ func Page(html []byte, pageID, requested int64) (*fbv1.Page, Report) {
 		pageID = requested
 	}
 	if pageID == 0 {
-		rep.missing("page.id")
+		rep.AddMissing("page.id")
 		return nil, rep
 	}
 	idStr := strconv.FormatInt(pageID, 10)
 	p := &fbv1.Page{PageId: pageID, Status: fbv1.PageStatus_PAGE_STATUS_ACTIVE, Contact: map[string]string{}}
 
-	blobs := htmlx.JSONBlobs(html)
-	nodes := Collect(blobs, "User", "Page")
+	blobs := scrapehtml.JSONBlobs(html)
+	nodes := walk.Collect(blobs, "User", "Page")
 	// The profile's nodes, then those of its older Page object (a
 	// new-style page's delegate_page), which may hold more of its fields.
 	ids := map[string]bool{idStr: true}
@@ -65,7 +67,7 @@ func Page(html []byte, pageID, requested int64) (*fbv1.Page, Report) {
 	}
 	str := func(paths ...string) string {
 		for _, m := range mine {
-			if s := First(m, paths...).String(); s != "" {
+			if s := walk.First(m, paths...).String(); s != "" {
 				return s
 			}
 		}
@@ -82,39 +84,39 @@ func Page(html []byte, pageID, requested int64) (*fbv1.Page, Report) {
 		p.CoverPhoto = &fbv1.ImageRef{Url: cover}
 	}
 	for _, m := range mine {
-		if v := First(m, "is_verified", "is_blue_verified"); v.Exists() && p.Verified == nil {
+		if v := walk.First(m, "is_verified", "is_blue_verified"); v.Exists() && p.Verified == nil {
 			b := v.Bool()
 			p.Verified = &b
 		}
-		if c := First(m, "delegate_page.category_name", "category_name", "page_category"); c.Exists() && len(p.Categories) == 0 {
+		if c := walk.First(m, "delegate_page.category_name", "category_name", "page_category"); c.Exists() && len(p.Categories) == 0 {
 			p.Categories = []string{c.String()}
 		}
-		First(m, "category_type_list", "categories").ForEach(func(_, x gjson.Result) bool {
-			if s := First(x, "text", "name").String(); s != "" {
+		walk.First(m, "category_type_list", "categories").ForEach(func(_, x gjson.Result) bool {
+			if s := walk.First(x, "text", "name").String(); s != "" {
 				p.Categories = appendUnique(p.Categories, s)
 			} else if x.Type == gjson.String {
 				p.Categories = appendUnique(p.Categories, x.Str)
 			}
 			return true
 		})
-		if f := First(m, "follower_count", "followers_count", "subscribers.count"); f.Exists() && p.FollowersCount == nil {
-			v := Int64(f)
+		if f := walk.First(m, "follower_count", "followers_count", "subscribers.count"); f.Exists() && p.FollowersCount == nil {
+			v := walk.Int64(f)
 			p.FollowersCount = &v
 		}
-		if l := First(m, "page_likers.global_likers_count", "likes_count", "fan_count"); l.Exists() && p.LikesCount == nil {
-			v := Int64(l)
+		if l := walk.First(m, "page_likers.global_likers_count", "likes_count", "fan_count"); l.Exists() && p.LikesCount == nil {
+			v := walk.Int64(l)
 			p.LikesCount = &v
 		}
 		// Social context lines such as "1.2M followers" / "980K likes".
-		for _, t := range FindAll(m, "text") {
+		for _, t := range walk.FindAll(m, "text") {
 			s := strings.ToLower(t.String())
 			switch {
 			case strings.Contains(s, "follower") && p.FollowersCount == nil:
-				if v, ok := ParseCount(s); ok {
+				if v, ok := walk.ParseCount(s); ok {
 					p.FollowersCount = &v
 				}
 			case strings.Contains(s, "like") && !strings.Contains(s, "talking") && p.LikesCount == nil:
-				if v, ok := ParseCount(s); ok {
+				if v, ok := walk.ParseCount(s); ok {
 					p.LikesCount = &v
 				}
 			}
@@ -128,7 +130,7 @@ func Page(html []byte, pageID, requested int64) (*fbv1.Page, Report) {
 			if _, ok := p.Contact[key]; ok {
 				continue
 			}
-			if v := First(m, paths...).String(); v != "" {
+			if v := walk.First(m, paths...).String(); v != "" {
 				p.Contact[key] = v
 			}
 		}
@@ -146,10 +148,10 @@ func Page(html []byte, pageID, requested int64) (*fbv1.Page, Report) {
 		}
 	}
 	if p.Name == "" {
-		rep.missing("page.name")
+		rep.AddMissing("page.name")
 	}
 	if p.FollowersCount == nil {
-		rep.optional("page.followers")
+		rep.AddOptional("page.followers")
 	}
 	return p, rep
 }

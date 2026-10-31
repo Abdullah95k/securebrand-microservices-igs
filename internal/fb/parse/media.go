@@ -4,6 +4,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
 )
 
 // Media typenames collected by the parsers.
@@ -33,7 +34,7 @@ type Owner struct {
 // variant (original photo; sd/hd/thumbnail for video).
 func MediaFromNode(n gjson.Result, typename string, o Owner) []*fbv1.Media {
 	fbID := n.Get("id").String()
-	alt := First(n, "accessibility_caption", "alt_text", "accessibility_label").String()
+	alt := walk.First(n, "accessibility_caption", "alt_text", "accessibility_label").String()
 	mk := func(variant, url string, kind fbv1.MediaKind, w, h int64) *fbv1.Media {
 		if url == "" {
 			return nil
@@ -45,7 +46,7 @@ func MediaFromNode(n gjson.Result, typename string, o Owner) []*fbv1.Media {
 		m := &fbv1.Media{
 			MediaId: MediaID(id, variant), FbMediaId: id, Kind: kind, Variant: variant,
 			OwnerType: o.Type, OwnerId: o.ID, PostId: o.PostID, PageId: o.PageID,
-			SourceUrl: url, SourceExpiresAt: URLExpiry(url), Width: int32(w), Height: int32(h), AltText: alt,
+			SourceUrl: url, SourceExpiresAt: walk.URLExpiry(url), Width: int32(w), Height: int32(h), AltText: alt,
 		}
 		if o.CommentID != 0 {
 			cid := o.CommentID
@@ -61,7 +62,7 @@ func MediaFromNode(n gjson.Result, typename string, o Owner) []*fbv1.Media {
 	}
 	switch typename {
 	case "Photo":
-		img := First(n, "photo_image", "image", "viewer_image", "large_share_image", "preview_image", "blurred_image")
+		img := walk.First(n, "photo_image", "image", "viewer_image", "large_share_image", "preview_image", "blurred_image")
 		kind := fbv1.MediaKind_MEDIA_KIND_PHOTO
 		if o.Comment {
 			kind = fbv1.MediaKind_MEDIA_KIND_COMMENT_PHOTO
@@ -75,19 +76,19 @@ func MediaFromNode(n gjson.Result, typename string, o Owner) []*fbv1.Media {
 		if o.Comment {
 			kind = fbv1.MediaKind_MEDIA_KIND_COMMENT_VIDEO
 		}
-		w, h := First(n, "width", "original_width").Int(), First(n, "height", "original_height").Int()
-		durMS := First(n, "playable_duration_in_ms").Int()
+		w, h := walk.First(n, "width", "original_width").Int(), walk.First(n, "height", "original_height").Int()
+		durMS := walk.First(n, "playable_duration_in_ms").Int()
 		if durMS == 0 {
-			durMS = int64(First(n, "length_in_second", "playable_duration").Float() * 1000)
+			durMS = int64(walk.First(n, "length_in_second", "playable_duration").Float() * 1000)
 		}
-		dash := First(n, "dash_manifest_url", "dash_manifest_urls.0.manifest_url").String()
-		thumb := First(n, "preferred_thumbnail.image.uri", "thumbnailImage.uri", "thumbnail_image.uri", "image.uri").String()
+		dash := walk.First(n, "dash_manifest_url", "dash_manifest_urls.0.manifest_url").String()
+		thumb := walk.First(n, "preferred_thumbnail.image.uri", "thumbnailImage.uri", "thumbnail_image.uri", "image.uri").String()
 		for _, v := range []struct {
 			variant string
 			url     string
 		}{
-			{"sd", First(n, "browser_native_sd_url", "playable_url", "videoDeliveryLegacyFields.browser_native_sd_url").String()},
-			{"hd", First(n, "browser_native_hd_url", "playable_url_quality_hd", "videoDeliveryLegacyFields.browser_native_hd_url").String()},
+			{"sd", walk.First(n, "browser_native_sd_url", "playable_url", "videoDeliveryLegacyFields.browser_native_sd_url").String()},
+			{"hd", walk.First(n, "browser_native_hd_url", "playable_url_quality_hd", "videoDeliveryLegacyFields.browser_native_hd_url").String()},
 		} {
 			if m := mk(v.variant, v.url, kind, w, h); m != nil {
 				m.DurationMs = durMS
@@ -99,14 +100,14 @@ func MediaFromNode(n gjson.Result, typename string, o Owner) []*fbv1.Media {
 		}
 		add(mk("thumbnail", thumb, fbv1.MediaKind_MEDIA_KIND_THUMBNAIL, 0, 0))
 	case "Sticker":
-		img := First(n, "image", "sticker_image", "preview_image")
+		img := walk.First(n, "image", "sticker_image", "preview_image")
 		add(mk("original", img.Get("uri").String(), fbv1.MediaKind_MEDIA_KIND_STICKER, img.Get("width").Int(), img.Get("height").Int()))
 	case "GenericAttachmentMedia", "Gif":
-		if anim := First(n, "animated_image", "animated_gif"); anim.Exists() {
+		if anim := walk.First(n, "animated_image", "animated_gif"); anim.Exists() {
 			add(mk("original", anim.Get("uri").String(), fbv1.MediaKind_MEDIA_KIND_COMMENT_GIF, anim.Get("width").Int(), anim.Get("height").Int()))
 			break
 		}
-		img := First(n, "image", "large_share_image")
+		img := walk.First(n, "image", "large_share_image")
 		kind := fbv1.MediaKind_MEDIA_KIND_THUMBNAIL
 		if o.Comment {
 			kind = fbv1.MediaKind_MEDIA_KIND_COMMENT_PHOTO

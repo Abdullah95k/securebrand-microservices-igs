@@ -1,9 +1,10 @@
-// Package parse turns Facebook GraphQL/HTML payloads into securebrand.fb.v1
-// messages. Parsers locate entities by __typename instead of fixed paths and
-// try several candidate paths per field, so they survive the frequent A/B
-// shape changes Facebook ships. Missing required fields are reported so the
-// caller can classify the response as schema drift.
-package parse
+// Package walk finds entities in GraphQL and embedded-JSON payloads without
+// fixed paths: a walk collects every object a kind function recognises, and
+// fields are read from several candidate paths. Parsers built on it survive
+// the frequent A/B shape changes Facebook and Instagram ship; a Report lists
+// the required fields that could not be found, so the caller can classify a
+// response as schema drift.
+package walk
 
 import (
 	"github.com/tidwall/gjson"
@@ -11,17 +12,19 @@ import (
 
 // Node is a collected entity together with its nearest collected ancestor.
 type Node struct {
-	Typename string
-	V        gjson.Result
-	Parent   *Node
-	key      string // typename|id under the parent's key
+	// Kind is what the kind function named the object (with Collect, its
+	// __typename).
+	Kind   string
+	V      gjson.Result
+	Parent *Node
+	key    string // kind|id under the parent's key
 }
 
-// Ancestor returns the nearest ancestor with one of the typenames, or nil.
-func (n *Node) Ancestor(typenames ...string) *Node {
+// Ancestor returns the nearest ancestor of one of the kinds, or nil.
+func (n *Node) Ancestor(kinds ...string) *Node {
 	for p := n.Parent; p != nil; p = p.Parent {
-		for _, t := range typenames {
-			if p.Typename == t {
+		for _, k := range kinds {
+			if p.Kind == k {
 				return p
 			}
 		}
@@ -29,20 +32,41 @@ func (n *Node) Ancestor(typenames ...string) *Node {
 	return nil
 }
 
-// Collect walks every part once and returns the objects whose __typename is
-// in want, in document order. An object repeated with the same typename and
-// id at the same place (under the same collected ancestors, as when parts
-// repeat it) is returned once. The same object quoted elsewhere, such as a
-// shared post inside the story that shares it, is returned again: the first
-// copy must not hide the one in its own place. Objects without an id are
-// never merged, but they are placed by typename alone, so two id-less
-// siblings of one typename share the place of their children.
-func Collect(parts []gjson.Result, want ...string) []*Node {
+// KindFunc names the kind of an object a walk should collect, or returns ""
+// to pass it by. Objects without a __typename (most of Instagram's) are
+// recognised by their fields.
+type KindFunc func(obj gjson.Result) string
+
+// Typename collects objects whose __typename is one of want.
+func Typename(want ...string) KindFunc {
 	w := make(map[string]bool, len(want))
 	for _, t := range want {
 		w[t] = true
 	}
-	c := &collector{want: w, seen: map[string]bool{}}
+	return func(obj gjson.Result) string {
+		if tn := obj.Get("__typename"); tn.Type == gjson.String && w[tn.Str] {
+			return tn.Str
+		}
+		return ""
+	}
+}
+
+// Collect walks every part once and returns the objects whose __typename is
+// in want, in document order. It is CollectBy with Typename(want...).
+func Collect(parts []gjson.Result, want ...string) []*Node {
+	return CollectBy(parts, Typename(want...))
+}
+
+// CollectBy walks every part once and returns the objects kind names, in
+// document order. An object repeated with the same kind and id at the same
+// place (under the same collected ancestors, as when parts repeat it) is
+// returned once. The same object quoted elsewhere, such as a shared post
+// inside the story that shares it, is returned again: the first copy must
+// not hide the one in its own place. Objects without an id are never
+// merged, but they are placed by kind alone, so two id-less siblings of one
+// kind share the place of their children.
+func CollectBy(parts []gjson.Result, kind KindFunc) []*Node {
+	c := &collector{kind: kind, seen: map[string]bool{}}
 	for _, p := range parts {
 		c.walk(p, nil, 0)
 	}
@@ -50,7 +74,7 @@ func Collect(parts []gjson.Result, want ...string) []*Node {
 }
 
 type collector struct {
-	want map[string]bool
+	kind KindFunc
 	seen map[string]bool
 	out  []*Node
 }
@@ -69,8 +93,8 @@ func (c *collector) walk(v gjson.Result, parent *Node, depth int) {
 		})
 	case v.IsObject():
 		cur := parent
-		if tn := v.Get("__typename"); tn.Type == gjson.String && c.want[tn.Str] {
-			key := tn.Str + "|" + v.Get("id").String()
+		if k := c.kind(v); k != "" {
+			key := k + "|" + v.Get("id").String()
 			if parent != nil {
 				key = parent.key + "/" + key
 			}
@@ -80,7 +104,7 @@ func (c *collector) walk(v gjson.Result, parent *Node, depth int) {
 				}
 				c.seen[key] = true
 			}
-			n := &Node{Typename: tn.Str, V: v, Parent: parent, key: key}
+			n := &Node{Kind: k, V: v, Parent: parent, key: key}
 			c.out = append(c.out, n)
 			cur = n
 		}
