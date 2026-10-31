@@ -15,7 +15,7 @@ It also collects what it reads, for you to look at:
 - each profile's username, link, name, bio and bio links, follower and following counts, verified and private flags, linked Facebook page and highlights;
 - the profile picture, saved as an image;
 - every post it pages through: link, type, caption, image description and thumbnail link;
-- the newest post's first 10 comments: commenter, text, time and likes.
+- comments (commenter, text, time and likes): the newest post's first 10 by default, more with `--comment-posts` and `--comment-pages` (see Reference).
 
 It runs on the same machine as Facebook's Phase 0 (a droplet), with the
 same `phase0/proxies.yaml`, through the ISP proxies only (the owner's
@@ -113,20 +113,36 @@ make igs-probe
 This runs the ISP tier only. To also measure the droplet's own IP, run
 `make igs-probe IGS_PROBE_TIERS=direct,isp`.
 
-It prints a line when each profile is done, and on a long grid a line every
-10 pages (about every 30 seconds), for example
+It prints a line when each profile is done, with its comments and the
+running totals, for example
+`profile 81/348 some_brand: bootstrap ok, grid 1212 posts, stop cap, 10 comments; so far 52495 posts, 790 comments`,
+and on a long grid a line every 10 pages (about every 30 seconds), for example
 `some_brand: 132 posts so far, back to 2026-10-28`.
+
+**To check the totals without disturbing the run,** log in and, without
+attaching, print its latest line:
+
+```bash
+tmux capture-pane -p -J -S - -t igs | grep 'so far' | tail -1
+```
+
+The CSVs (below) are also saved after every profile, so they can be opened
+or copied while the run goes.
 
 To leave it running, close the Terminal window or press **Ctrl-B, then D**.
 If the connection drops, log in again and reattach with `tmux attach -t igs`.
 
 **Ctrl-C stops the run.** It still writes what it read; the profile it was
 reading is marked `stopped` (partial), and the summary says the run stopped
-early. A stop is not counted as a wall.
+early. A stop is not counted as a wall. The summary also says how to
+continue: run the same command again with `--start-at N` (the profile it
+stopped at) in `IGS_PROBE_ARGS` and a **new** `IGS_PROBE_OUT`, so the first
+part's files are kept.
 
 At the end of each tier it prints a short summary, for example:
 
 ```
+read 3120 posts and 80 comments from 8 profiles
 bootstrapped 8/8; grid: 6 ended, 2 capped, walls map[] at [] posts, 8 paged past 24 (max 384)
 cursor from another identity: 8 worked, 0 failed; grid by pk alone: 8 worked, 0 failed
 ```
@@ -139,12 +155,14 @@ For each tier, `phase0/out-ig/<tier>/` holds:
 |---|---|
 | `profiles.csv` | One row per profile: link, name, counts, bio, highlights, picture file, how far the grid went |
 | `posts.csv` | One row per post read: link, type, caption, thumbnail link |
-| `comments.csv` | The newest post's first comments |
+| `comments.csv` | The comments read, with the post each belongs to |
 | `images/` | The profile pictures |
 | `raw/` | Instagram's raw answers, to check their shape: per profile the first answer of each query and every failed or empty one, and the page HTML of the first 3 profiles |
 | `report.json` | Everything above, plus every request's outcome, timing and size, and the answers to U1 to U9 under `summary` |
 
-and `phase0/out-ig/<tier>.tar.gz` packs the folder for downloading.
+and `phase0/out-ig/<tier>.tar.gz` packs the folder for downloading. The
+three CSVs grow while the run goes (one profile at a time); `report.json`
+and the `.tar.gz` are written at the end.
 
 ## 6. Send the results back
 
@@ -170,6 +188,8 @@ themselves out of git.
 | Proxies | `phase0/proxies.yaml` | `PHASE0_CONFIG=...` |
 | Grid depth | 32 pages after the first (396 posts) | `IGS_PROBE_ARGS="--max-grid-pages 100"` |
 | Backfill window | none | `IGS_PROBE_ARGS="--max-age-days 365"`: stop each profile's grid at posts older than a year |
+| Comments | the newest post, first page (10) | `IGS_PROBE_ARGS="--comment-posts 10 --comment-pages 3"`: the newest 10 posts, up to 30 comments each (each page is one more request, about 3 seconds) |
+| Start | the first profile | `IGS_PROBE_ARGS="--start-at 81"`, with a new `IGS_PROBE_OUT`: continue a stopped run at profile 81 |
 
 **The full list.** The 348 accounts, back one year or 1,200 posts each (whichever comes first), with results kept apart from the test's:
 
