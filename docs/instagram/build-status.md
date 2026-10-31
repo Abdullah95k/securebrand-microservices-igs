@@ -66,7 +66,10 @@ From M0 (details and evidence in the [reuse matrix](reuse-matrix.md)):
 - The GitHub integration in build sessions cannot create repositories (HTTP 403); the owner creates them, and a session attaches one with `add_repo`.
 
 From the owner's first probe run (2026-10-31, droplet, 5 profiles from the owner's list, ISP and residential):
-- **Logged-out pages bootstrap through the proxies**: 5 of 5 page loads on the residential tier gave an LSD and the other tokens; no wall, no challenge.
+- **Logged-out pages bootstrap through both proxy tiers**: 5 of 5 page loads on ISP and on residential carried all 11 tokens the probe looks for (`lsd`, `csrf_token`, `app_id`, `jazoest`, `__spin_r/b/t`, `__rev`, `__hs`, `__hsi`, `rollout_hash`); no wall, no challenge, no rate limit in 59 queries.
+- **The profile query works**: follower and following counts, verified and private flags, biography, bio links and the profile picture (3 to 9 KB, so the small version) were read for every profile. The first grid page's 12 posts (link, caption, thumbnail, type) too, and it said there is a next page.
+- **Not read yet (the probe's fault, not Instagram's):** later grid pages, comments and highlights. Their queries answered OK, but the probe found no items in them, and no highlights list in the profile answer.
+- **Cost on the wire** (ISP, means): profile page 138 KB, first grid page 10.4 KB, a later grid page 3.7 KB, profile query 5.1 KB, comments 4.1 KB, profile picture 7.4 KB; latency 2 to 3.5 s per request. Residential was within 10% on every figure.
 - **U3 and U8 are answered** (table above).
 - **The probe misread the grid**, so U1, U5 and U9 need a rerun. Every grid first page reported 12 posts and no next page, and the cursor and pk checks found no posts in answers classed OK. The likely cause: Instagram streams the connection in parts (edges and the real `page_info` after the first part), and the probe read only the first part. Fixed: the probe reads every part (and a deferred `page_info`), follows a first page's cursor even when it says no next page, and saves the raw answers under `raw/` so the shape can be checked. Also fixed: every per-profile step in `report.json` pointed at one shared variable, so each showed the last request (the summary counts were right).
 

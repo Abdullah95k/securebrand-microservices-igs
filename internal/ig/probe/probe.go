@@ -333,6 +333,13 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 	r.keepRaw("profile", resp, 1)
 	out.Data = profileData(user)
+	if len(out.Data.Highlights) == 0 {
+		// The first run found no highlights on any profile: the list may
+		// come in another part of the answer.
+		for _, e := range findAll(resp.Parts, "lox_highlights_connection").Get("edges").Array() {
+			out.Data.Highlights = append(out.Data.Highlights, Highlight{ID: e.Get("node.id").String(), Title: e.Get("node.title").String()})
+		}
+	}
 	if r.o.ImageDir != "" && out.Data.ProfilePicURL != "" {
 		out.Data.ProfilePicFile = r.saveImage(ctx, id, out.Data.ProfilePicURL, username, page)
 	}
