@@ -14,6 +14,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
 // The fleet-wide request ceiling is adjusted by AIMD (additive increase,
@@ -31,10 +32,10 @@ const Window = 10 * time.Second
 const settle = 3 * time.Second
 
 func windowKey(ns string, start time.Time) string {
-	return ns + "aimd:w:" + strconv.FormatInt(start.Unix(), 10)
+	return redisx.KeyPrefix + ns + "aimd:w:" + strconv.FormatInt(start.Unix(), 10)
 }
 
-func ceilingKey(ns string) string { return ns + "aimd:global_rps" }
+func ceilingKey(ns string) string { return redisx.KeyPrefix + ns + "aimd:global_rps" }
 
 // Reporter counts GraphQL outcomes and flushes them to Redis: block
 // counts for AIMD, and requests and wire bytes per lane for the traffic

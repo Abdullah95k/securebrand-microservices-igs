@@ -180,7 +180,7 @@ func (s *Sync) InitMetrics(ctx context.Context) error {
 }
 
 // lockKey serialises runs across replicas and rollouts.
-const lockKey = "fbs:registry-sync"
+const lockKey = "igs:registry-sync"
 
 // Run performs one sync. The report is returned (and stored in
 // registry_sync_runs) even when the run fails.

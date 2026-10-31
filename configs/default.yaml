@@ -47,7 +47,7 @@ kafka:
     username: ""
     password: ""
   # Schema Registry for the public fb.v1 contract (`fbctl schemas apply`).
-  # Records stay plain protobuf with the type in the fbs-type header; the
+  # Records stay plain protobuf with the type in the igs-type header; the
   # registry documents the schemas and rejects incompatible changes.
   schema_registry:
     url: ""                # e.g. http://localhost:18081 (Redpanda dev)
@@ -60,8 +60,8 @@ s3:
   secret_key: "fbs-secret"
   use_ssl: false
   region: "us-east-1"
-  media_bucket: "fbs-media"
-  raw_bucket: "fbs-raw"
+  media_bucket: "igs-media"
+  raw_bucket: "igs-raw"
 
 fb:
   # Base URL of the Facebook web surface. Tests and local dev point this at fakefb.

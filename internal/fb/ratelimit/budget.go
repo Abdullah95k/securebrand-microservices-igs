@@ -13,6 +13,7 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
 // The daily traffic budget: crawlers add requests and wire bytes per lane
@@ -24,14 +25,14 @@ import (
 const BudgetSlice = 5 * time.Minute
 
 func budgetDayKey(ns string, t time.Time) string {
-	return ns + "budget:d:" + t.UTC().Format("20060102")
+	return redisx.KeyPrefix + ns + "budget:d:" + t.UTC().Format("20060102")
 }
 
 func budgetSliceKey(ns string, t time.Time) string {
-	return ns + "budget:s:" + strconv.FormatInt(t.Truncate(BudgetSlice).Unix(), 10)
+	return redisx.KeyPrefix + ns + "budget:s:" + strconv.FormatInt(t.Truncate(BudgetSlice).Unix(), 10)
 }
 
-func budgetStateKey(ns string) string { return ns + "budget:state" }
+func budgetStateKey(ns string) string { return redisx.KeyPrefix + ns + "budget:state" }
 
 // Usage is traffic per lane.
 type Usage struct {

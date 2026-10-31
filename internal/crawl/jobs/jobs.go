@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
 // FinalizeSet holds job ids whose pending count reached zero.
-const FinalizeSet = "jobs:finalize"
+const FinalizeSet = redisx.KeyPrefix + "jobs:finalize"
 
 const ttl = 7 * 24 * time.Hour
 
@@ -30,7 +32,7 @@ const (
 	PostFailed    = "failed"
 )
 
-func key(job, name string) string { return "{job:" + job + "}:" + name }
+func key(job, name string) string { return redisx.KeyPrefix + "{job:" + job + "}:" + name }
 
 var spawnScript = redis.NewScript(`
 local added = 0

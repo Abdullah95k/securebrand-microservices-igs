@@ -78,7 +78,7 @@ groups:
         # would otherwise keep resetting the for timer.
         expr: |
           sum(rate(fbs_tasks_total[10m])) == 0
-            and sum(fbs:leader:kafka_consumer_lag{group=~"fbs-crawler-.*"}) > 0
+            and sum(fbs:leader:kafka_consumer_lag{group=~"igs-crawler-.*"}) > 0
         for: 15m
         labels: {severity: critical}
         annotations:
@@ -228,7 +228,7 @@ groups:
             budget. Check the scheduler pods and their Postgres connection.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/operations.md#stuck-jobs
       - alert: FbsOnDemandLag
-        expr: max by (group, topic) (fbs:leader:kafka_consumer_lag{group=~"fbs-crawler-.*-p0"}) > 500
+        expr: max by (group, topic) (fbs:leader:kafka_consumer_lag{group=~"igs-crawler-.*-p0"}) > 500
         for: 10m
         labels: {severity: warning}
         annotations:
@@ -238,7 +238,7 @@ groups:
             max replicas, the lane slots and the AIMD ceiling.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/operations.md#kafka-lag
       - alert: FbsPersisterLag
-        expr: max by (topic) (fbs:leader:kafka_consumer_lag{group="fbs-persister"}) > 50000
+        expr: max by (topic) (fbs:leader:kafka_consumer_lag{group="igs-persister"}) > 50000
         for: 15m
         labels: {severity: warning}
         annotations:

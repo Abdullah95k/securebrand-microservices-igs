@@ -27,7 +27,7 @@ func (l *LagGauges) Tick(ctx context.Context) error {
 	}
 	var groups []string
 	for _, g := range listed.Groups() {
-		if strings.HasPrefix(g, l.Prefix+"fbs-") {
+		if strings.HasPrefix(g, l.Prefix+"igs-") {
 			groups = append(groups, g)
 		}
 	}

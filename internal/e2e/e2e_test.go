@@ -19,6 +19,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/pilot"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
@@ -344,7 +345,7 @@ func TestBlockedIdentitiesRetryAndTruncation(t *testing.T) {
 	var total, blocked int64
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(200 * time.Millisecond) { // reporters flush every 2s
 		total, blocked = 0, 0
-		iter := s.Redis.Scan(ctx, 0, s.Cfg.Kafka.TopicPrefix+"aimd:w:*", 100).Iterator()
+		iter := s.Redis.Scan(ctx, 0, redisx.KeyPrefix+s.Cfg.Kafka.TopicPrefix+"aimd:w:*", 100).Iterator()
 		for iter.Next(ctx) {
 			h := s.Redis.HGetAll(ctx, iter.Val()).Val()
 			n, _ := strconv.ParseInt(h["total"], 10, 64)

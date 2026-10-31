@@ -27,7 +27,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scheduler"
 )
 
-const leaderKey = 4_200_100
+const leaderKey = 4_300_100
 
 func main() {
 	fs := flag.NewFlagSet("fbs-scheduler", flag.ExitOnError)

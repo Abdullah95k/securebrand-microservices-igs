@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-redis/redis_rate/v10"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
 // Limiter blocks until a request under key is allowed at perSecond.
@@ -30,7 +32,7 @@ func (r *Redis) Wait(ctx context.Context, key string, perSecond int) error {
 		return nil
 	}
 	for {
-		res, err := r.l.Allow(ctx, "rl:"+key, redis_rate.PerSecond(perSecond))
+		res, err := r.l.Allow(ctx, redisx.KeyPrefix+"rl:"+key, redis_rate.PerSecond(perSecond))
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

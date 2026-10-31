@@ -24,7 +24,7 @@ All metric names start with `fbs_`.
 | Jobs | `fbs_jobs_total{status}` | `completed` dominates |
 | Schedule lag | `fbs_schedule_lag_seconds` | < planner interval |
 | Media | `fbs_media_download_total{outcome}`, `fbs_media_deleted_total{reason}` | `ttl_expired` ≈ 0 |
-| Persister | `fbs_persist_batch_seconds`, `fbs_kafka_consumer_lag{group="fbs-persister"}` | lag < 1 min |
+| Persister | `fbs_persist_batch_seconds`, `fbs_kafka_consumer_lag{group="igs-persister"}` | lag < 1 min |
 | Consumer lag | `fbs_kafka_consumer_lag{group,topic}` (leader scheduler) | p0 groups ≈ 0 |
 
 ## Alerts and dashboards
