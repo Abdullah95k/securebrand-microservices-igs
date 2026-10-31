@@ -11,6 +11,7 @@ Each build session updates this file at the end of its work. The plan and rules 
 | How should M1's moves fit with ongoing fbs work? | igs gets **its own repository**, so fbs work is never impacted. The owner created it as `Abdullah95k/securebrand-microservices-igs` (the session could not: HTTP 403); the session seeded it | D7 changed (brief §2); ADR 0004 rewritten; M1 and M2 now happen in igs's copy |
 | Who merges the pull requests? | **The build session merges them** once CI is green (owner, 2026-10-31), and **never touches the fbs repository** | Sessions mark a PR ready and merge it on green CI; nothing is pushed, commented or changed in `securebrand-microservices` |
 | How often to refresh profile details (counts, bio, verified, highlights list)? | **Daily** | ADR 0005 §4 "Freshness": daily follower history; highlight items only when the list changed |
+| What may the probe's output hold? Where does it run? (owner, 2026-10-31) | **Everything it reads** (profile name, link, picture and details, posts, the newest post's first comments), and it runs on the **Phase 0 droplet**, like Facebook's Phase 0, not on the owner's Mac | `igs-spike probe` writes `profiles.csv`, `posts.csv`, `comments.csv`, `images/` and `report.json` under `phase0/out-ig/` (git-ignored, files 0600), plus a `.tar.gz` per tier; `make igs-probe` and `make igs-probe-dryrun`; runbook [`igs-probe.md`](../runbooks/igs-probe.md). The brief's rule against committing real usernames, names or text still holds for the repository: the output never goes into git |
 | Milestone order after M1? (owner's session prompt, 2026-10-31) | **M4 before M2 and M3**, so the probe reaches the owner sooner | M4's client builds on the M1 seams; M2's fixes and M3's contracts follow it |
 
 The owner's decisions doc (rev 743) still shows the old D7 answer ("share code ... make sure that does not produce any risks"); the answer above supersedes it.
@@ -24,7 +25,7 @@ The owner's decisions doc (rev 743) still shows the old D7 answer ("share code .
 | M2 | Fixes in igs's copy (§5 items 1–6, unknown-kind crash) | not started | | After M4 (owner's order). Item 6: the per-identity profile list exists since M1d-5a (`PoolConfig.Profiles`); adding Chrome 152 needs no dependency bump |
 | C1 | Owner: HARs of a grid click (post-detail query), reels tab, tagged tab | waiting for owner | | Re-share the Drive folder by link when recorded |
 | M3 | Contracts (protos, topics, migrations, config, metrics) | not started | | After M4 and M2 (owner's order). Follows ADR 0005; own database `igs`, schema `ig`. Also gives the registry its table names (`queries`, `client_params`, with M1d-2's `endpoint` and `headers` columns) |
-| M4 | Instagram client, first `fakeig` slice, `igs-spike probe` | **done** (2026-10-31) | M4a: [#12](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/12) (merged); M4b and M4c: [#13](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/13) | M4a: `internal/ig/{htmlx,detect,client}` (tokens with candidate patterns, the `/accounts/login` and `/challenge` walls, the request builder, `configs/ig/queries.seed.yaml` with the five operations). M4b: `internal/fakeig` (generated world; pages that mint tokens and cookies; the five operations, checked like a real client; faults for walls, rate limits, rotated doc_ids and U1, U3, U5, U9) and `internal/ig/igtest`, with client tests over both transports. M4c: `internal/ig/probe` and `igs-spike probe` (report without PII; `make igs-spike-bin`). The probe uses fingerprint `chrome_146` by default; `chrome_152` (the recordings' Chrome) comes with M2 item 6 |
+| M4 | Instagram client, first `fakeig` slice, `igs-spike probe` | **done** (2026-10-31) | M4a: [#12](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/12) (merged); M4b and M4c: [#13](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/13) | M4a: `internal/ig/{htmlx,detect,client}` (tokens with candidate patterns, the `/accounts/login` and `/challenge` walls, the request builder, `configs/ig/queries.seed.yaml` with the five operations). M4b: `internal/fakeig` (generated world; pages that mint tokens and cookies; the five operations, checked like a real client; faults for walls, rate limits, rotated doc_ids and U1, U3, U5, U9) and `internal/ig/igtest`, with client tests over both transports. M4c: `internal/ig/probe` and `igs-spike probe` (`make igs-probe`, `make igs-probe-dryrun`, `make igs-spike-bin`; the output holds everything the probe read, owner's decision). The probe uses fingerprint `chrome_146` by default; `chrome_152` (the recordings' Chrome) comes with M2 item 6 |
 | C2 | Owner: run the probe (direct + each proxy tier) | **waiting for owner** | | Answers U1, U3, U5, U8, U9 |
 | M5 | Parsers, Instagram scrubber, golden fixtures | not started | | Also checks U10 and the pk range against the fixtures |
 | M6 | Crawl stages, full `fakeig`, e2e with ground truth | not started | | |
@@ -76,16 +77,16 @@ From the M1d-2 to M1d-5a session:
 
 ## What the owner needs to do
 
-**Checkpoint C2: run the probe.** It answers whether the grid pages past 24 posts (U1), whether queries need the browser's client-state fields (U3), whether cursors are tied to one identity (U5), which cookies Instagram sets (U8), and whether a profile can be read by its id alone (U9). It sends about 50 requests per profile, one every 3 seconds, so each profile takes 2 to 3 minutes. The report it writes holds no usernames, ids or text.
+**Checkpoint C2: run the probe on the Phase 0 droplet.** The steps are in [`docs/runbooks/igs-probe.md`](../runbooks/igs-probe.md); in short:
 
-1. Install Go once: `brew install go` (macOS).
-2. Get the code: `git clone https://github.com/Abdullah95k/securebrand-microservices-igs` and `cd securebrand-microservices-igs`.
-3. Make a file `canary.txt` outside the repository (for example in your home folder), with 5 to 10 public profiles, one per line (a username, `@username` or the profile URL). Mix a big brand, a small account, at least two with more than 50 posts, and one with highlights. Don't commit it.
-4. Run it without a proxy: `go run ./cmd/igs-spike probe --profiles ~/canary.txt --out probe-direct.json`.
-5. For each proxy tier you have (rotating ISP first, then residential):
-   1. `cp phase0/proxies.example.yaml phase0/proxies.yaml`, put your credentials in it, `chmod 600 phase0/proxies.yaml` (it is git-ignored).
-   2. `go run ./cmd/igs-spike probe --profiles ~/canary.txt --config phase0/proxies.yaml --tier isp --out probe-isp.json` (then `--tier residential --out probe-residential.json`).
-6. Send the `probe-*.json` files back: paste them into the next build session, or put them in the Drive folder and share the link. Ctrl-C stops a run early and still writes what it read.
+1. Log in to the droplet (`ssh root@YOUR_DROPLET_IP`) and clone this repository next to fbs's: `cd ~ && git clone https://github.com/Abdullah95k/securebrand-microservices-igs`, then `cd ~/securebrand-microservices-igs`.
+2. Rehearse with no traffic: `make igs-probe-dryrun` (its summary must say `bootstrapped 3/3`).
+3. Copy Facebook's proxies file: `cp ~/securebrand-microservices/phase0/proxies.yaml phase0/proxies.yaml` and `chmod 600 phase0/proxies.yaml`.
+4. List 5 to 10 public profiles: `cp phase0/ig-profiles.example.txt phase0/ig-profiles.txt`, then `nano phase0/ig-profiles.txt`, one per line.
+5. Run, inside `tmux new -s igs` so a dropped connection does not stop it: `make igs-probe` (ISP, then residential; 2 to 3 minutes per profile and tier).
+6. On your Mac, download the bundles: `scp "root@YOUR_DROPLET_IP:securebrand-microservices-igs/phase0/out-ig/*.tar.gz" ~/Downloads/`, and attach them to the next build session or share them by Drive link.
+
+The output holds each profile's name, link, picture, details, posts and the newest post's first comments. It stays off git.
 
 **Any time:** record C1 (brief §6):
 1. Open a post by clicking it in a profile grid.
@@ -109,3 +110,4 @@ From the M1d-2 to M1d-5a session:
   Each was tested locally with `go test -race ./...` against a local Postgres 16 and Redis; registry-sync's integration tests and the new migration (up, down, up) also ran locally. The flaky e2e test did not recur. The session stopped before M1d-5b so that it could end cleanly.
 - **2026-10-31 (same session, continued at the owner's request):** [#11](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/11) (M1d-5b) moved `session`, the GraphQL core and `browser` to `internal/scrape`, merged on green CI. M1 is done.
 - **2026-10-31 (same session, continued):** [#12](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/12) (M4a, Instagram client) and [#13](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/13) (M4b `fakeig` and M4c `igs-spike probe`), merged on green CI. M4 is done; the session stopped at checkpoint C2.
+- **2026-10-31 (same session, owner's follow-up):** the owner wants the probe's output to hold everything it reads, and to run it on the Phase 0 droplet. The probe now writes profiles, posts, comments, profile pictures and the answers as CSV, JSON and a bundle under `phase0/out-ig/`; `make igs-probe`, `make igs-probe-dryrun` and the runbook `igs-probe.md` were added.

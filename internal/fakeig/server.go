@@ -89,6 +89,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		page(w, http.StatusOK, `<html><form action="/accounts/login/ajax/" method="post"></form></html>`)
 	case strings.HasPrefix(r.URL.Path, "/challenge"):
 		page(w, http.StatusOK, `<html><form action="/challenge/action/" method="post"></form></html>`)
+	case strings.HasPrefix(r.URL.Path, "/fake-cdn/"):
+		// A stand-in for the image CDN: a few bytes with a JPEG header.
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("\xff\xd8\xff\xe0fake-jpeg" + r.URL.Path))
 	case r.Method == http.MethodPost && (r.URL.Path == "/api/graphql" || r.URL.Path == "/graphql/query"):
 		s.graphql(w, r)
 	case r.Method == http.MethodGet:
@@ -240,7 +244,7 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 			write(w, data(map[string]any{"xig_user_by_username": nil}))
 			return
 		}
-		write(w, data(map[string]any{"xig_user_by_username": profileJSON(p)}))
+		write(w, data(map[string]any{"xig_user_by_username": profileJSON(p, "http://"+r.Host)}))
 	case OpGridFirst:
 		p := s.World.Profile(sv(vars["username"]))
 		if p == nil {
@@ -391,15 +395,16 @@ func encodeCursor(kind string, pk int64, offset int, lsd string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%d:%d:%s", kind, pk, offset, lsd)))
 }
 
-func profileJSON(p *Profile) map[string]any {
+func profileJSON(p *Profile, host string) map[string]any {
 	hl := []any{}
 	for _, h := range p.Highlights {
 		hl = append(hl, map[string]any{"node": map[string]any{"id": "highlight:" + str(h.ID), "title": h.Title}})
 	}
 	return map[string]any{"pk": str(p.PK), "id": str(p.PK), "username": p.Username, "full_name": p.FullName,
-		"biography": p.Bio, "bio_links": []any{}, "is_verified": p.Verified, "is_private": false, "is_memorialized": false,
+		"biography": p.Bio, "is_verified": p.Verified, "is_private": false, "is_memorialized": false,
 		"follower_count": p.Followers, "following_count": p.Following, "all_media_count": nil, "has_any_clips": true,
-		"profile_pic_url": "https://scontent.cdninstagram.example/v/profile.jpg", "linked_fb_info": nil,
+		"profile_pic_url": host + "/fake-cdn/" + str(p.PK) + ".jpg", "linked_fb_info": nil,
+		"bio_links":                 []any{map[string]any{"title": "Site", "url": "https://example.com/" + p.Username}},
 		"lox_highlights_connection": map[string]any{"edges": hl}}
 }
 

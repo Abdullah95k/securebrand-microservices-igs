@@ -11,15 +11,23 @@
 //   - U9: does the grid query answer by user pk alone, with no cursor?
 //
 // It also reports which page tokens were found, and every request's class,
-// latency and wire bytes. The report holds no usernames, ids, cursors or
-// text: a profile is its line number in the owner's list, a cookie or token
-// is its name.
+// latency and wire bytes.
+//
+// Beside the answers, the report holds what the probe read (owner's
+// decision, 2026-10-31): each profile's public details, its posts' links,
+// captions and thumbnails, the newest post's first comments, and the
+// profile picture saved as a file. That is personal data: the command
+// writes it 0600 under phase0/, which git ignores, and it is never
+// committed.
 package probe
 
 import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -30,6 +38,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 
 // Options configure a run.
@@ -45,7 +54,9 @@ type Options struct {
 	// Fingerprint names the profile the pool uses, for the report.
 	Fingerprint string
 	Version     string
-	// Progress, when set, gets one line per finished profile (no names).
+	// ImageDir, when set, receives each profile picture as <username>.jpg.
+	ImageDir string
+	// Progress, when set, gets one line per finished profile.
 	Progress func(string)
 	Now      func() time.Time
 }
@@ -72,9 +83,69 @@ type Grid struct {
 	Failed   *Step  `json:"failed,omitempty"`
 }
 
+// ProfileData is what the profile query returned.
+type ProfileData struct {
+	PK                 string      `json:"pk"`
+	FullName           string      `json:"full_name"`
+	Biography          string      `json:"biography"`
+	BioLinks           []Link      `json:"bio_links,omitempty"`
+	Verified           bool        `json:"is_verified"`
+	Private            bool        `json:"is_private"`
+	Memorialized       bool        `json:"is_memorialized"`
+	Followers          int64       `json:"follower_count"`
+	Following          int64       `json:"following_count"`
+	ProfilePicURL      string      `json:"profile_pic_url"`
+	ProfilePicFile     string      `json:"profile_pic_file,omitempty"`
+	LinkedFacebookPage string      `json:"linked_facebook_page,omitempty"`
+	HasClips           bool        `json:"has_clips"`
+	Highlights         []Highlight `json:"highlights,omitempty"`
+}
+
+// Link is a bio link.
+type Link struct {
+	Title string `json:"title,omitempty"`
+	URL   string `json:"url"`
+}
+
+// Highlight is one highlights reel; Items is known for the one the probe read.
+type Highlight struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Items int    `json:"items,omitempty"`
+}
+
+// Post is one grid item. Grid items carry no time or counts: those need the
+// post page (U2).
+type Post struct {
+	PK           string `json:"pk"`
+	Shortcode    string `json:"shortcode"`
+	URL          string `json:"url"`
+	MediaType    string `json:"media_type"`
+	ProductType  string `json:"product_type,omitempty"`
+	Caption      string `json:"caption,omitempty"`
+	AltText      string `json:"alt_text,omitempty"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
+}
+
+// Comment is one top-level comment of the newest post.
+type Comment struct {
+	PostShortcode string    `json:"post_shortcode"`
+	PK            string    `json:"pk"`
+	Username      string    `json:"username"`
+	Verified      bool      `json:"is_verified"`
+	Text          string    `json:"text"`
+	CreatedAt     time.Time `json:"created_at"`
+	Likes         int64     `json:"likes"`
+}
+
 // Profile is one profile's results; Index is its 1-based line in the list.
 type Profile struct {
 	Index        int             `json:"index"`
+	Username     string          `json:"username"`
+	URL          string          `json:"url"`
+	Data         *ProfileData    `json:"data,omitempty"`
+	Posts        []Post          `json:"posts,omitempty"`
+	Comments     []Comment       `json:"comments,omitempty"`
 	Bootstrap    Step            `json:"bootstrap"`
 	TokensFound  map[string]bool `json:"tokens_found,omitempty"`
 	Cookies      []string        `json:"cookies,omitempty"`
@@ -84,7 +155,7 @@ type Profile struct {
 	Grid         *Grid           `json:"grid,omitempty"`
 	OtherCursor  *Step           `json:"cursor_other_identity,omitempty"`
 	GridByPK     *Step           `json:"grid_by_pk_no_cursor,omitempty"`
-	Comments     *Step           `json:"comments,omitempty"`
+	CommentsRead *Step           `json:"comments_read,omitempty"`
 	Highlights   *Step           `json:"highlights,omitempty"`
 	NoHighlights bool            `json:"no_highlights,omitempty"`
 }
@@ -155,7 +226,7 @@ func Run(ctx context.Context, o Options) Report {
 		p := r.profile(ctx, i+1, username)
 		rep.Profiles = append(rep.Profiles, p)
 		if o.Progress != nil {
-			o.Progress(fmt.Sprintf("profile %d/%d: bootstrap %s, grid %s", i+1, len(o.Profiles), p.Bootstrap.Class, gridLine(p.Grid)))
+			o.Progress(fmt.Sprintf("profile %d/%d %s: bootstrap %s, grid %s", i+1, len(o.Profiles), username, p.Bootstrap.Class, gridLine(p.Grid)))
 		}
 	}
 	if r.second != nil {
@@ -179,14 +250,14 @@ type runner struct {
 }
 
 func (r *runner) profile(ctx context.Context, index int, username string) Profile {
-	out := Profile{Index: index}
+	page := strings.TrimRight(r.o.BaseURL, "/") + "/" + username + "/"
+	out := Profile{Index: index, Username: username, URL: page}
 	id, err := r.o.Pool.Acquire(ctx, r.o.Tier)
 	if err != nil {
 		out.Bootstrap = Step{Class: "no_identity", Reason: err.Error()}
 		return out
 	}
 	defer r.o.Pool.Release(id)
-	page := strings.TrimRight(r.o.BaseURL, "/") + "/" + username + "/"
 	start := time.Now()
 	pl, err := r.o.Loader.Load(ctx, id, page)
 	out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
@@ -195,7 +266,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		return out
 	}
 	out.Bootstrap.Class, out.Bootstrap.Status, out.Bootstrap.WireBytes = pl.Class.String(), pl.Status, pl.Bytes
-	out.Bootstrap.Reason = r.reason(pl.Reason, username)
+	out.Bootstrap.Reason = pl.Reason
 	r.cost("page", out.Bootstrap)
 	if pl.Class == detect.OK {
 		out.TokensFound = htmlx.Found(htmlx.ExtractTokens(pl.HTML))
@@ -225,7 +296,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 
 	// Profile: the user pk and the highlights list.
-	resp, s := r.do(ctx, id, "profile", map[string]any{"username": username}, username, page)
+	resp, s := r.do(ctx, id, "profile", map[string]any{"username": username}, page)
 	out.Profile = &s
 	if resp == nil || resp.Class != detect.OK {
 		return out
@@ -236,13 +307,17 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		out.Profile.Reason = "no user in the response"
 		return out
 	}
+	out.Data = profileData(user)
+	if r.o.ImageDir != "" && out.Data.ProfilePicURL != "" {
+		out.Data.ProfilePicFile = r.saveImage(ctx, id, out.Data.ProfilePicURL, username, page)
+	}
 	var highlight string
-	if h := user.Get("lox_highlights_connection.edges.0.node.id"); h.Exists() {
-		highlight = h.String()
+	if len(out.Data.Highlights) > 0 {
+		highlight = out.Data.Highlights[0].ID
 	}
 
 	// First grid page, by username.
-	resp, s = r.do(ctx, id, "grid_first", map[string]any{"username": username}, username, page)
+	resp, s = r.do(ctx, id, "grid_first", map[string]any{"username": username}, page)
 	out.GridFirst = &s
 	if resp == nil || resp.Class != detect.OK {
 		return out
@@ -251,15 +326,16 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	edges := conn.Get("edges").Array()
 	out.GridFirst.Items, out.GridFirst.HasNext = len(edges), conn.Get("page_info.has_next_page").Bool()
 	cursor := conn.Get("page_info.end_cursor").String()
-	var mediaPK string
-	if len(edges) > 0 {
-		mediaPK = edges[0].Get("node.pk").String()
+	out.Posts = append(out.Posts, r.posts(edges)...)
+	var mediaPK, newest string
+	if len(out.Posts) > 0 {
+		mediaPK, newest = out.Posts[0].PK, out.Posts[0].Shortcode
 	}
 
 	// U5: the first cursor, from another identity.
 	if cursor != "" {
 		if other := r.otherIdentity(ctx, page); other != nil {
-			resp, s := r.do(ctx, other, "grid", map[string]any{"user_pk": pk, "cursor": cursor}, username, page)
+			resp, s := r.do(ctx, other, "grid", map[string]any{"user_pk": pk, "cursor": cursor}, page)
 			s.Items = gridItems(resp)
 			out.OtherCursor = &s
 			if s.Class == detect.OK.String() && s.Items > 0 {
@@ -271,10 +347,10 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 
 	// U1: page the grid as far as it goes.
-	out.Grid = r.walk(ctx, id, pk, cursor, out.GridFirst, username, page)
+	out.Grid = r.walk(ctx, id, pk, cursor, &out, page)
 
 	// U9: the grid by pk with no cursor.
-	resp, s = r.do(ctx, id, "grid", map[string]any{"user_pk": pk, "cursor": ""}, username, page)
+	resp, s = r.do(ctx, id, "grid", map[string]any{"user_pk": pk, "cursor": ""}, page)
 	s.Items = gridItems(resp)
 	out.GridByPK = &s
 	if s.Class == detect.OK.String() && s.Items > 0 {
@@ -285,22 +361,30 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 
 	// Comments of the newest post, and the first highlight.
 	if mediaPK != "" {
-		resp, s = r.do(ctx, id, "comments", map[string]any{"media_pk": mediaPK, "cursor": ""}, username, page)
+		resp, s = r.do(ctx, id, "comments", map[string]any{"media_pk": mediaPK, "cursor": ""}, page)
 		cc := first(respParts(resp), "data.xig_polaris_media.comments_connection")
 		s.Items, s.HasNext = len(cc.Get("edges").Array()), cc.Get("page_info.has_next_page").Bool()
-		out.Comments = &s
+		out.CommentsRead = &s
+		for _, e := range cc.Get("edges").Array() {
+			n := e.Get("node")
+			out.Comments = append(out.Comments, Comment{PostShortcode: newest, PK: n.Get("pk").String(),
+				Username: n.Get("user.username").String(), Verified: n.Get("user.is_verified").Bool(), Text: n.Get("text").String(),
+				CreatedAt: time.Unix(n.Get("created_at").Int(), 0).UTC(), Likes: n.Get("comment_like_count").Int()})
+		}
 	}
 	if highlight != "" {
-		resp, s = r.do(ctx, id, "highlights", map[string]any{"reel_ids": []string{highlight}, "initial_reel_id": highlight}, username, page)
+		resp, s = r.do(ctx, id, "highlights", map[string]any{"reel_ids": []string{highlight}, "initial_reel_id": highlight}, page)
 		s.Items = len(first(respParts(resp), "data.xdt_api__v1__feed__reels_media__connection.edges.0.node.items").Array())
 		out.Highlights = &s
+		out.Data.Highlights[0].Items = s.Items
 	} else {
 		out.NoHighlights = true
 	}
 	return out
 }
 
-func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor string, firstPage *Step, username, page string) *Grid {
+func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor string, out *Profile, page string) *Grid {
+	firstPage := out.GridFirst
 	g := &Grid{Posts: firstPage.Items, Stop: "end"}
 	if !firstPage.HasNext {
 		r.sum.GridEnds++
@@ -313,7 +397,7 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor stri
 			g.Stop = "cap"
 			break
 		}
-		resp, s := r.do(ctx, id, "grid", map[string]any{"user_pk": pk, "cursor": cursor}, username, page)
+		resp, s := r.do(ctx, id, "grid", map[string]any{"user_pk": pk, "cursor": cursor}, page)
 		if resp == nil || resp.Class != detect.OK {
 			g.Stop, g.Failed = "wall:"+s.Class, &s
 			break
@@ -321,6 +405,7 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor stri
 		g.Pages++
 		conn := first(resp.Parts, "data.node.polaris_ordered_timeline_connection")
 		g.Posts += len(conn.Get("edges").Array())
+		out.Posts = append(out.Posts, r.posts(conn.Get("edges").Array())...)
 		cursor = ""
 		if conn.Get("page_info.has_next_page").Bool() {
 			cursor = conn.Get("page_info.end_cursor").String()
@@ -361,7 +446,7 @@ func (r *runner) otherIdentity(ctx context.Context, page string) *session.Identi
 	return id
 }
 
-func (r *runner) do(ctx context.Context, id *session.Identity, query string, vars map[string]any, username, referer string) (*graphql.Response, Step) {
+func (r *runner) do(ctx context.Context, id *session.Identity, query string, vars map[string]any, referer string) (*graphql.Response, Step) {
 	start := time.Now()
 	resp, err := r.o.GQL.Do(ctx, id, graphql.Request{Query: query, Vars: vars, Referer: referer})
 	s := Step{Ms: time.Since(start).Milliseconds()}
@@ -370,7 +455,7 @@ func (r *runner) do(ctx context.Context, id *session.Identity, query string, var
 		r.cost(query, s)
 		return nil, s
 	}
-	s.Class, s.Status, s.WireBytes, s.Reason = resp.Class.String(), resp.Status, resp.BytesIn+resp.BytesOut, r.reason(resp.Reason, username)
+	s.Class, s.Status, s.WireBytes, s.Reason = resp.Class.String(), resp.Status, resp.BytesIn+resp.BytesOut, resp.Reason
 	r.sum.QueriesWithoutClientState[s.Class]++
 	r.cost(query, s)
 	return resp, s
@@ -382,15 +467,6 @@ func (r *runner) cost(kind string, s Step) {
 	c.sumMs += s.Ms
 	c.sumBytes += s.WireBytes
 	r.sum.Requests[kind] = c
-}
-
-// reason keeps a classifier reason out of the report if it names the
-// profile (a redirect path can carry the username).
-func (r *runner) reason(reason, username string) string {
-	if username != "" && strings.Contains(strings.ToLower(reason), strings.ToLower(username)) {
-		return "(withheld: names the profile)"
-	}
-	return reason
 }
 
 func first(parts []gjson.Result, path string) gjson.Result {
@@ -418,4 +494,89 @@ func gridLine(g *Grid) string {
 		return "not read"
 	}
 	return fmt.Sprintf("%d posts, stop %s", g.Posts, g.Stop)
+}
+
+// profileData reads the profile query's user object. Field names are the
+// findings' (har-findings §3); the linked Facebook page's shape was not
+// recorded, so two candidate paths are tried.
+func profileData(u gjson.Result) *ProfileData {
+	d := &ProfileData{PK: u.Get("pk").String(), FullName: u.Get("full_name").String(), Biography: u.Get("biography").String(),
+		Verified: u.Get("is_verified").Bool(), Private: u.Get("is_private").Bool(), Memorialized: u.Get("is_memorialized").Bool(),
+		Followers: u.Get("follower_count").Int(), Following: u.Get("following_count").Int(), HasClips: u.Get("has_any_clips").Bool()}
+	for _, p := range []string{"hd_profile_pic_url_info.url", "profile_pic_url_hd", "profile_pic_url"} {
+		if v := u.Get(p).String(); v != "" {
+			d.ProfilePicURL = v
+			break
+		}
+	}
+	for _, p := range []string{"linked_fb_info.linked_fb_page.name", "linked_fb_info.name"} {
+		if v := u.Get(p).String(); v != "" {
+			d.LinkedFacebookPage = v
+			break
+		}
+	}
+	for _, l := range u.Get("bio_links").Array() {
+		if url := l.Get("url").String(); url != "" {
+			d.BioLinks = append(d.BioLinks, Link{Title: l.Get("title").String(), URL: url})
+		}
+	}
+	for _, e := range u.Get("lox_highlights_connection.edges").Array() {
+		d.Highlights = append(d.Highlights, Highlight{ID: e.Get("node.id").String(), Title: e.Get("node.title").String()})
+	}
+	return d
+}
+
+var mediaTypes = map[int64]string{1: "photo", 2: "video", 8: "carousel"}
+
+// posts reads grid edges.
+func (r *runner) posts(edges []gjson.Result) []Post {
+	base := strings.TrimRight(r.o.BaseURL, "/")
+	var out []Post
+	for _, e := range edges {
+		n := e.Get("node")
+		p := Post{PK: n.Get("pk").String(), Shortcode: n.Get("code").String(), ProductType: n.Get("product_type").String(),
+			Caption: n.Get("caption.text").String(), AltText: n.Get("accessibility_caption").String()}
+		p.MediaType = mediaTypes[n.Get("media_type").Int()]
+		if p.MediaType == "" {
+			p.MediaType = n.Get("media_type").String()
+		}
+		for _, k := range []string{"display_uri", "image_versions2.candidates.0.url", "thumbnail_src"} {
+			if v := n.Get(k).String(); v != "" {
+				p.ThumbnailURL = v
+				break
+			}
+		}
+		kind := "p"
+		if p.ProductType == "clips" {
+			kind = "reel"
+		}
+		p.URL = base + "/" + kind + "/" + p.Shortcode + "/"
+		out = append(out, p)
+	}
+	return out
+}
+
+var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+// saveImage downloads a profile picture through the identity (its exit and
+// fingerprint) and returns the file name under ImageDir, or "" on failure.
+func (r *runner) saveImage(ctx context.Context, id *session.Identity, url, username, referer string) string {
+	resp, err := id.Doer.Do(ctx, &transport.Request{Method: "GET", URL: url, Header: [][2]string{
+		{"sec-ch-ua", id.FP.SecChUa}, {"sec-ch-ua-mobile", id.FP.SecChUaMobile}, {"user-agent", id.FP.UserAgent},
+		{"sec-ch-ua-platform", id.FP.SecChUaPlatform}, {"accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"},
+		{"sec-fetch-site", "cross-site"}, {"sec-fetch-mode", "no-cors"}, {"sec-fetch-dest", "image"},
+		{"referer", referer}, {"accept-encoding", "gzip, deflate, br, zstd"}, {"priority", "i"},
+	}})
+	if err != nil || resp.Status != 200 || len(resp.Body) == 0 {
+		return ""
+	}
+	r.cost("profile_picture", Step{WireBytes: resp.BytesIn + resp.BytesOut, Ms: resp.Elapsed.Milliseconds()})
+	name := unsafeName.ReplaceAllString(username, "_") + ".jpg"
+	if err := os.MkdirAll(r.o.ImageDir, 0o700); err != nil {
+		return ""
+	}
+	if err := os.WriteFile(filepath.Join(r.o.ImageDir, name), resp.Body, 0o600); err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Base(r.o.ImageDir), name)
 }
