@@ -1,4 +1,10 @@
-# securebrand-microservices
+# securebrand-microservices-igs
+
+> **This is igs**, the logged-out Instagram public-profile scraper. It was seeded from a copy of
+> [`securebrand-microservices`](https://github.com/Abdullah95k/securebrand-microservices) (fbs, the
+> Facebook page scraper) at commit `f1377a9`, and fbs's code below is that copy. The igs plan is in
+> [`docs/instagram/build-brief.md`](docs/instagram/build-brief.md); what was copied and ported since is in
+> [`UPSTREAM.md`](UPSTREAM.md). fbs itself lives on, unchanged, in its own repository.
 
 ## fbs: Facebook public page scraper
 
