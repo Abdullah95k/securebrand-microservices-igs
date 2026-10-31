@@ -279,3 +279,77 @@ func TestProbeProgressAndStop(t *testing.T) {
 		t.Fatalf("profile %+v", rep.Profiles[0])
 	}
 }
+
+// More comments per profile (the newest posts, several pages each) match
+// fakeig's ground truth; a run can start at a later line, keeping line
+// numbers; the progress lines carry running totals; and the CSVs are
+// current after each profile.
+func TestProbeCommentsStartAtAndSaver(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 5, Profiles: 3, PostsPerProfile: 30, MaxComments: 35, PostSpacing: time.Hour}})
+	var names []string
+	for _, p := range env.World.Profiles() {
+		names = append(names, p.Username)
+	}
+	dir := t.TempDir()
+	saver, err := probe.NewSaver(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = saver.Close() }()
+	var lines []string
+	var commentRowsSeen []int // comments.csv data rows after each profile
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 10,
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, StartAt: 2, CommentPosts: 3, CommentPages: 2,
+		Progress: func(line string) { lines = append(lines, line) },
+		OnProfile: func(p probe.Profile) {
+			if err := saver.Add(p); err != nil {
+				t.Fatal(err)
+			}
+			commentRowsSeen = append(commentRowsSeen, len(readCSV(t, filepath.Join(dir, "comments.csv")))-1)
+		}})
+	if len(rep.Profiles) != 2 || rep.Profiles[0].Index != 2 || rep.Profiles[1].Index != 3 || rep.StartAt != 2 {
+		t.Fatalf("profiles %d, first index %d, start_at %d", len(rep.Profiles), rep.Profiles[0].Index, rep.StartAt)
+	}
+	posts, comments := 0, 0
+	for i, p := range rep.Profiles {
+		want := env.World.Profiles()[i+1]
+		n := 0
+		for _, post := range want.Posts[:3] {
+			n += min(len(post.Comments), 2*10)
+		}
+		if len(p.Comments) != n {
+			t.Fatalf("profile %d: %d comments, want %d", p.Index, len(p.Comments), n)
+		}
+		if n > 0 && p.Comments[0].PostShortcode != want.Posts[0].Code && len(want.Posts[0].Comments) > 0 {
+			t.Fatalf("profile %d: first comment on %s", p.Index, p.Comments[0].PostShortcode)
+		}
+		posts, comments = posts+len(p.Posts), comments+len(p.Comments)
+		if commentRowsSeen[i] != comments {
+			t.Fatalf("after profile %d, comments.csv has %d rows, want %d", p.Index, commentRowsSeen[i], comments)
+		}
+	}
+	if s := rep.Summary; s.Posts != posts || s.Comments != comments || comments == 0 {
+		t.Fatalf("summary posts %d comments %d, counted %d and %d", s.Posts, s.Comments, posts, comments)
+	}
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "profile 3/3 "+names[2]+": ") ||
+		!strings.HasSuffix(lines[1], "; so far "+strconv.Itoa(posts)+" posts, "+strconv.Itoa(comments)+" comments") {
+		t.Fatalf("progress %q", lines)
+	}
+	if got := len(readCSV(t, filepath.Join(dir, "posts.csv"))) - 1; got != posts {
+		t.Fatalf("posts.csv has %d rows, want %d", got, posts)
+	}
+}
+
+func readCSV(t *testing.T, path string) [][]string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}

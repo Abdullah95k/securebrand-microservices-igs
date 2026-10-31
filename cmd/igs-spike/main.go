@@ -74,6 +74,9 @@ func runProbe(args []string) int {
 	rps := fs.Float64("rps", 0.3, "requests per second per identity (0.3 = one every ~3.3 s, as in the recordings)")
 	maxPages := fs.Int("max-grid-pages", 32, "grid pages to read per profile after the first (12 posts each)")
 	maxAge := fs.Int("max-age-days", 0, "stop a profile's grid once its posts are older than this many days (0 = no limit; the backfill window is 365)")
+	commentPosts := fs.Int("comment-posts", 1, "read the comments of each profile's newest N posts")
+	commentPages := fs.Int("comment-pages", 1, "comment pages to read per post (10 comments each, newest first)")
+	startAt := fs.Int("start-at", 1, "start at this line of the profiles list, to continue a stopped run (use a new --out-dir)")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
 	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
 	dryRun := fs.Bool("dry-run", false, "rehearse against a built-in fake Instagram (no traffic, no proxies)")
@@ -122,12 +125,31 @@ func runProbe(args []string) int {
 	if *raw {
 		rawDir = filepath.Join(*outDir, "raw")
 	}
+	if *startAt < 1 || *startAt > len(names) {
+		fmt.Fprintf(os.Stderr, "probe: --start-at %d is outside the list (1 to %d)\n", *startAt, len(names))
+		return 2
+	}
+	// The CSVs grow as profiles are read, so they can be opened mid-run.
+	saver, err := probe.NewSaver(*outDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "probe:", err)
+		return 1
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Fprintf(os.Stderr, "probe: %d profiles, tier %s, %.2f requests/s per identity; Ctrl-C stops and keeps what was read\n", len(names), *tier, *rps)
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
 		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
-		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) }})
+		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages,
+		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) },
+		OnProfile: func(p probe.Profile) {
+			if err := saver.Add(p); err != nil {
+				fmt.Fprintln(os.Stderr, "probe: saving profile:", err)
+			}
+		}})
+	if err := saver.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "probe:", err)
+	}
 	if err := probe.Write(*outDir, rep); err != nil {
 		fmt.Fprintln(os.Stderr, "probe: write:", err)
 		return 1
@@ -138,12 +160,14 @@ func runProbe(args []string) int {
 		return 1
 	}
 	s := rep.Summary
-	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  bootstrapped %d/%d; grid: %d ended, %d capped, %d at the age limit, walls %v at %v posts, %d paged past 24 (max %d)\n"+
+	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  read %d posts and %d comments from %d profiles\n  bootstrapped %d/%d; grid: %d ended, %d capped, %d at the age limit, walls %v at %v posts, %d paged past 24 (max %d)\n"+
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
-		*outDir, bundle, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
+		*outDir, bundle, s.Posts, s.Comments, s.Profiles, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
-	if s.StoppedEarly {
-		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C) after %d of %d profiles; the last one is partial and counts for no question\n", s.Profiles, len(names))
+	if s.StoppedEarly && len(rep.Profiles) > 0 {
+		last := rep.Profiles[len(rep.Profiles)-1].Index
+		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C) at profile %d of %d; it is partial and counts for no question.\n"+
+			"  To continue, run again with --start-at %d and a new output directory.\n", last, len(names), last)
 	}
 	return 0
 }

@@ -25,54 +25,131 @@ func Write(dir string, rep Report) error {
 	if err := os.WriteFile(filepath.Join(dir, "report.json"), append(b, '\n'), 0o600); err != nil {
 		return err
 	}
-	profiles := [][]string{{"line", "username", "url", "full_name", "followers", "following", "verified", "private",
-		"biography", "bio_links", "linked_facebook_page", "highlights", "profile_pic_file", "profile_pic_url",
-		"page_load", "posts_read", "grid_stop", "oldest_post_read", "comments_read"}}
-	posts := [][]string{{"username", "shortcode", "url", "posted_at", "media_type", "product_type", "caption", "alt_text", "thumbnail_url"}}
-	comments := [][]string{{"username", "post_shortcode", "commenter", "commenter_verified", "created_at", "likes", "text"}}
+	tables := map[string][][]string{"profiles.csv": {profilesHeader}, "posts.csv": {postsHeader}, "comments.csv": {commentsHeader}}
 	for _, p := range rep.Profiles {
-		row := []string{strconv.Itoa(p.Index), p.Username, p.URL}
-		if d := p.Data; d != nil {
-			var links, hl []string
-			for _, l := range d.BioLinks {
-				links = append(links, l.URL)
-			}
-			for _, h := range d.Highlights {
-				hl = append(hl, h.Title)
-			}
-			row = append(row, d.FullName, i64(d.Followers), i64(d.Following), strconv.FormatBool(d.Verified),
-				strconv.FormatBool(d.Private), d.Biography, strings.Join(links, " "), d.LinkedFacebookPage,
-				strings.Join(hl, " | "), d.ProfilePicFile, d.ProfilePicURL)
-		} else {
-			row = append(row, make([]string, 11)...)
-		}
-		stop, oldest := "", ""
-		if p.Grid != nil {
-			stop = p.Grid.Stop
-			if !p.Grid.Oldest.IsZero() {
-				oldest = p.Grid.Oldest.Format(time.RFC3339)
-			}
-		}
-		row = append(row, p.Bootstrap.Class, strconv.Itoa(len(p.Posts)), stop, oldest, strconv.Itoa(len(p.Comments)))
-		profiles = append(profiles, row)
-		for _, x := range p.Posts {
-			posted := ""
-			if !x.PostedAt.IsZero() {
-				posted = x.PostedAt.Format(time.RFC3339)
-			}
-			posts = append(posts, []string{p.Username, x.Shortcode, x.URL, posted, x.MediaType, x.ProductType, x.Caption, x.AltText, x.ThumbnailURL})
-		}
-		for _, c := range p.Comments {
-			comments = append(comments, []string{p.Username, c.PostShortcode, c.Username, strconv.FormatBool(c.Verified),
-				c.CreatedAt.Format(time.RFC3339), i64(c.Likes), c.Text})
-		}
+		tables["profiles.csv"] = append(tables["profiles.csv"], profileRow(p))
+		tables["posts.csv"] = append(tables["posts.csv"], postRows(p)...)
+		tables["comments.csv"] = append(tables["comments.csv"], commentRows(p)...)
 	}
-	for name, rows := range map[string][][]string{"profiles.csv": profiles, "posts.csv": posts, "comments.csv": comments} {
+	for name, rows := range tables {
 		if err := writeCSV(filepath.Join(dir, name), rows); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Saver keeps the three CSVs current while a run goes: each profile's rows
+// are appended as soon as it is read, so the files can be opened (or
+// counted) mid-run, and a run that dies keeps what it read. Write rewrites
+// them at the end, with report.json.
+type Saver struct {
+	files []*os.File
+	w     []*csv.Writer
+}
+
+// NewSaver creates dir and starts the CSVs, with their headers.
+func NewSaver(dir string) (*Saver, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	s := &Saver{}
+	for _, t := range []struct {
+		name   string
+		header []string
+	}{{"profiles.csv", profilesHeader}, {"posts.csv", postsHeader}, {"comments.csv", commentsHeader}} {
+		f, err := os.OpenFile(filepath.Join(dir, t.name), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) //nolint:gosec // the operator's output dir
+		if err != nil {
+			_ = s.Close()
+			return nil, err
+		}
+		s.files, s.w = append(s.files, f), append(s.w, csv.NewWriter(f))
+		if err := s.write(len(s.w)-1, [][]string{t.header}); err != nil {
+			_ = s.Close()
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// Add appends one profile's rows.
+func (s *Saver) Add(p Profile) error {
+	for i, rows := range [][][]string{{profileRow(p)}, postRows(p), commentRows(p)} {
+		if err := s.write(i, rows); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Saver) write(i int, rows [][]string) error {
+	return s.w[i].WriteAll(rows) // WriteAll flushes
+}
+
+// Close closes the files.
+func (s *Saver) Close() error {
+	var err error
+	for _, f := range s.files {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	return err
+}
+
+var (
+	profilesHeader = []string{"line", "username", "url", "full_name", "followers", "following", "verified", "private",
+		"biography", "bio_links", "linked_facebook_page", "highlights", "profile_pic_file", "profile_pic_url",
+		"page_load", "posts_read", "grid_stop", "oldest_post_read", "comments_read"}
+	postsHeader    = []string{"username", "shortcode", "url", "posted_at", "media_type", "product_type", "caption", "alt_text", "thumbnail_url"}
+	commentsHeader = []string{"username", "post_shortcode", "commenter", "commenter_verified", "created_at", "likes", "text"}
+)
+
+func profileRow(p Profile) []string {
+	row := []string{strconv.Itoa(p.Index), p.Username, p.URL}
+	if d := p.Data; d != nil {
+		var links, hl []string
+		for _, l := range d.BioLinks {
+			links = append(links, l.URL)
+		}
+		for _, h := range d.Highlights {
+			hl = append(hl, h.Title)
+		}
+		row = append(row, d.FullName, i64(d.Followers), i64(d.Following), strconv.FormatBool(d.Verified),
+			strconv.FormatBool(d.Private), d.Biography, strings.Join(links, " "), d.LinkedFacebookPage,
+			strings.Join(hl, " | "), d.ProfilePicFile, d.ProfilePicURL)
+	} else {
+		row = append(row, make([]string, 11)...)
+	}
+	stop, oldest := "", ""
+	if p.Grid != nil {
+		stop = p.Grid.Stop
+		if !p.Grid.Oldest.IsZero() {
+			oldest = p.Grid.Oldest.Format(time.RFC3339)
+		}
+	}
+	return append(row, p.Bootstrap.Class, strconv.Itoa(len(p.Posts)), stop, oldest, strconv.Itoa(len(p.Comments)))
+}
+
+func postRows(p Profile) [][]string {
+	var rows [][]string
+	for _, x := range p.Posts {
+		posted := ""
+		if !x.PostedAt.IsZero() {
+			posted = x.PostedAt.Format(time.RFC3339)
+		}
+		rows = append(rows, []string{p.Username, x.Shortcode, x.URL, posted, x.MediaType, x.ProductType, x.Caption, x.AltText, x.ThumbnailURL})
+	}
+	return rows
+}
+
+func commentRows(p Profile) [][]string {
+	var rows [][]string
+	for _, c := range p.Comments {
+		rows = append(rows, []string{p.Username, c.PostShortcode, c.Username, strconv.FormatBool(c.Verified),
+			c.CreatedAt.Format(time.RFC3339), i64(c.Likes), c.Text})
+	}
+	return rows
 }
 
 func writeCSV(path string, rows [][]string) error {

@@ -15,8 +15,8 @@
 //
 // Beside the answers, the report holds what the probe read (owner's
 // decision, 2026-10-31): each profile's public details, its posts' links,
-// captions and thumbnails, the newest post's first comments, and the
-// profile picture saved as a file. That is personal data: the command
+// captions and thumbnails, the newest posts' comments (as many posts and
+// pages as asked), and the profile picture saved as a file. That is personal data: the command
 // writes it 0600 under phase0/, which git ignores, and it is never
 // committed.
 package probe
@@ -68,9 +68,22 @@ type Options struct {
 	// the first RawPages profiles.
 	RawDir   string
 	RawPages int
-	// Progress, when set, gets one line per finished profile.
+	// Progress, when set, gets one line per finished profile, with the
+	// running totals of posts and comments.
 	Progress func(string)
-	Now      func() time.Time
+	// OnProfile, when set, gets each profile as soon as it is read, so the
+	// caller can save it before the run ends (igs-spike appends the CSVs).
+	OnProfile func(Profile)
+	// StartAt is the line (1-based, in Profiles) to start at, to continue a
+	// run that was stopped; earlier profiles are skipped. Profiles keep
+	// their line numbers. 0 or 1 starts at the first.
+	StartAt int
+	// CommentPosts is how many of each profile's newest posts get their
+	// comments read, and CommentPages how many comment pages (10 comments
+	// each, newest first) per post. Both default to 1.
+	CommentPosts int
+	CommentPages int
+	Now          func() time.Time
 }
 
 // Step is one request's outcome.
@@ -158,7 +171,7 @@ type PostPage struct {
 	CommentsEmbedded int       `json:"comments_embedded"`
 }
 
-// Comment is one top-level comment of the newest post.
+// Comment is one top-level comment of one of the newest posts.
 type Comment struct {
 	PostShortcode string    `json:"post_shortcode"`
 	PK            string    `json:"pk"`
@@ -208,13 +221,18 @@ type Report struct {
 	Fingerprint string    `json:"fingerprint"`
 	StartedAt   time.Time `json:"started_at"`
 	FinishedAt  time.Time `json:"finished_at"`
-	Profiles    []Profile `json:"profiles"`
-	Summary     Summary   `json:"summary"`
+	// StartAt is the profile line the run started at, when not the first.
+	StartAt  int       `json:"start_at,omitempty"`
+	Profiles []Profile `json:"profiles"`
+	Summary  Summary   `json:"summary"`
 }
 
 // Summary answers the questions over all profiles.
 type Summary struct {
 	Profiles int `json:"profiles"`
+	// Posts and Comments are the totals read.
+	Posts    int `json:"posts"`
+	Comments int `json:"comments"`
 	// StoppedEarly: the operator stopped the run (Ctrl-C) before the last
 	// profile; the last profile in the report is partial.
 	StoppedEarly bool           `json:"stopped_early,omitempty"`
@@ -270,20 +288,33 @@ func Run(ctx context.Context, o Options) Report {
 	if o.MaxGridPages <= 0 {
 		o.MaxGridPages = 32
 	}
+	o.CommentPosts, o.CommentPages = max(o.CommentPosts, 1), max(o.CommentPages, 1)
 	r := &runner{o: o, sum: Summary{TokensFound: map[string]int{}, GridWalls: map[string]int{},
 		QueriesWithoutClientState: map[string]int{}, Cookies: map[string]int{}, Requests: map[string]Cost{}}}
 	rep := Report{Version: o.Version, Tier: o.Tier, Fingerprint: o.Fingerprint, StartedAt: o.Now().UTC()}
+	if o.StartAt > 1 {
+		rep.StartAt = o.StartAt
+	}
 	for i, username := range o.Profiles {
 		if ctx.Err() != nil {
 			break
+		}
+		if i+1 < o.StartAt {
+			continue
 		}
 		p := r.profile(ctx, i+1, username)
 		if ctx.Err() != nil {
 			p.Stopped, r.sum.StoppedEarly = true, true
 		}
 		rep.Profiles = append(rep.Profiles, p)
+		r.sum.Posts += len(p.Posts)
+		r.sum.Comments += len(p.Comments)
+		if o.OnProfile != nil {
+			o.OnProfile(p)
+		}
 		if o.Progress != nil {
-			line := fmt.Sprintf("profile %d/%d %s: bootstrap %s, grid %s", i+1, len(o.Profiles), username, p.Bootstrap.Class, gridLine(p.Grid))
+			line := fmt.Sprintf("profile %d/%d %s: bootstrap %s, grid %s, %d comments; so far %d posts, %d comments",
+				i+1, len(o.Profiles), username, p.Bootstrap.Class, gridLine(p.Grid), len(p.Comments), r.sum.Posts, r.sum.Comments)
 			if p.Stopped {
 				line = fmt.Sprintf("profile %d/%d %s: stopped (Ctrl-C) after %d posts; the report keeps what was read", i+1, len(o.Profiles), username, len(p.Posts))
 			}
@@ -465,18 +496,10 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		r.sum.GridByPKFails++
 	}
 
-	// Comments of the newest post, and the first highlight.
+	// Comments of the newest posts, and the first highlight.
 	if mediaPK != "" {
-		resp, s = r.do(ctx, id, "comments", map[string]any{"media_pk": mediaPK}, page)
-		cedges, cpi := connection(respParts(resp), "comments_connection")
-		s.Items, s.HasNext = len(cedges), cpi.HasNext
-		r.keepRaw("comments", resp, s.Items)
-		out.CommentsRead = ptr(s)
-		for _, e := range cedges {
-			n := e.Get("node")
-			out.Comments = append(out.Comments, Comment{PostShortcode: newest, PK: n.Get("pk").String(),
-				Username: n.Get("user.username").String(), Verified: n.Get("user.is_verified").Bool(), Text: n.Get("text").String(),
-				CreatedAt: time.Unix(n.Get("created_at").Int(), 0).UTC(), Likes: n.Get("comment_like_count").Int()})
+		if !r.comments(ctx, id, &out, page) {
+			return out
 		}
 	}
 	// The newest post's page: time and counts the grid lacks, and the first
@@ -494,6 +517,46 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		out.NoHighlights = true
 	}
 	return out
+}
+
+// comments reads up to CommentPages pages of comments (newest first) for
+// each of the CommentPosts newest posts. The newest post's first page is
+// out.CommentsRead. It reports false when the run was stopped.
+func (r *runner) comments(ctx context.Context, id *session.Identity, out *Profile, page string) bool {
+	for i := range min(r.o.CommentPosts, len(out.Posts)) {
+		post := out.Posts[i]
+		if post.PK == "" {
+			continue
+		}
+		cursor := ""
+		for pg := range r.o.CommentPages {
+			vars := map[string]any{"media_pk": post.PK}
+			if cursor != "" {
+				vars["cursor"] = cursor
+			}
+			resp, s := r.do(ctx, id, "comments", vars, page)
+			if s.Class == stopped {
+				return false
+			}
+			edges, pi := connection(respParts(resp), "comments_connection")
+			s.Items, s.HasNext = len(edges), pi.HasNext
+			r.keepRaw("comments", resp, s.Items)
+			if i == 0 && pg == 0 {
+				out.CommentsRead = ptr(s)
+			}
+			for _, e := range edges {
+				n := e.Get("node")
+				out.Comments = append(out.Comments, Comment{PostShortcode: post.Shortcode, PK: n.Get("pk").String(),
+					Username: n.Get("user.username").String(), Verified: n.Get("user.is_verified").Bool(), Text: n.Get("text").String(),
+					CreatedAt: time.Unix(n.Get("created_at").Int(), 0).UTC(), Likes: n.Get("comment_like_count").Int()})
+			}
+			if resp == nil || resp.Class != detect.OK || !pi.HasNext || pi.EndCursor == "" || pi.EndCursor == cursor {
+				break
+			}
+			cursor = pi.EndCursor
+		}
+	}
+	return true
 }
 
 func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor string, out *Profile, page string) *Grid {
