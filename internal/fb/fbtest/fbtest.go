@@ -10,6 +10,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
@@ -98,7 +99,7 @@ func New(t testing.TB, o Options) *Env {
 	rules := detect.DefaultRules()
 	return &Env{
 		World: w, Fake: fs, HTTP: hs, Registry: reg, Pool: pool,
-		Loader: &session.Loader{Rules: rules, AcceptLanguage: "en-US,en;q=0.9"},
-		GQL:    &graphql.Client{Registry: reg, Rules: rules, Builder: graphql.FacebookBuilder{AcceptLanguage: "en-US,en;q=0.9"}},
+		Loader: &session.Loader{Rules: rules, AcceptLanguage: "en-US,en;q=0.9", Hooks: fbclient.Hooks("en-US,en;q=0.9")},
+		GQL:    &graphql.Client{Registry: reg, Rules: rules, Builder: fbclient.Builder{AcceptLanguage: "en-US,en;q=0.9"}},
 	}
 }

@@ -62,7 +62,8 @@ type Client struct {
 	PageRPS     int
 	PageRPSFast int
 	GlobalRPS   int
-	// Builder writes the platform's request (FacebookBuilder for fbs).
+	// Builder writes the platform's request (internal/fb/client.Builder
+	// for fbs).
 	Builder    RequestBuilder
 	Raw        RawSink
 	CaptureAll bool

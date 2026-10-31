@@ -27,6 +27,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
@@ -691,7 +692,7 @@ func (s *Sync) client(e *entry) *graphql.Client {
 		params = s.Params()
 	}
 	return &graphql.Client{Registry: registry.NewStatic(registry.Seed{ClientParams: params, Queries: []registry.Query{q}}),
-		Rules: s.Rules, Builder: graphql.FacebookBuilder{AcceptLanguage: s.AcceptLanguage, Locale: s.Locale}}
+		Rules: s.Rules, Builder: fbclient.Builder{AcceptLanguage: s.AcceptLanguage, Locale: s.Locale}}
 }
 
 func (s *Sync) do(ctx context.Context, c *canary, e *entry, vars map[string]any) (*graphql.Response, Check) {

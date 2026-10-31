@@ -17,7 +17,6 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
@@ -74,7 +73,7 @@ func (id *Identity) Tokens() Tokens {
 	return maps.Clone(id.tokens)
 }
 
-// SetTokens installs freshly extracted tokens.
+// SetTokens installs tokens the platform's Extract hook accepted.
 func (id *Identity) SetTokens(t Tokens) {
 	id.mu.Lock()
 	id.tokens = maps.Clone(t)
@@ -82,11 +81,11 @@ func (id *Identity) SetTokens(t Tokens) {
 	id.mu.Unlock()
 }
 
-// Bootstrapped reports whether tokens are present.
+// Bootstrapped reports whether tokens are installed.
 func (id *Identity) Bootstrapped() bool {
 	id.mu.Lock()
 	defer id.mu.Unlock()
-	return htmlx.Valid(id.tokens)
+	return len(id.tokens) > 0
 }
 
 // NextReq returns the next __req value (base36 counter).

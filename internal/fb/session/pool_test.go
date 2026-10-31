@@ -100,7 +100,7 @@ func (d doer) Do(context.Context, *transport.Request) (*transport.Response, erro
 // exit; one cancelled by its caller does not.
 func TestCancelledLoadsDoNotRetireAnIdentity(t *testing.T) {
 	base, _ := url.Parse("https://www.facebook.com")
-	l := &Loader{Rules: detect.DefaultRules()}
+	l := &Loader{Rules: detect.DefaultRules(), Hooks: Hooks{Extract: func([]byte) (Tokens, bool) { return nil, false }}}
 	cancelled := newIdentity("c", proxy.Endpoint{Tier: "isp"}, Fingerprint{}, nil, base, 1000, 10, 0)
 	dead := newIdentity("d", proxy.Endpoint{Tier: "isp"}, Fingerprint{}, nil, base, 1000, 10, 0)
 	std := transport.NewStd(time.Second)

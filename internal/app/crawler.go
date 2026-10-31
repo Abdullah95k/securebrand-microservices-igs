@@ -24,6 +24,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/shadow"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/stage"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/gdpr"
@@ -109,7 +110,7 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 	gql := &graphql.Client{
 		Registry: reg, Rules: rules, Limiter: ratelimit.NewRedis(rdb),
 		PageRPS: cfg.FB.PageRPS, PageRPSFast: cfg.FB.PageRPSP0, GlobalRPS: cfg.FB.GlobalRPS,
-		Builder:  graphql.FacebookBuilder{AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale},
+		Builder:  fbclient.Builder{AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale},
 		Breakers: breaker.New(cfg.FB.QueryBreaker),
 	}
 	gql.Breakers.OnChange = func(key string, from, to breaker.State) {
@@ -117,9 +118,9 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		slog.Warn("graphql: query breaker", "query", key, "from", from.String(), "to", to.String())
 	}
 	supp := gdpr.NewSuppression(db)
-	loader := &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage}
+	loader := &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage, Hooks: fbclient.Hooks(cfg.FB.AcceptLanguage)}
 	if cfg.FB.Browser.Enabled {
-		b, err := browser.NewBootstrapper(cfg.FB.Browser, cfg.FB.AcceptLanguage)
+		b, err := browser.NewBootstrapper(cfg.FB.Browser, cfg.FB.AcceptLanguage, fbclient.Hooks(cfg.FB.AcceptLanguage))
 		if err != nil {
 			return nil, fmt.Errorf("fb.browser is enabled: %w", err)
 		}
