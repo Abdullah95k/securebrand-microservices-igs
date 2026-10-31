@@ -50,6 +50,12 @@ type Faults struct {
 	CursorBound bool
 	// NoPKGrid fails the grid query sent without a cursor (U9).
 	NoPKGrid bool
+	// StreamGrid answers grid queries the way Relay streams a connection:
+	// the first part holds the connection with no edges and a placeholder
+	// page_info (has_next_page false), each edge follows in its own part
+	// with a path, and the real page_info comes last in a deferred part. A
+	// reader of the first part alone sees 0 posts and no next page.
+	StreamGrid bool
 }
 
 // Options configure a server.
@@ -308,8 +314,25 @@ func (s *Server) writeGrid(w http.ResponseWriter, p *Profile, offset int, id *id
 	if s.opts.Faults.CursorBound {
 		lsd = id.lsd
 	}
-	write(w, data(wrap(s.gridPage(p, offset, lsd))))
+	page := s.gridPage(p, offset, lsd)
+	if !s.opts.Faults.StreamGrid {
+		write(w, data(wrap(page)))
+		return
+	}
+	edges, pi := page["edges"].([]any), page["page_info"]
+	head := map[string]any{"edges": []any{}, "page_info": map[string]any{"has_next_page": false, "end_cursor": pi.(map[string]any)["end_cursor"]}}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(map[string]any{"data": wrap(head), "extensions": map[string]any{"is_final": false}})
+	for i, e := range edges {
+		_ = enc.Encode(map[string]any{"data": e, "label": "PolarisProfilePostsTab$stream$" + gridConnKey,
+			"path": []any{"xig_user_by_username", gridConnKey, "edges", i}, "extensions": map[string]any{"is_final": false}})
+	}
+	_ = enc.Encode(map[string]any{"data": map[string]any{"page_info": pi}, "label": "PolarisProfilePostsTab$defer$" + gridConnKey + "_page_info",
+		"path": []any{"xig_user_by_username", gridConnKey}, "extensions": map[string]any{"is_final": true}})
 }
+
+const gridConnKey = "polaris_ordered_timeline_connection"
 
 func (s *Server) gridPage(p *Profile, offset int, lsd string) map[string]any {
 	end := min(offset+GridPageSize, len(p.Posts))

@@ -70,6 +70,7 @@ func runProbe(args []string) int {
 	tier := fs.String("tier", "direct", "proxy tier to use (direct = this machine's own IP)")
 	outDir := fs.String("out-dir", "", "output directory (default phase0/out-ig/<tier>-<time>)")
 	images := fs.Bool("images", true, "save each profile picture under <out-dir>/images")
+	raw := fs.Bool("raw", true, "save Instagram's raw answers under <out-dir>/raw (first of each query per profile, every failure, the first 3 pages' HTML)")
 	rps := fs.Float64("rps", 0.3, "requests per second per identity (0.3 = one every ~3.3 s, as in the recordings)")
 	maxPages := fs.Int("max-grid-pages", 32, "grid pages to read per profile after the first (12 posts each)")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
@@ -113,15 +114,18 @@ func runProbe(args []string) int {
 	if *outDir == "" {
 		*outDir = filepath.Join("phase0", "out-ig", *tier+"-"+time.Now().UTC().Format("20060102-150405"))
 	}
-	imageDir := ""
+	imageDir, rawDir := "", ""
 	if *images {
 		imageDir = filepath.Join(*outDir, "images")
+	}
+	if *raw {
+		rawDir = filepath.Join(*outDir, "raw")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	fmt.Fprintf(os.Stderr, "probe: %d profiles, tier %s, %.2f requests/s per identity; Ctrl-C stops and keeps what was read\n", len(names), *tier, *rps)
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
-		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, Version: version, ImageDir: imageDir,
+		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) }})
 	if err := probe.Write(*outDir, rep); err != nil {
 		fmt.Fprintln(os.Stderr, "probe: write:", err)
