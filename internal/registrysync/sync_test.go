@@ -2,6 +2,7 @@ package registrysync_test
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"sort"
 	"testing"
@@ -398,4 +399,67 @@ func TestSyncRendersOperationsTheBundlesOmit(t *testing.T) {
 		len(rep.NotFound) != 0 || rep.Status != registrysync.StatusOK {
 		t.Fatalf("render discovery: %+v", rep)
 	}
+}
+
+// A query's endpoint and headers survive the database (seed, upsert, list,
+// reload) and pass to the candidates a rotation discovers, so a promoted
+// doc_id keeps its query's route.
+func TestSyncKeepsEndpointAndHeaders(t *testing.T) {
+	f := start(t, fakefb.Faults{}, nil)
+	ctx := context.Background()
+	q, err := f.reg.Get("timeline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Endpoint = "/api/graphql/"
+	q.Headers = []registry.Header{{Name: "X-Route-Test", Value: "1"}, {Name: "x-other", Value: "2"}}
+	q.Source = "seed" // still the seed row, so the sync treats it as before
+	if err := registry.Upsert(ctx, f.s.DB, q); err != nil {
+		t.Fatal(err)
+	}
+	bad := q
+	bad.Endpoint = "https://elsewhere.example/api/graphql/"
+	if err := registry.Upsert(ctx, f.s.DB, bad); err == nil {
+		t.Fatal("an endpoint on another host was saved")
+	}
+	want := `[{x-route-test 1} {x-other 2}]`
+	check := func(label string, got registry.Query) {
+		t.Helper()
+		if got.Endpoint != "/api/graphql/" || fmt.Sprint(got.Headers) != want {
+			t.Fatalf("%s: %q %v", label, got.Endpoint, got.Headers)
+		}
+	}
+	if err := f.reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.reg.Get("timeline")
+	check("reload", got)
+	if other, _ := f.reg.Get("comments"); other.Endpoint != "" || other.Headers != nil {
+		t.Fatalf("another query got a route: %q %v", other.Endpoint, other.Headers)
+	}
+
+	rotated := f.rotate()
+	rep := f.run()
+	if rep.Status != registrysync.StatusOK || len(rep.Promoted) != len(f.seed.Queries) {
+		t.Fatalf("rotation: %+v", rep)
+	}
+	qs, err := registry.List(ctx, f.s.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range qs {
+		if e.Name == "timeline" && e.DocID == rotated["ProfileCometTimelineFeedRefetchQuery"] {
+			found = true
+			check("promoted candidate", e)
+		}
+	}
+	if !found {
+		t.Fatalf("no promoted timeline row: %+v", qs)
+	}
+	if err := f.reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = f.reg.Get("timeline")
+	check("after promotion", got)
 }

@@ -8,6 +8,14 @@
 #
 # Variables are a JSON template. A string value of the form "{{name}}" is
 # replaced by the caller-provided value (JSON null when not provided).
+#
+# A query may also name an endpoint (a path on the platform's host; default
+# /api/graphql/) and extra request headers, sent in this order; a header the
+# client already sends takes the query's value in its place:
+#   endpoint: /graphql/query
+#   headers:
+#     - {name: x-root-field-name, value: some_root_field}
+# Facebook needs neither.
 client_params:
   __a: "1"
   __comet_req: "15"

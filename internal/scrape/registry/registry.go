@@ -1,6 +1,7 @@
 // Package registry resolves logical query names (timeline, comments, ...) to
-// Facebook's current doc_id, friendly name and variables template. Facebook
-// rotates doc_ids, so the registry is data, reloaded at runtime.
+// the platform's current doc_id, friendly name, variables template and, where
+// a platform has more than one GraphQL endpoint, the endpoint and extra
+// headers. doc_ids rotate, so the registry is data, reloaded at runtime.
 package registry
 
 import (
@@ -10,13 +11,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/net/http/httpguts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,10 +43,77 @@ type Query struct {
 	Status        string          `json:"status"`
 	Priority      int             `json:"priority"`
 	Source        string          `json:"source"`
+	// Endpoint is the request path on the identity's host, for platforms
+	// with more than one GraphQL endpoint (Instagram: /api/graphql and
+	// /graphql/query). Empty means the client's default endpoint.
+	Endpoint string `json:"endpoint,omitempty"`
+	// Headers are sent with this query only, in this order: a name the
+	// client already sends takes this value in the client's position, a new
+	// name is added. Names are lower case. Empty means none.
+	Headers []Header `json:"headers,omitempty"`
 	// Check state recorded by fbs-registry-sync (read only; List fills it).
 	LastCheck     string     `json:"last_check,omitempty"`
 	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
 	LastOKAt      *time.Time `json:"last_ok_at,omitempty"`
+}
+
+// Header is one request header of a query.
+type Header struct {
+	Name  string `json:"name" yaml:"name"`
+	Value string `json:"value" yaml:"value"`
+}
+
+// endpointPath is the shape of an endpoint: a plain path, with no host,
+// query string or escapes, so a registry row cannot send an identity's
+// cookies and tokens anywhere but its own host.
+var endpointPath = regexp.MustCompile(`^/[A-Za-z0-9/_.~-]*$`)
+
+// reservedHeaders belong to the transport (framing, cookies) and cannot be
+// set per query.
+var reservedHeaders = map[string]bool{
+	"host": true, "content-length": true, "transfer-encoding": true, "connection": true,
+	"keep-alive": true, "proxy-connection": true, "upgrade": true, "te": true, "cookie": true,
+}
+
+// normalizeRoute checks a query's endpoint and headers and returns the
+// headers with lower-case names.
+func normalizeRoute(name, endpoint string, headers []Header) ([]Header, error) {
+	if endpoint != "" {
+		clean := path.Clean(endpoint)
+		if !endpointPath.MatchString(endpoint) || (endpoint != clean && endpoint != clean+"/") {
+			return nil, fmt.Errorf("registry: %s: endpoint %q must be a plain path on the platform's host, like /api/graphql/", name, endpoint)
+		}
+	}
+	if len(headers) == 0 {
+		return nil, nil
+	}
+	out := make([]Header, 0, len(headers))
+	seen := map[string]bool{}
+	for _, h := range headers {
+		n := strings.ToLower(h.Name)
+		switch {
+		case !httpguts.ValidHeaderFieldName(n):
+			return nil, fmt.Errorf("registry: %s: invalid header name %q", name, h.Name)
+		case reservedHeaders[n]:
+			return nil, fmt.Errorf("registry: %s: header %q is set by the transport, not per query", name, n)
+		case seen[n]:
+			return nil, fmt.Errorf("registry: %s: header %q given twice", name, n)
+		case !httpguts.ValidHeaderFieldValue(h.Value):
+			return nil, fmt.Errorf("registry: %s: invalid value for header %q", name, n)
+		}
+		seen[n] = true
+		out = append(out, Header{Name: n, Value: h.Value})
+	}
+	return out, nil
+}
+
+// headersJSON encodes headers for the jsonb column ([] when none).
+func headersJSON(h []Header) []byte {
+	if len(h) == 0 {
+		return []byte("[]")
+	}
+	b, _ := json.Marshal(h)
+	return b
 }
 
 // ErrNotFound is returned for unknown query names.
@@ -79,6 +150,8 @@ type seedQueryYAML struct {
 	ParserVersion int            `yaml:"parser_version"`
 	Priority      int            `yaml:"priority"`
 	Status        string         `yaml:"status,omitempty"`
+	Endpoint      string         `yaml:"endpoint,omitempty"`
+	Headers       []Header       `yaml:"headers,omitempty"`
 	Variables     map[string]any `yaml:"variables"`
 }
 
@@ -98,9 +171,14 @@ func ParseSeed(b []byte) (Seed, error) {
 		if st == "" {
 			st = StatusActive
 		}
+		hdr, err := normalizeRoute(q.Name, q.Endpoint, q.Headers)
+		if err != nil {
+			return Seed{}, fmt.Errorf("registry: seed: %w", err)
+		}
 		s.Queries = append(s.Queries, Query{
 			Name: q.Name, DocID: q.DocID, FriendlyName: q.FriendlyName, Variables: vars,
 			Parser: q.Parser, ParserVersion: q.ParserVersion, Status: st, Priority: q.Priority, Source: "seed",
+			Endpoint: q.Endpoint, Headers: hdr,
 		})
 	}
 	return s, nil
@@ -141,7 +219,8 @@ func MarshalSeed(s Seed) ([]byte, error) {
 			st = ""
 		}
 		y.Queries = append(y.Queries, seedQueryYAML{Name: q.Name, FriendlyName: q.FriendlyName, DocID: q.DocID,
-			Parser: q.Parser, ParserVersion: q.ParserVersion, Priority: q.Priority, Status: st, Variables: vars})
+			Parser: q.Parser, ParserVersion: q.ParserVersion, Priority: q.Priority, Status: st,
+			Endpoint: q.Endpoint, Headers: q.Headers, Variables: vars})
 	}
 	var b bytes.Buffer
 	enc := yaml.NewEncoder(&b)
@@ -304,17 +383,35 @@ func (r *DB) Run(ctx context.Context, every time.Duration) error {
 // List returns every row of fb_queries.
 func List(ctx context.Context, pool *pgxpool.Pool) ([]Query, error) {
 	rows, err := pool.Query(ctx, `SELECT name, doc_id, friendly_name, variables_template, parser,
-		parser_version, status, priority, source, coalesce(last_check, ''), last_checked_at, last_ok_at
+		parser_version, status, priority, source, endpoint, headers,
+		coalesce(last_check, ''), last_checked_at, last_ok_at
 		FROM fb_queries ORDER BY name, priority DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("registry: list: %w", err)
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Query, error) {
 		var q Query
+		var hdr []byte
 		err := row.Scan(&q.Name, &q.DocID, &q.FriendlyName, &q.Variables, &q.Parser,
-			&q.ParserVersion, &q.Status, &q.Priority, &q.Source, &q.LastCheck, &q.LastCheckedAt, &q.LastOKAt)
+			&q.ParserVersion, &q.Status, &q.Priority, &q.Source, &q.Endpoint, &hdr,
+			&q.LastCheck, &q.LastCheckedAt, &q.LastOKAt)
+		if err == nil {
+			q.Headers, err = ScanHeaders(hdr)
+		}
 		return q, err
 	})
+}
+
+// ScanHeaders decodes the headers column.
+func ScanHeaders(b []byte) ([]Header, error) {
+	var h []Header
+	if err := json.Unmarshal(b, &h); err != nil {
+		return nil, fmt.Errorf("registry: headers: %w", err)
+	}
+	if len(h) == 0 {
+		return nil, nil
+	}
+	return h, nil
 }
 
 // ApplySeed upserts seed rows. Existing rows from other sources win: a seed
@@ -324,17 +421,20 @@ func ApplySeed(ctx context.Context, pool *pgxpool.Pool, seed Seed) error {
 		for _, q := range seed.Queries {
 			_, err := tx.Exec(ctx, `
 				INSERT INTO fb_queries (name, doc_id, friendly_name, variables_template, parser,
-					parser_version, status, priority, source, promoted_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'seed', now())
+					parser_version, status, priority, endpoint, headers, source, promoted_at)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'seed', now())
 				ON CONFLICT (name, doc_id) DO UPDATE SET
 					friendly_name = EXCLUDED.friendly_name,
 					variables_template = EXCLUDED.variables_template,
 					parser = EXCLUDED.parser,
 					parser_version = EXCLUDED.parser_version,
 					priority = EXCLUDED.priority,
+					endpoint = EXCLUDED.endpoint,
+					headers = EXCLUDED.headers,
 					updated_at = now()
 				WHERE fb_queries.source = 'seed'`,
-				q.Name, q.DocID, q.FriendlyName, q.Variables, q.Parser, q.ParserVersion, q.Status, q.Priority)
+				q.Name, q.DocID, q.FriendlyName, q.Variables, q.Parser, q.ParserVersion, q.Status, q.Priority,
+				q.Endpoint, headersJSON(q.Headers))
 			if err != nil {
 				return fmt.Errorf("registry: seed %s: %w", q.Name, err)
 			}
@@ -355,6 +455,10 @@ func Upsert(ctx context.Context, pool *pgxpool.Pool, q Query) error {
 	if !json.Valid(q.Variables) {
 		return errors.New("registry: variables must be valid JSON")
 	}
+	hdr, err := normalizeRoute(q.Name, q.Endpoint, q.Headers)
+	if err != nil {
+		return err
+	}
 	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if q.Status == StatusActive {
 			if _, err := tx.Exec(ctx, `UPDATE fb_queries SET status = 'fallback', updated_at = now()
@@ -364,14 +468,16 @@ func Upsert(ctx context.Context, pool *pgxpool.Pool, q Query) error {
 		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO fb_queries (name, doc_id, friendly_name, variables_template, parser,
-				parser_version, status, priority, source, promoted_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $7 = 'active' THEN now() END)
+				parser_version, status, priority, source, endpoint, headers, promoted_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, CASE WHEN $7 = 'active' THEN now() END)
 			ON CONFLICT (name, doc_id) DO UPDATE SET
 				friendly_name = EXCLUDED.friendly_name, variables_template = EXCLUDED.variables_template,
 				parser = EXCLUDED.parser, parser_version = EXCLUDED.parser_version,
 				status = EXCLUDED.status, priority = EXCLUDED.priority, source = EXCLUDED.source,
+				endpoint = EXCLUDED.endpoint, headers = EXCLUDED.headers,
 				promoted_at = COALESCE(EXCLUDED.promoted_at, fb_queries.promoted_at), updated_at = now()`,
-			q.Name, q.DocID, q.FriendlyName, q.Variables, q.Parser, q.ParserVersion, q.Status, q.Priority, q.Source)
+			q.Name, q.DocID, q.FriendlyName, q.Variables, q.Parser, q.ParserVersion, q.Status, q.Priority, q.Source,
+			q.Endpoint, headersJSON(hdr))
 		return err
 	})
 }
