@@ -327,10 +327,10 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor stri
 		}
 	}
 	g.PastPage = g.Posts > 24
-	switch {
-	case g.Stop == "end":
+	switch g.Stop {
+	case "end":
 		r.sum.GridEnds++
-	case g.Stop == "cap":
+	case "cap":
 		r.sum.GridCaps++
 	default:
 		r.sum.GridWalls[strings.TrimPrefix(g.Stop, "wall:")]++
