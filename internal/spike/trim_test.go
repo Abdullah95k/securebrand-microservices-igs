@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 )
 
 // flagged serves the timeline with two provider flags on, as Facebook's

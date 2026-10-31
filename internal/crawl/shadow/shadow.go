@@ -17,10 +17,10 @@ import (
 	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 )
 
 // TimelineParser has parse.Timeline's signature.

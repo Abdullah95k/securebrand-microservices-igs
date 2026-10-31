@@ -10,12 +10,12 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/proxy"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/transport"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 
 // Env is a ready-to-use client stack against fakefb.

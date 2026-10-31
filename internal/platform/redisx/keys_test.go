@@ -11,9 +11,9 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/checkpoint"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 )
 
 // TestEveryKeyIsPrefixed drives each Valkey-backed store and checks that

@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/pilot"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 )
 
 // registryImport makes every query of a registry file (a Phase 0

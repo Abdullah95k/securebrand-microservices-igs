@@ -15,9 +15,9 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/registrysync"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
 )

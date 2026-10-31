@@ -14,7 +14,6 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/dispatch"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
@@ -25,6 +24,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scheduler"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 )
 
 const leaderKey = 4_300_100

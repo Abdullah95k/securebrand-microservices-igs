@@ -9,10 +9,10 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/replay"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 )
 
 // replayRaw parses captured raw responses again with the current parsers.

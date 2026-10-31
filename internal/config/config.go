@@ -179,7 +179,7 @@ type Browser struct {
 	NoSandbox bool `koanf:"no_sandbox"`
 }
 
-// AIMD tunes the fleet ceiling controller (internal/fb/ratelimit).
+// AIMD tunes the fleet ceiling controller (internal/scrape/ratelimit).
 type AIMD struct {
 	Enabled        bool          `koanf:"enabled"`
 	Interval       time.Duration `koanf:"interval"`

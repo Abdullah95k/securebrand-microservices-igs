@@ -99,7 +99,7 @@ igs-spike: Phase 0 kit and the probe the owner runs     fakeig: synthetic Instag
 
 **Code layout, in the igs repository (decided in [ADR 0004](../adr/0004-ig-code-organisation.md)):**
 - **Neutral, moved out of the copied `internal/fb`:**
-  - `internal/scrape/{transport,detect,proxy,ratelimit,session,htmlx,registry,gql,docids,browser,walk}`;
+  - `internal/scrape/{transport,detect,proxy,ratelimit,session,htmlx,registry,graphql,docids,browser,walk}`;
   - `internal/crawl/*`, working on igs's own task envelope.
 - **The copied Facebook code and its tests** stay as the regression net for the copied pipeline until igs's own `fakeig` suites cover it (M6–M8).
 - **Instagram-only:**

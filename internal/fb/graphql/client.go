@@ -11,13 +11,13 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/ratelimit"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/transport"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/breaker"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 
 // RawSink receives raw responses for replay and drift debugging, with the
