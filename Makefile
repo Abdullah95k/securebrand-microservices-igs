@@ -5,7 +5,7 @@ PG_DSN ?= postgres://fbs:fbs@localhost:5432/fbs?sslmode=disable
 TEST_ENV = IGS_TEST_PG_DSN="$(PG_DSN)" IGS_TEST_REDIS_ADDR=localhost:6379 IGS_TEST_KAFKA_BROKERS=localhost:19092 IGS_TEST_SCHEMA_REGISTRY=http://localhost:18081
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 
-.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin chart-check chart-smoke clean
+.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin igs-probe igs-probe-dryrun chart-check chart-smoke clean
 
 all: generate build test
 
@@ -189,6 +189,25 @@ pilot-clean:
 ## Rehearse Phase 0 against a local fakefb (no proxies, no Facebook, about a minute).
 phase0-dryrun:
 	GO=$(GO) phase0/dryrun.sh
+
+IGS_PROBE_PROFILES ?= phase0/ig-profiles.txt
+IGS_PROBE_TIERS ?= isp,residential
+IGS_PROBE_OUT ?= phase0/out-ig
+
+## igs probe against real Instagram (checkpoint C2, docs/runbooks/igs-probe.md).
+## One run per tier in IGS_PROBE_TIERS ("direct" = this machine's own IP);
+## each writes $(IGS_PROBE_OUT)/<tier>/ and <tier>.tar.gz.
+igs-probe:
+	@test -f $(IGS_PROBE_PROFILES) || { echo "missing $(IGS_PROBE_PROFILES): cp phase0/ig-profiles.example.txt $(IGS_PROBE_PROFILES) and fill it in"; exit 2; }
+	@for t in $$(echo $(IGS_PROBE_TIERS) | tr , ' '); do \
+	  if [ $$t != direct ] && [ ! -f $(PHASE0_CONFIG) ]; then echo "missing $(PHASE0_CONFIG) for tier $$t: cp phase0/proxies.example.yaml $(PHASE0_CONFIG), fill it in, chmod 600"; exit 2; fi; \
+	  $(GO) run ./cmd/igs-spike probe --profiles $(IGS_PROBE_PROFILES) $(if $(wildcard $(PHASE0_CONFIG)),--config $(PHASE0_CONFIG)) \
+	    --tier $$t --out-dir $(IGS_PROBE_OUT)/$$t || exit 1; \
+	done
+
+## Rehearse the probe against a built-in fake Instagram: no traffic, no proxies.
+igs-probe-dryrun:
+	$(GO) run ./cmd/igs-spike probe --dry-run --out-dir $(IGS_PROBE_OUT)-dryrun
 
 ## Static fbs-spike binaries in bin/, to run Phase 0 on a machine without Go or Docker.
 spike-bin:

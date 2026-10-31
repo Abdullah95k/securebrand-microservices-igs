@@ -213,6 +213,11 @@ func TestBootstrapRefusesWalls(t *testing.T) {
 // bytes are counted, and no Chromium process outlives the render.
 func TestRenderBlocksMediaAndSettles(t *testing.T) {
 	bin := chromium(t)
+	// The render's profile directory goes under a directory of this test's
+	// own, so the leftover count cannot see renders of other packages that
+	// go test runs in parallel (internal/fb/client renders too).
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 	var images atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -238,20 +243,21 @@ func TestRenderBlocksMediaAndSettles(t *testing.T) {
 	if images.Load() != 0 || res.Bytes < 5000 || time.Since(start) > 30*time.Second {
 		t.Fatalf("images fetched %d, bytes %d, took %s", images.Load(), res.Bytes, time.Since(start))
 	}
-	if n := browserProcesses(t); n != 0 {
+	if n := browserProcesses(t, tmp); n != 0 {
 		t.Fatalf("%d Chromium processes left after the render", n)
 	}
 }
 
-// browserProcesses counts processes started with an fbs-browser profile.
-func browserProcesses(t *testing.T) int {
+// browserProcesses counts live processes started with a browser profile
+// under tmp.
+func browserProcesses(t *testing.T, tmp string) int {
 	t.Helper()
 	time.Sleep(200 * time.Millisecond)
 	entries, _ := os.ReadDir("/proc")
 	n := 0
 	for _, e := range entries {
 		b, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
-		if err == nil && strings.Contains(string(b), "--user-data-dir="+filepath.Join(os.TempDir(), "igs-browser-")) {
+		if err == nil && strings.Contains(string(b), "--user-data-dir="+filepath.Join(tmp, "igs-browser-")) {
 			stat, _ := os.ReadFile("/proc/" + e.Name() + "/stat")
 			if !strings.Contains(string(stat), ") Z ") { // zombies are reaped by the test's parent
 				n++
