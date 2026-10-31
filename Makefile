@@ -193,6 +193,7 @@ phase0-dryrun:
 IGS_PROBE_PROFILES ?= phase0/ig-profiles.txt
 IGS_PROBE_TIERS ?= isp,residential
 IGS_PROBE_OUT ?= phase0/out-ig
+IGS_PROBE_ARGS ?=
 
 ## igs probe against real Instagram (checkpoint C2, docs/runbooks/igs-probe.md).
 ## One run per tier in IGS_PROBE_TIERS ("direct" = this machine's own IP);
@@ -202,7 +203,7 @@ igs-probe:
 	@for t in $$(echo $(IGS_PROBE_TIERS) | tr , ' '); do \
 	  if [ $$t != direct ] && [ ! -f $(PHASE0_CONFIG) ]; then echo "missing $(PHASE0_CONFIG) for tier $$t: cp phase0/proxies.example.yaml $(PHASE0_CONFIG), fill it in, chmod 600"; exit 2; fi; \
 	  $(GO) run ./cmd/igs-spike probe --profiles $(IGS_PROBE_PROFILES) $(if $(wildcard $(PHASE0_CONFIG)),--config $(PHASE0_CONFIG)) \
-	    --tier $$t --out-dir $(IGS_PROBE_OUT)/$$t || exit 1; \
+	    --tier $$t --out-dir $(IGS_PROBE_OUT)/$$t $(IGS_PROBE_ARGS) || exit 1; \
 	done
 
 ## Rehearse the probe against a built-in fake Instagram: no traffic, no proxies.

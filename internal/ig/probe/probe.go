@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,9 +51,12 @@ type Options struct {
 	Tier     string   // proxy tier ("direct" for none)
 	// MaxGridPages caps the U1 walk after the first grid page (12 posts each).
 	MaxGridPages int
-	Pool         *session.Pool
-	Loader       *session.Loader
-	GQL          *graphql.Client
+	// MaxAge, when set, stops the walk once the posts read are older than
+	// this (judged by the time their pk encodes): the backfill window.
+	MaxAge time.Duration
+	Pool   *session.Pool
+	Loader *session.Loader
+	GQL    *graphql.Client
 	// Fingerprint names the profile the pool uses, for the report.
 	Fingerprint string
 	Version     string
@@ -87,11 +91,14 @@ type Step struct {
 type Grid struct {
 	Pages int `json:"pages"` // after the first
 	Posts int `json:"posts"` // including the first page
-	// Stop is "end" (has_next_page false), "cap" (MaxGridPages), or
-	// "wall:<class>" for the first page that did not answer.
+	// Stop is "end" (has_next_page false), "cap" (MaxGridPages), "age"
+	// (MaxAge reached), or "wall:<class>" for the first page that did not
+	// answer.
 	Stop     string `json:"stop"`
 	PastPage bool   `json:"past_24"` // read more than 24 posts
-	Failed   *Step  `json:"failed,omitempty"`
+	// Oldest is when the oldest post read was posted (from its pk).
+	Oldest time.Time `json:"oldest,omitzero"`
+	Failed *Step     `json:"failed,omitempty"`
 }
 
 // ProfileData is what the profile query returned.
@@ -128,14 +135,17 @@ type Highlight struct {
 // Post is one grid item. Grid items carry no time or counts: those need the
 // post page (U2).
 type Post struct {
-	PK           string `json:"pk"`
-	Shortcode    string `json:"shortcode"`
-	URL          string `json:"url"`
-	MediaType    string `json:"media_type"`
-	ProductType  string `json:"product_type,omitempty"`
-	Caption      string `json:"caption,omitempty"`
-	AltText      string `json:"alt_text,omitempty"`
-	ThumbnailURL string `json:"thumbnail_url,omitempty"`
+	PK        string `json:"pk"`
+	Shortcode string `json:"shortcode"`
+	URL       string `json:"url"`
+	MediaType string `json:"media_type"`
+	// PostedAt is when the post was made, from the time its pk encodes
+	// (within about a minute of the post page's taken_at).
+	PostedAt     time.Time `json:"posted_at,omitzero"`
+	ProductType  string    `json:"product_type,omitempty"`
+	Caption      string    `json:"caption,omitempty"`
+	AltText      string    `json:"alt_text,omitempty"`
+	ThumbnailURL string    `json:"thumbnail_url,omitempty"`
 }
 
 // PostPage is what a post page held.
@@ -206,6 +216,7 @@ type Summary struct {
 	// U1
 	GridEnds       int            `json:"grid_ends"`
 	GridCaps       int            `json:"grid_caps"`
+	GridAgeStops   int            `json:"grid_age_stops"`
 	GridWalls      map[string]int `json:"grid_walls"`
 	PagedPast24    int            `json:"paged_past_24"`
 	MaxPosts       int            `json:"max_posts"`
@@ -298,7 +309,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	pl, err := r.o.Loader.Load(ctx, id, page)
 	out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
 	if err != nil {
-		out.Bootstrap.Class, out.Bootstrap.Reason = detect.Transport.String(), "page load failed"
+		out.Bootstrap.Class, out.Bootstrap.Reason = detect.Transport.String(), redact(err.Error())
 		return out
 	}
 	out.Bootstrap.Class, out.Bootstrap.Status, out.Bootstrap.WireBytes = pl.Class.String(), pl.Status, pl.Bytes
@@ -480,6 +491,12 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor 
 		g.Pages++
 		g.Posts += len(edges)
 		out.Posts = append(out.Posts, r.posts(edges)...)
+		if r.o.MaxAge > 0 {
+			if last := out.Posts[len(out.Posts)-1].PostedAt; !last.IsZero() && last.Before(r.o.Now().Add(-r.o.MaxAge)) {
+				g.Stop = "age"
+				break
+			}
+		}
 		next := ""
 		if pi.HasNext || pi.EndCursor != cursor {
 			next = pi.EndCursor
@@ -490,11 +507,16 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor 
 		cursor = next
 	}
 	g.PastPage = g.Posts > 24
+	if n := len(out.Posts); n > 0 {
+		g.Oldest = out.Posts[n-1].PostedAt
+	}
 	switch g.Stop {
 	case "end":
 		r.sum.GridEnds++
 	case "cap":
 		r.sum.GridCaps++
+	case "age":
+		r.sum.GridAgeStops++
 	default:
 		r.sum.GridWalls[strings.TrimPrefix(g.Stop, "wall:")]++
 		r.sum.WalledAtPosts = append(r.sum.WalledAtPosts, g.Posts)
@@ -527,7 +549,7 @@ func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *
 		if st.Class == "" {
 			st.Class = detect.Transport.String()
 		}
-		st.Reason = err.Error()
+		st.Reason = redact(err.Error())
 		out.OtherBootstrap = st
 		r.o.Pool.Release(id)
 		return nil
@@ -546,7 +568,7 @@ func (r *runner) postPage(ctx context.Context, id *session.Identity, url, shortc
 	pl, err := r.o.Loader.Load(ctx, id, url)
 	pp.Ms = time.Since(start).Milliseconds()
 	if err != nil {
-		pp.Class, pp.Reason = detect.Transport.String(), "page load failed"
+		pp.Class, pp.Reason = detect.Transport.String(), redact(err.Error())
 		r.cost("post_page", pp.Step)
 		return pp
 	}
@@ -774,6 +796,7 @@ func (r *runner) posts(edges []gjson.Result) []Post {
 		p := Post{PK: n.Get("pk").String(), Shortcode: n.Get("code").String(), ProductType: n.Get("product_type").String(),
 			Caption: n.Get("caption.text").String(), AltText: n.Get("accessibility_caption").String()}
 		p.MediaType = mediaTypes[n.Get("media_type").Int()]
+		p.PostedAt = PostedAt(p.PK)
 		if p.MediaType == "" {
 			p.MediaType = n.Get("media_type").String()
 		}
@@ -792,6 +815,33 @@ func (r *runner) posts(edges []gjson.Result) []Post {
 	}
 	return out
 }
+
+// idEpochMs is the epoch of Instagram's ids: a media pk holds the
+// milliseconds since it above its 23rd bit. Checked in the owner's probe run
+// (2026-10-31): within about a minute of each post page's taken_at.
+const idEpochMs = 1314220021721
+
+// PostedAt is when a media pk says its post was made; zero for a pk that
+// does not parse or encodes no plausible time.
+func PostedAt(pk string) time.Time {
+	v, err := strconv.ParseInt(pk, 10, 64)
+	if err != nil || v <= 0 {
+		return time.Time{}
+	}
+	t := time.UnixMilli(v>>23 + idEpochMs).UTC()
+	// Ids that encode a time began in late 2011; a small number decodes to
+	// the epoch itself.
+	if t.Year() < 2012 || t.After(time.Now().Add(48*time.Hour)) {
+		return time.Time{}
+	}
+	return t
+}
+
+var credentials = regexp.MustCompile(`://[^/@\s]+@`)
+
+// redact removes credentials from URLs in an error text (a proxy URL can
+// carry them).
+func redact(s string) string { return credentials.ReplaceAllString(s, "://***@") }
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 

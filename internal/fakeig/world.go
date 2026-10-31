@@ -98,8 +98,9 @@ func NewWorld(s Spec) *World {
 			Followers: 1000 + r.Int64N(100000), Following: r.Int64N(500), Verified: i%2 == 0}
 		p.ID = fmt.Sprintf("178414%011d", p.PK%100_000_000_000)
 		for j := range s.PostsPerProfile {
-			post := &Post{PK: pk(), MediaType: []int{1, 2, 8}[r.IntN(3)], Caption: fmt.Sprintf("synthetic caption %d", j+1),
-				TakenAt: Epoch.Add(-time.Duration(j) * s.PostSpacing), Likes: r.Int64N(5000), Owner: p}
+			taken := Epoch.Add(-time.Duration(j) * s.PostSpacing)
+			post := &Post{PK: MediaPK(taken, r.Int64N(1<<23)), MediaType: []int{1, 2, 8}[r.IntN(3)], Caption: fmt.Sprintf("synthetic caption %d", j+1),
+				TakenAt: taken, Likes: r.Int64N(5000), Owner: p}
 			post.Code = shortcode(post.PK)
 			post.ProductType = map[int]string{1: "feed", 2: "clips", 8: "carousel_container"}[post.MediaType]
 			n := 0
@@ -130,6 +131,16 @@ func (w *World) Profiles() []*Profile { return w.profiles }
 
 // Profile returns the profile with username, or nil.
 func (w *World) Profile(username string) *Profile { return w.byName[username] }
+
+// IDEpochMs is the epoch of Instagram's ids: a media pk holds the
+// milliseconds since it in its bits above the 23rd (checked against the
+// post pages' taken_at in the owner's probe run, 2026-10-31).
+const IDEpochMs = 1314220021721
+
+// MediaPK builds a pk the way Instagram's encode their creation time.
+func MediaPK(t time.Time, low int64) int64 {
+	return (t.UnixMilli()-IDEpochMs)<<23 | low&(1<<23-1)
+}
 
 // shortcode encodes a media pk in Instagram's base64 alphabet.
 func shortcode(pk int64) string {
