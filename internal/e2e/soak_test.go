@@ -16,6 +16,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
 // TestSoak runs the scheduled pipeline for FBS_SOAK_DURATION (default 20m)
@@ -292,7 +293,7 @@ func TestSoak(t *testing.T) {
 	if n, _ := s.Redis.SCard(ctx, jobs.FinalizeSet).Result(); n != 0 {
 		t.Fatalf("%d jobs left in the finalize set", n)
 	}
-	if left, _ := s.Redis.Keys(ctx, "{job:*}:seen:*").Result(); len(left) != 0 {
+	if left, _ := s.Redis.Keys(ctx, redisx.KeyPrefix+"{job:*}:seen:*").Result(); len(left) != 0 {
 		t.Fatalf("%d seen lists left behind, e.g. %s", len(left), left[0])
 	}
 	// Goroutines must not grow with the restarts.

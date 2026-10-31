@@ -258,7 +258,7 @@ func watchBacklog(s *Stack, every time.Duration) func() map[string]backlogStat {
 	label := map[string]string{s.Producer.Topic(persist.Group): "persister"}
 	for _, st := range []string{"page", "post", "thread"} {
 		for _, l := range []string{"p0", "p1", "p2"} {
-			label[s.Producer.Topic("fbs-crawler-"+st+"-"+l)] = st
+			label[s.Producer.Topic("igs-crawler-"+st+"-"+l)] = st
 		}
 	}
 	groups := make([]string, 0, len(label))

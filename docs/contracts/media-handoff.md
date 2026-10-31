@@ -13,7 +13,7 @@ analysis service ──fb.media.processed.v1──▶ fbs-media-janitor ──�
 ```
 
 Schemas: `api/proto/securebrand/fb/v1/media.proto` (generated Go:
-`gen/go/securebrand/fb/v1`). Records are protobuf; the `fbs-type` header holds
+`gen/go/securebrand/fb/v1`). Records are protobuf; the `igs-type` header holds
 the full message name and `content-type` is `application/x-protobuf`. Topic
 names get `kafka.topic_prefix` prepended.
 

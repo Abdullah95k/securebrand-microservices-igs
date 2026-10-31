@@ -15,6 +15,8 @@ import (
 	"github.com/go-redis/redis_rate/v10"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
 // Scopes.
@@ -54,7 +56,7 @@ func GenerateKey() (key, prefix string, hash []byte) {
 	s := base64.RawURLEncoding.EncodeToString(b)
 	prefix, secret := strings.ToLower(strings.NewReplacer("-", "a", "_", "b").Replace(s[:8])), s[8:]
 	h := sha256.Sum256([]byte(secret))
-	return "fbs_" + prefix + "_" + secret, prefix, h[:]
+	return "igs_" + prefix + "_" + secret, prefix, h[:]
 }
 
 // CreateClient stores a new API client and returns its key.
@@ -81,8 +83,8 @@ type authenticator struct {
 var errUnauthorized = errors.New("missing or invalid API key")
 
 func (a *authenticator) lookup(ctx context.Context, key string) (*Client, error) {
-	parts := strings.SplitN(strings.TrimPrefix(key, "fbs_"), "_", 2)
-	if !strings.HasPrefix(key, "fbs_") || len(parts) != 2 {
+	parts := strings.SplitN(strings.TrimPrefix(key, "igs_"), "_", 2)
+	if !strings.HasPrefix(key, "igs_") || len(parts) != 2 {
 		return nil, errUnauthorized
 	}
 	prefix, secret := parts[0], parts[1]
@@ -129,7 +131,7 @@ func (a *authenticator) middleware(next http.Handler) http.Handler {
 			return
 		}
 		if a.limiter != nil && c.RatePerMinute > 0 {
-			res, err := a.limiter.Allow(r.Context(), "rl:api:"+c.ID.String(), redis_rate.PerMinute(c.RatePerMinute))
+			res, err := a.limiter.Allow(r.Context(), redisx.KeyPrefix+"rl:api:"+c.ID.String(), redis_rate.PerMinute(c.RatePerMinute))
 			if err == nil && res.Allowed == 0 {
 				w.Header().Set("Retry-After", strconvItoa(int(res.RetryAfter.Seconds())+1))
 				problem(w, http.StatusTooManyRequests, "rate limited", "API rate limit exceeded")

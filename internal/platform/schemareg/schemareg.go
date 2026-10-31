@@ -1,7 +1,7 @@
 // Package schemareg registers protobuf schemas with a Confluent-compatible
 // Schema Registry (Redpanda's included) and gates changes on its
 // compatibility check. fbs keeps plain protobuf on the wire (the message
-// type is in the fbs-type record header); the registry documents the
+// type is in the igs-type record header); the registry documents the
 // contract for consumers and rejects changes that would break them.
 package schemareg
 
@@ -330,7 +330,7 @@ func Apply(ctx context.Context, c *Client, files fs.FS, prefix string, topicFile
 			_ = c.DeleteSubject(cctx, temps[i])
 		}
 	}()
-	tmpPrefix := fmt.Sprintf("%sfbs-check-%d.", prefix, time.Now().UnixNano())
+	tmpPrefix := fmt.Sprintf("%sigs-check-%d.", prefix, time.Now().UnixNano())
 	var problems []string
 	for i, n := range nodes {
 		s := n.schema(staged)

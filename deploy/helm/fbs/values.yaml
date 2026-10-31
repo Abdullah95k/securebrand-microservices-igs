@@ -22,8 +22,8 @@ config:
     endpoint: "s3.amazonaws.com"
     use_ssl: true
     region: "eu-west-1"
-    media_bucket: "securebrand-fbs-media"
-    raw_bucket: "securebrand-fbs-raw"
+    media_bucket: "securebrand-igs-media"
+    raw_bucket: "securebrand-igs-raw"
   fb:
     base_url: "https://www.facebook.com"
     identity_rps: 0.33
@@ -155,9 +155,9 @@ components:
       min: 2
       max: 8
       lag:
-        - {group: fbs-crawler-page-p0, topic: fbs.task.page.p0, threshold: 20}
-        - {group: fbs-crawler-page-p1, topic: fbs.task.page.p1, threshold: 200}
-        - {group: fbs-crawler-page-p2, topic: fbs.task.page.p2, threshold: 500}
+        - {group: igs-crawler-page-p0, topic: fbs.task.page.p0, threshold: 20}
+        - {group: igs-crawler-page-p1, topic: fbs.task.page.p1, threshold: 200}
+        - {group: igs-crawler-page-p2, topic: fbs.task.page.p2, threshold: 500}
   crawler-post:
     enabled: true
     browser: true
@@ -170,9 +170,9 @@ components:
       min: 3
       max: 12
       lag:
-        - {group: fbs-crawler-post-p0, topic: fbs.task.post.p0, threshold: 50}
-        - {group: fbs-crawler-post-p1, topic: fbs.task.post.p1, threshold: 500}
-        - {group: fbs-crawler-post-p2, topic: fbs.task.post.p2, threshold: 1000}
+        - {group: igs-crawler-post-p0, topic: fbs.task.post.p0, threshold: 50}
+        - {group: igs-crawler-post-p1, topic: fbs.task.post.p1, threshold: 500}
+        - {group: igs-crawler-post-p2, topic: fbs.task.post.p2, threshold: 1000}
   crawler-thread:
     enabled: true
     browser: true
@@ -185,9 +185,9 @@ components:
       min: 4
       max: 16
       lag:
-        - {group: fbs-crawler-thread-p0, topic: fbs.task.thread.p0, threshold: 100}
-        - {group: fbs-crawler-thread-p1, topic: fbs.task.thread.p1, threshold: 1000}
-        - {group: fbs-crawler-thread-p2, topic: fbs.task.thread.p2, threshold: 2000}
+        - {group: igs-crawler-thread-p0, topic: fbs.task.thread.p0, threshold: 100}
+        - {group: igs-crawler-thread-p1, topic: fbs.task.thread.p1, threshold: 1000}
+        - {group: igs-crawler-thread-p2, topic: fbs.task.thread.p2, threshold: 2000}
   crawler-retry:
     enabled: true
     command: ["/usr/local/bin/fbs-crawler", "--stages", "retry"]
@@ -203,8 +203,8 @@ components:
       min: 2
       max: 6
       lag:
-        - {group: fbs-persister, topic: fb.comment.v1, threshold: 20000}
-        - {group: fbs-persister, topic: fb.post.v1, threshold: 5000}
+        - {group: igs-persister, topic: fb.comment.v1, threshold: 20000}
+        - {group: igs-persister, topic: fb.post.v1, threshold: 5000}
   media-downloader:
     enabled: true
     command: ["/usr/local/bin/fbs-media-downloader"]
@@ -215,7 +215,7 @@ components:
       min: 4
       max: 12
       lag:
-        - {group: fbs-media-downloader, topic: fbs.task.media, threshold: 1000}
+        - {group: igs-media-downloader, topic: fbs.task.media, threshold: 1000}
   media-janitor:
     enabled: true
     command: ["/usr/local/bin/fbs-media-janitor"]

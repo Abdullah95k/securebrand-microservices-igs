@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
 // State is the resume point of one task segment.
@@ -44,7 +46,7 @@ type Store struct {
 func New(r *redis.Client) *Store { return &Store{r: r} }
 
 func ckptKey(lineage string, seq uint32) string {
-	return "ckpt:" + lineage + ":" + strconv.FormatUint(uint64(seq), 10)
+	return redisx.KeyPrefix + "ckpt:" + lineage + ":" + strconv.FormatUint(uint64(seq), 10)
 }
 
 // Load returns the checkpoint of a segment, or ok=false.
@@ -71,13 +73,13 @@ func (s *Store) Save(ctx context.Context, lineage string, seq uint32, st State) 
 
 // IsDone reports whether a task already completed.
 func (s *Store) IsDone(ctx context.Context, taskID string) (bool, error) {
-	n, err := s.r.Exists(ctx, "done:"+taskID).Result()
+	n, err := s.r.Exists(ctx, redisx.KeyPrefix+"done:"+taskID).Result()
 	return n > 0, err
 }
 
 // MarkDone records task completion (7d TTL).
 func (s *Store) MarkDone(ctx context.Context, taskID string) error {
-	return s.r.Set(ctx, "done:"+taskID, "1", 7*24*time.Hour).Err()
+	return s.r.Set(ctx, redisx.KeyPrefix+"done:"+taskID, "1", 7*24*time.Hour).Err()
 }
 
 var extendScript = redis.NewScript(`
@@ -105,7 +107,7 @@ type Lease struct {
 // re-acquire its own lease (redelivery after a crash). The lease is kept
 // alive until Release.
 func (s *Store) Acquire(ctx context.Context, scope, owner string, ttl time.Duration) (*Lease, bool, error) {
-	k := "lease:" + scope
+	k := redisx.KeyPrefix + "lease:" + scope
 	ok, err := s.r.SetNX(ctx, k, owner, ttl).Result()
 	if err != nil {
 		return nil, false, err
@@ -155,7 +157,7 @@ type PostCache struct {
 const cacheTTL = 45 * 24 * time.Hour
 
 func (s *Store) GetPost(ctx context.Context, postID int64) (PostCache, bool) {
-	b, err := s.r.Get(ctx, "pc:"+strconv.FormatInt(postID, 10)).Bytes()
+	b, err := s.r.Get(ctx, redisx.KeyPrefix+"pc:"+strconv.FormatInt(postID, 10)).Bytes()
 	if err != nil {
 		return PostCache{}, false
 	}
@@ -168,12 +170,12 @@ func (s *Store) GetPost(ctx context.Context, postID int64) (PostCache, bool) {
 
 func (s *Store) SetPost(ctx context.Context, postID int64, pc PostCache) error {
 	b, _ := json.Marshal(pc)
-	return s.r.Set(ctx, "pc:"+strconv.FormatInt(postID, 10), b, cacheTTL).Err()
+	return s.r.Set(ctx, redisx.KeyPrefix+"pc:"+strconv.FormatInt(postID, 10), b, cacheTTL).Err()
 }
 
 // GetThread returns the reply count collected last time for a comment.
 func (s *Store) GetThread(ctx context.Context, commentID int64) (int64, bool) {
-	v, err := s.r.Get(ctx, "tc:"+strconv.FormatInt(commentID, 10)).Int64()
+	v, err := s.r.Get(ctx, redisx.KeyPrefix+"tc:"+strconv.FormatInt(commentID, 10)).Int64()
 	if err != nil {
 		return 0, false
 	}
@@ -181,5 +183,5 @@ func (s *Store) GetThread(ctx context.Context, commentID int64) (int64, bool) {
 }
 
 func (s *Store) SetThread(ctx context.Context, commentID, replies int64) error {
-	return s.r.Set(ctx, "tc:"+strconv.FormatInt(commentID, 10), replies, cacheTTL).Err()
+	return s.r.Set(ctx, redisx.KeyPrefix+"tc:"+strconv.FormatInt(commentID, 10), replies, cacheTTL).Err()
 }

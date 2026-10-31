@@ -195,14 +195,14 @@ func Start(t *testing.T, o Options) *Stack {
 	s.Eraser = &gdpr.Eraser{DB: db, S3: s3, Producer: producer}
 	dl := &media.Downloader{DB: db, S3: s3, Bucket: cfg.S3.MediaBucket, Producer: producer, HTTP: media.NewHTTPClient(),
 		TTL: cfg.Media.TTL, MaxBytes: cfg.Media.MaxBytes}
-	dlc, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "fbs-media-downloader",
+	dlc, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "igs-media-downloader",
 		Topics: []string{topics.TaskMedia}, MaxInflight: 16, DrainTimeout: 5 * time.Second}, dl.Handle)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Janitor = &media.Janitor{DB: db, S3: s3, Bucket: cfg.S3.MediaBucket, Producer: producer,
 		RequiredConsumers: cfg.Media.RequiredConsumers, MaxRetryableFailures: 3, TTL: cfg.Media.TTL}
-	jc, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "fbs-media-janitor",
+	jc, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "igs-media-janitor",
 		Topics: []string{topics.MediaProcessd}, MaxInflight: 8, DrainTimeout: 5 * time.Second}, s.Janitor.Handle)
 	if err != nil {
 		t.Fatal(err)

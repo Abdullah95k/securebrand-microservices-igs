@@ -19,8 +19,8 @@ config:
     endpoint: "s3:9000"
     use_ssl: false
     region: "us-east-1"
-    media_bucket: "fbs-media"
-    raw_bucket: "fbs-raw"
+    media_bucket: "igs-media"
+    raw_bucket: "igs-raw"
   fb:
     base_url: "http://fakefb:8090"
     identity_rps: 20

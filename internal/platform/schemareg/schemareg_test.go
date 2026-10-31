@@ -201,7 +201,7 @@ func TestApplyGatesIncompatibleChanges(t *testing.T) {
 	// The checks' temporary subjects are gone.
 	subjects, _ := c.Subjects(ctx)
 	for _, s := range subjects {
-		if strings.HasPrefix(s, prefix+"fbs-check-") {
+		if strings.HasPrefix(s, prefix+"igs-check-") {
 			t.Fatalf("temporary subject left: %s", s)
 		}
 	}
