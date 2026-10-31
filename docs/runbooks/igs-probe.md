@@ -113,8 +113,16 @@ make igs-probe
 This runs the ISP tier only. To also measure the droplet's own IP, run
 `make igs-probe IGS_PROBE_TIERS=direct,isp`.
 
+It prints a line when each profile is done, and on a long grid a line every
+10 pages (about every 30 seconds), for example
+`some_brand: 132 posts so far, back to 2026-10-28`.
+
+To leave it running, close the Terminal window or press **Ctrl-B, then D**.
 If the connection drops, log in again and reattach with `tmux attach -t igs`.
-Ctrl-C stops a run early; it still writes what it read.
+
+**Ctrl-C stops the run.** It still writes what it read; the profile it was
+reading is marked `stopped` (partial), and the summary says the run stopped
+early. A stop is not counted as a wall.
 
 At the end of each tier it prints a short summary, for example:
 

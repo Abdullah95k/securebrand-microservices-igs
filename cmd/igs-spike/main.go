@@ -142,6 +142,9 @@ func runProbe(args []string) int {
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
 		*outDir, bundle, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
+	if s.StoppedEarly {
+		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C) after %d of %d profiles; the last one is partial and counts for no question\n", s.Profiles, len(names))
+	}
 	return 0
 }
 

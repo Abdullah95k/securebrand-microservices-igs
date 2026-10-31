@@ -84,6 +84,7 @@ From the fourth probe run (2026-10-31, after the fixes in #15 and #16):
 - **ISP: everything read.** 5 of 5 profiles, each grid to the 32-page cap (396 posts), comments (10 per post that has any), the newest post's page (likes, comment count, 11 to 12 embedded comments), no wall in 182 queries over 10.5 minutes.
 - **Cost on the wire (ISP, means):** profile page 138 KB, post page 117 KB, grid page 9.4 KB, comments 6.1 KB, profile query 5.3 KB, profile picture 13 KB; 2.7 to 3.5 s per request at 0.3 requests per second.
 - **A fresh ISP identity was walled on its page load** (302 to `/accounts/login`) 3 times out of 4: some of the ISP exits already get the login redirect for page loads. The identity that did load could query freely.
+- **A Ctrl-C read as a wall** (the owner's first start of the full run, 2026-10-31): stopped after one profile, the probe reported `wall:transport` at 48 posts and the grid by id as failed, because the cancelled request looked like a transport failure. The probe now records a stop as `stopped` (the profile marked partial, no question counted, `stopped_early` in the summary) and prints progress every 10 grid pages.
 - **Residential failed every page load** at the transport level (about 3.7 s each), where it had worked in the three runs before. The probe did not record the error text; it does now (credentials redacted). The owner should check the residential proxy (balance, credentials, gateway).
 
 From the M1d-2 to M1d-5a session:
