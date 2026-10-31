@@ -73,7 +73,7 @@ func NewPool(cfg PoolConfig, proxies *proxy.Pool, fps map[string]Fingerprint, f 
 	return p, nil
 }
 
-// Base returns the Facebook base URL.
+// Base returns the platform's base URL.
 func (p *Pool) Base() *url.URL { return p.base }
 
 // Acquire returns an identity on tier for exclusive use. Fresh identities

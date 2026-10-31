@@ -4,8 +4,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 )
 
 // RequestBuilder writes one GraphQL request the way a platform's web client

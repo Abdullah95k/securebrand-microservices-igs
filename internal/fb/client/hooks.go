@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 

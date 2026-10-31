@@ -1,5 +1,6 @@
-// Package graphql builds Facebook web GraphQL requests and decodes their
-// (possibly streamed) responses.
+// Package graphql sends persisted GraphQL queries the way a platform's web
+// client does and decodes their (possibly streamed) responses. A platform
+// supplies its RequestBuilder (Facebook's is in internal/fb/client).
 package graphql
 
 import (

@@ -21,12 +21,12 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/shadow"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 

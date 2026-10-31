@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 )
 
 // FixtureCheck is the parse result of one captured fixture.

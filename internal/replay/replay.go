@@ -21,10 +21,10 @@ import (
 	"github.com/minio/minio-go/v7"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/rawsink"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fixtures"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 )
 
 // ShadowPrefix prefixes the query of shadow-parser captures.

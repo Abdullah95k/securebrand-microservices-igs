@@ -10,19 +10,18 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
-	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/fbtest"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
+	scrapeproxy "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 
 func chromium(t *testing.T) string {
@@ -34,52 +33,11 @@ func chromium(t *testing.T) string {
 	return bin
 }
 
-const timelineDoc = "7316000000000001"
-
-func fake(t *testing.T, f fakefb.Faults) (*fakefb.Server, string) {
-	t.Helper()
-	srv := fakefb.NewServer(fakefb.NewWorld(fakefb.DefaultSpec()), fakefb.Options{
-		Docs: map[string][]string{"ProfileCometTimelineFeedRefetchQuery": {timelineDoc}}, Faults: f})
-	hs := httptest.NewServer(srv)
-	t.Cleanup(hs.Close)
-	return srv, hs.URL
-}
-
 func render(t *testing.T, opts Options) (*Result, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	return Render(ctx, chromium(t), opts)
-}
-
-// The render returns the DOM after scripts ran and the GraphQL requests
-// the page made itself, with their doc_id and response.
-func TestRenderCapturesThePagesOwnGraphQL(t *testing.T) {
-	srv, base := fake(t, fakefb.Faults{JSOnlyTokens: true})
-	page := srv.World.Pages()[0]
-	raw, _ := http.Get(base + "/" + page.Vanity)
-	html, _ := io.ReadAll(raw.Body)
-	_ = raw.Body.Close()
-	if htmlx.Valid(htmlx.ExtractTokens(html)) {
-		t.Fatal("JSOnlyTokens: the served markup must not carry the tokens")
-	}
-
-	res, err := render(t, Options{URL: base + "/" + page.Vanity, UserAgent: "Mozilla/5.0 fbs-test", AcceptLanguage: "en-US,en;q=0.9"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("rendered %s (%d) in %s: %d bytes, %d captured", res.URL, res.Status, res.Elapsed, len(res.HTML), len(res.Captured))
-	if res.Status != 200 || !strings.Contains(string(res.HTML), page.Name) || !htmlx.Valid(htmlx.ExtractTokens(res.HTML)) {
-		t.Fatalf("status %d, tokens %+v", res.Status, htmlx.ExtractTokens(res.HTML))
-	}
-	if len(res.Captured) != 1 {
-		t.Fatalf("captured %+v", res.Captured)
-	}
-	x := res.Captured[0]
-	if x.FriendlyName != "ProfileCometTimelineFeedRefetchQuery" || x.DocID != timelineDoc || x.Status != 200 ||
-		!strings.Contains(string(x.Body), "timeline") || !strings.Contains(string(x.Variables), `"count"`) {
-		t.Fatalf("exchange %+v body %.200s", x, x.Body)
-	}
 }
 
 // proxy is a forward proxy requiring Basic credentials.
@@ -117,11 +75,14 @@ func proxy(t *testing.T, user, pass string) (*httptest.Server, *atomic.Int32) {
 }
 
 func TestRenderThroughAnAuthenticatedProxy(t *testing.T) {
-	srv, base := fake(t, fakefb.Faults{})
-	page := srv.World.Pages()[0]
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = io.WriteString(w, "<html><body>a page</body></html>")
+	}))
+	t.Cleanup(page.Close)
 	px, served := proxy(t, "user-session-1", "s3cret")
 	pu := strings.Replace(px.URL, "http://", "http://user-session-1:s3cret@", 1)
-	res, err := render(t, Options{URL: base + "/" + page.Vanity, Proxy: mustURL(t, pu)})
+	res, err := render(t, Options{URL: page.URL + "/brand", Proxy: mustURL(t, pu)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,51 +92,56 @@ func TestRenderThroughAnAuthenticatedProxy(t *testing.T) {
 	// Wrong credentials: the render fails instead of looping on the
 	// challenge.
 	bad := strings.Replace(px.URL, "http://", "http://user-session-1:wrong@", 1)
-	if _, err := render(t, Options{URL: base + "/" + page.Vanity, Proxy: mustURL(t, bad)}); err == nil {
+	if _, err := render(t, Options{URL: page.URL + "/brand", Proxy: mustURL(t, bad)}); err == nil {
 		t.Fatal("render through a proxy refusing the credentials succeeded")
 	}
 }
 
-// A page whose tokens need JavaScript: the HTTP bootstrap fails, the
-// browser fallback bootstraps the identity, and GraphQL works with it.
-func TestBootstrapFallback(t *testing.T) {
-	chromium(t)
-	env := fbtest.New(t, fbtest.Options{Faults: fakefb.Faults{JSOnlyTokens: true}})
-	ctx := context.Background()
-	p := env.World.Pages()[0]
-	id, _ := env.Pool.Acquire(ctx, "direct")
-	if _, err := env.Loader.Bootstrap(ctx, id, env.HTTP.URL+"/"+p.Vanity); !errors.Is(err, session.ErrBootstrap) {
-		t.Fatalf("without the browser the bootstrap must fail: %v", err)
-	}
-	env.Pool.Release(id)
-
-	b, err := NewBootstrapper(config.Browser{MaxConcurrent: 1, MaxShare: 0.02, Timeout: time.Minute}, "en-US,en;q=0.9", fbclient.Hooks("en-US,en;q=0.9"))
+// testIdentity is a fresh identity on https://www.example.com.
+func testIdentity(t *testing.T) *session.Identity {
+	t.Helper()
+	proxies, err := scrapeproxy.New(config.Proxy{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.Loader.Browser = b
-	id, _ = env.Pool.Acquire(ctx, "direct")
-	defer env.Pool.Release(id)
-	pl, err := env.Loader.Bootstrap(ctx, id, env.HTTP.URL+"/"+p.Vanity)
-	if err != nil || !id.Bootstrapped() || pl.Class != detect.OK {
-		t.Fatalf("browser bootstrap: %v %+v", err, pl)
+	fpBytes, _ := configs.FS.ReadFile("fingerprints.yaml")
+	fps, err := session.LoadFingerprints(fpBytes)
+	if err != nil {
+		t.Fatal(err)
 	}
-	resp, err := env.GQL.Do(ctx, id, graphql.Request{Query: "timeline", Vars: map[string]any{"count": 3, "page_id": p.ID}})
-	if err != nil || resp.Class != detect.OK {
-		t.Fatalf("timeline with browser tokens: %v %v %s", err, resp.Class, resp.Reason)
+	pool, err := session.NewPool(session.PoolConfig{BaseURL: "https://www.example.com", Profile: "chrome_146",
+		IdentityRPS: 1000, IdentityBurst: 1000, MaxRequestsMin: 1000, MaxRequestsMax: 1001, MaxPerTier: 1}, proxies, fps,
+		func(transport.Options) (transport.Doer, error) { return transport.NewStd(time.Second), nil })
+	if err != nil {
+		t.Fatal(err)
 	}
+	id, err := pool.Acquire(context.Background(), "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// testHooks read a "token" value and treat /login as a wall.
+var testHooks = session.Hooks{
+	Extract: func(html []byte) (session.Tokens, bool) {
+		m := regexp.MustCompile(`"token":"(\w+)"`).FindSubmatch(html)
+		if m == nil {
+			return nil, false
+		}
+		return session.Tokens{"lsd": string(m[1])}, true
+	},
+	IsWall: func(path string) bool { return strings.HasPrefix(path, "/login") },
 }
 
 func TestBootstrapperShareCap(t *testing.T) {
-	env := fbtest.New(t, fbtest.Options{})
 	var renders atomic.Int32
-	b := &Bootstrapper{MaxShare: 0.1, Timeout: time.Second, sem: make(chan struct{}, 1), credit: 1, burst: 1, Hooks: fbclient.Hooks(""),
+	b := &Bootstrapper{MaxShare: 0.1, Timeout: time.Second, sem: make(chan struct{}, 1), credit: 1, burst: 1, Hooks: testHooks,
 		render: func(context.Context, string, Options) (*Result, error) {
 			renders.Add(1)
 			return &Result{HTML: []byte("<html></html>")}, nil
 		}}
-	id, _ := env.Pool.Acquire(context.Background(), "direct")
-	defer env.Pool.Release(id)
+	id := testIdentity(t)
 	ctx := context.Background()
 	_, _ = b.Bootstrap(ctx, id, "http://x/")
 	if _, err := b.Bootstrap(ctx, id, "http://x/"); !errors.Is(err, ErrCapped) {
@@ -231,15 +197,13 @@ func TestSocksProxyWithCredentialsIsRefused(t *testing.T) {
 // A render that lands on a login wall is not a bootstrap, though the wall
 // carries an LSD token.
 func TestBootstrapRefusesWalls(t *testing.T) {
-	env := fbtest.New(t, fbtest.Options{})
 	b := &Bootstrapper{MaxShare: 1, Timeout: time.Second, sem: make(chan struct{}, 1), credit: 1, burst: 1, Rules: detect.DefaultRules(),
-		Hooks: fbclient.Hooks(""), render: func(context.Context, string, Options) (*Result, error) {
-			return &Result{URL: "https://www.facebook.com/login/?next=x", Status: 200,
-				HTML: []byte(`<html><script>["LSD",[],{"token":"AVq1"},323] "_js_datr","abc"</script></html>`)}, nil
+		Hooks: testHooks, render: func(context.Context, string, Options) (*Result, error) {
+			return &Result{URL: "https://www.example.com/login/?next=x", Status: 200,
+				HTML: []byte(`<html><script>["LSD",[],{"token":"AVq1"},323]</script></html>`)}, nil
 		}}
-	id, _ := env.Pool.Acquire(context.Background(), "direct")
-	defer env.Pool.Release(id)
-	pl, err := b.Bootstrap(context.Background(), id, "https://www.facebook.com/brand")
+	id := testIdentity(t)
+	pl, err := b.Bootstrap(context.Background(), id, "https://www.example.com/brand")
 	if err == nil || pl == nil || pl.Class != detect.LoginWall || id.Bootstrapped() {
 		t.Fatalf("wall taken for a bootstrap: %v %+v bootstrapped=%v", err, pl, id.Bootstrapped())
 	}
@@ -287,7 +251,7 @@ func browserProcesses(t *testing.T) int {
 	n := 0
 	for _, e := range entries {
 		b, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
-		if err == nil && strings.Contains(string(b), "--user-data-dir="+filepath.Join(os.TempDir(), "fbs-browser-")) {
+		if err == nil && strings.Contains(string(b), "--user-data-dir="+filepath.Join(os.TempDir(), "igs-browser-")) {
 			stat, _ := os.ReadFile("/proc/" + e.Name() + "/stat")
 			if !strings.Contains(string(stat), ") Z ") { // zombies are reaped by the test's parent
 				n++

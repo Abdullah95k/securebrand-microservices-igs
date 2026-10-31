@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fixtures"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/docids"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 )
 
 // Capture records real responses of one page as parser fixtures under
