@@ -452,7 +452,8 @@ func newStack(cfg *config.Config, f flags) (spike.Stack, error) {
 		Loader: &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage},
 		HTTP:   media.NewHTTPClient(),
 		NewGQL: func(s registry.Seed) *graphql.Client {
-			return &graphql.Client{Registry: registry.NewStatic(s), Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale}
+			return &graphql.Client{Registry: registry.NewStatic(s), Rules: rules,
+				Builder: graphql.FacebookBuilder{AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale}}
 		},
 	}, nil
 }

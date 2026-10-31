@@ -11,32 +11,16 @@ import (
 	scrapehtml "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/htmlx"
 )
 
-// Tokens are the request parameters a logged-out web client sends with
-// every GraphQL call. Field names follow Facebook's form keys.
-type Tokens struct {
-	LSD          string `json:"lsd,omitempty"`
-	DTSG         string `json:"fb_dtsg,omitempty"`
-	JSDatr       string `json:"js_datr,omitempty"`
-	SpinR        string `json:"__spin_r,omitempty"`
-	SpinB        string `json:"__spin_b,omitempty"`
-	SpinT        string `json:"__spin_t,omitempty"`
-	HSI          string `json:"__hsi,omitempty"`
-	Rev          string `json:"__rev,omitempty"`
-	HasteSession string `json:"__hs,omitempty"`
-	CometReq     string `json:"__comet_req,omitempty"`
-	ConsentWall  bool   `json:"consent_wall,omitempty"`
-}
-
-// Valid reports whether the minimum token set for GraphQL calls is present.
-func (t Tokens) Valid() bool { return t.LSD != "" }
+// Valid reports whether tokens hold the minimum for GraphQL calls (an lsd).
+func Valid(tok map[string]string) bool { return tok["lsd"] != "" }
 
 // Jazoest computes Facebook's jazoest checksum: "2" followed by the sum of
 // the character codes of the CSRF token (fb_dtsg when present, else lsd).
 // Verify against real traffic in Phase 0.
-func (t Tokens) Jazoest() string {
-	src := t.DTSG
+func Jazoest(tok map[string]string) string {
+	src := tok["fb_dtsg"]
 	if src == "" {
-		src = t.LSD
+		src = tok["lsd"]
 	}
 	sum := 0
 	for _, r := range src {
@@ -46,8 +30,8 @@ func (t Tokens) Jazoest() string {
 }
 
 // Several candidate patterns per token, tried in order, keyed by the form
-// field each token is sent as (the Tokens JSON names). Facebook moves these
-// around; unknown layouts show up as missing tokens in bootstrap metrics.
+// field each token is sent as. Facebook moves these around; unknown layouts
+// show up as missing tokens in bootstrap metrics.
 var patterns = []scrapehtml.Pattern{
 	{Key: "lsd", Re: regexp.MustCompile(`\["LSD",\[\],\{"token":"([^"]+)"`)},
 	{Key: "lsd", Re: regexp.MustCompile(`"LSD"\s*:\s*\{\s*"token"\s*:\s*"([^"]+)"`)},
@@ -67,16 +51,15 @@ var patterns = []scrapehtml.Pattern{
 
 var consentMarkers = [][]byte{[]byte(`"cookie_consent_dialog"`), []byte(`data-cookiebanner=`), []byte(`/cookie/consent/`)}
 
-// ExtractTokens scans html for every known token pattern.
-func ExtractTokens(html []byte) Tokens {
-	v := scrapehtml.Extract(html, patterns)
-	return Tokens{
-		LSD: v["lsd"], DTSG: v["fb_dtsg"], JSDatr: v["js_datr"],
-		SpinR: v["__spin_r"], SpinB: v["__spin_b"], SpinT: v["__spin_t"],
-		HSI: v["__hsi"], Rev: v["__rev"], HasteSession: v["__hs"], CometReq: v["__comet_req"],
-		ConsentWall: scrapehtml.ContainsAny(html, consentMarkers),
-	}
+// ExtractTokens scans html for every known token pattern and returns the
+// tokens found, keyed by the form field each is sent as (js_datr is the
+// value of the datr cookie).
+func ExtractTokens(html []byte) map[string]string {
+	return scrapehtml.Extract(html, patterns)
 }
+
+// ConsentWall reports whether html shows the cookie-consent wall.
+func ConsentWall(html []byte) bool { return scrapehtml.ContainsAny(html, consentMarkers) }
 
 // The page's id, the profile's first. A page made in the new Pages
 // experience is a profile (typed User) beside an older Page object with an

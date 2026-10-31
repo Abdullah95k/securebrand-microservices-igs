@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math/big"
 	"net/url"
 	"strconv"
@@ -22,6 +23,11 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 )
 
+// Tokens are the values a page hands its web client for later requests,
+// keyed by the form field each is sent as (Facebook: lsd, fb_dtsg,
+// __spin_r, ...; js_datr is the datr cookie's value).
+type Tokens map[string]string
+
 // Identity is used by one task at a time (see Pool.Acquire).
 type Identity struct {
 	ID       string
@@ -31,7 +37,7 @@ type Identity struct {
 	Base     *url.URL
 
 	mu           sync.Mutex
-	tokens       htmlx.Tokens
+	tokens       Tokens
 	bootstrapped time.Time
 	health       float64
 	consecBlocks int
@@ -61,17 +67,17 @@ func newIdentity(id string, ep proxy.Endpoint, fp Fingerprint, d transport.Doer,
 	}
 }
 
-// Tokens returns the current token bundle.
-func (id *Identity) Tokens() htmlx.Tokens {
+// Tokens returns a copy of the current token bundle.
+func (id *Identity) Tokens() Tokens {
 	id.mu.Lock()
 	defer id.mu.Unlock()
-	return id.tokens
+	return maps.Clone(id.tokens)
 }
 
 // SetTokens installs freshly extracted tokens.
-func (id *Identity) SetTokens(t htmlx.Tokens) {
+func (id *Identity) SetTokens(t Tokens) {
 	id.mu.Lock()
-	id.tokens = t
+	id.tokens = maps.Clone(t)
 	id.bootstrapped = time.Now()
 	id.mu.Unlock()
 }
@@ -80,7 +86,7 @@ func (id *Identity) SetTokens(t htmlx.Tokens) {
 func (id *Identity) Bootstrapped() bool {
 	id.mu.Lock()
 	defer id.mu.Unlock()
-	return id.tokens.Valid()
+	return htmlx.Valid(id.tokens)
 }
 
 // NextReq returns the next __req value (base36 counter).
@@ -186,7 +192,7 @@ type Snapshot struct {
 	Expires   time.Time         `json:"expires"`
 	Profile   string            `json:"profile"`
 	Cookies   map[string]string `json:"cookies"`
-	Tokens    htmlx.Tokens      `json:"tokens"`
+	Tokens    Tokens            `json:"tokens"`
 }
 
 func (id *Identity) Snapshot() ([]byte, error) {

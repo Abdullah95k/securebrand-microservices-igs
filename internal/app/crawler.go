@@ -109,7 +109,7 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 	gql := &graphql.Client{
 		Registry: reg, Rules: rules, Limiter: ratelimit.NewRedis(rdb),
 		PageRPS: cfg.FB.PageRPS, PageRPSFast: cfg.FB.PageRPSP0, GlobalRPS: cfg.FB.GlobalRPS,
-		AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale,
+		Builder:  graphql.FacebookBuilder{AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale},
 		Breakers: breaker.New(cfg.FB.QueryBreaker),
 	}
 	gql.Breakers.OnChange = func(key string, from, to breaker.State) {

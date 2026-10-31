@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tidwall/gjson"
@@ -58,16 +56,16 @@ type Response struct {
 
 // Client sends GraphQL requests on behalf of identities.
 type Client struct {
-	Registry       registry.Registry
-	Rules          detect.Rules
-	Limiter        ratelimit.Limiter
-	PageRPS        int
-	PageRPSFast    int
-	GlobalRPS      int
-	AcceptLanguage string
-	Locale         string
-	Raw            RawSink
-	CaptureAll     bool
+	Registry    registry.Registry
+	Rules       detect.Rules
+	Limiter     ratelimit.Limiter
+	PageRPS     int
+	PageRPSFast int
+	GlobalRPS   int
+	// Builder writes the platform's request (FacebookBuilder for fbs).
+	Builder    RequestBuilder
+	Raw        RawSink
+	CaptureAll bool
 	// Ceiling, when set, replaces GlobalRPS with the fleet ceiling AIMD
 	// publishes; Outcomes receives every response (class, lane, wire
 	// bytes) for AIMD and the traffic budget.
@@ -100,10 +98,6 @@ func (c *Client) Parsed(resp *Response, ok bool) {
 		c.Raw.Capture(context.Background(), resp.Query.Name, detect.SchemaDrift, resp.Body, resp.Vars)
 	}
 }
-
-// DefaultEndpoint is the request path of a query whose registry entry names
-// none.
-const DefaultEndpoint = "/api/graphql/"
 
 // withHeaders applies a query's headers to the client's list: a name already
 // in the list takes the query's value in place, so the browser's header
@@ -167,41 +161,21 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 	if err := c.pace(ctx, id, req); err != nil {
 		return nil, err
 	}
-	tok := id.Tokens()
-	params := c.Registry.ClientParams()
-	body := encodeForm(c.form(id, tok, params, q, vars))
-	path := q.Endpoint
-	if path == "" {
-		path = DefaultEndpoint
+	referer := req.Referer
+	if referer == "" {
+		referer = id.Base.String()
+	}
+	b := c.Builder.Build(id, q, vars, c.Registry.ClientParams(), referer)
+	path := b.Path
+	if q.Endpoint != "" {
+		path = q.Endpoint
 	}
 	endpoint, err := id.Base.Parse(path)
 	if err != nil {
 		return nil, fmt.Errorf("graphql: %s endpoint: %w", q.Name, err)
 	}
-	referer := req.Referer
-	if referer == "" {
-		referer = id.Base.String()
-	}
-	hdr := [][2]string{
-		{"sec-ch-ua-platform", id.FP.SecChUaPlatform},
-		{"x-fb-lsd", tok.LSD},
-		{"sec-ch-ua", id.FP.SecChUa},
-		{"sec-ch-ua-mobile", id.FP.SecChUaMobile},
-		{"x-fb-friendly-name", q.FriendlyName},
-		{"x-asbd-id", params["x_asbd_id"]},
-		{"user-agent", id.FP.UserAgent},
-		{"content-type", "application/x-www-form-urlencoded"},
-		{"accept", "*/*"},
-		{"origin", id.Base.Scheme + "://" + id.Base.Host},
-		{"sec-fetch-site", "same-origin"},
-		{"sec-fetch-mode", "cors"},
-		{"sec-fetch-dest", "empty"},
-		{"referer", referer},
-		{"accept-encoding", "gzip, deflate, br, zstd"},
-		{"accept-language", c.AcceptLanguage},
-		{"priority", "u=1, i"},
-	}
-	hdr = withHeaders(hdr, q.Headers)
+	body := b.Body
+	hdr := withHeaders(b.Header, q.Headers)
 	start := time.Now()
 	tr, err := id.Doer.Do(ctx, &transport.Request{Method: "POST", URL: endpoint.String(), Header: hdr, Body: body})
 	elapsed := time.Since(start)
@@ -265,63 +239,4 @@ func (c *Client) pace(ctx context.Context, id *session.Identity, req Request) er
 		}
 	}
 	return c.Limiter.Wait(ctx, "global", global)
-}
-
-type kv struct{ k, v string }
-
-// form builds the POST body in the order a browser sends it.
-func (c *Client) form(id *session.Identity, tok htmlTokens, params map[string]string, q registry.Query, vars []byte) []kv {
-	cometReq := params["__comet_req"]
-	if tok.CometReq != "" {
-		cometReq = tok.CometReq
-	}
-	f := []kv{
-		{"av", "0"},
-		{"__aaid", "0"},
-		{"__user", "0"},
-		{"__a", params["__a"]},
-		{"__req", id.NextReq()},
-		{"__hs", tok.HasteSession},
-		{"dpr", params["dpr"]},
-		{"__ccg", params["__ccg"]},
-		{"__rev", tok.Rev},
-		{"__s", id.SessionParam()},
-		{"__hsi", tok.HSI},
-		{"__comet_req", cometReq},
-	}
-	if c.Locale != "" {
-		f = append(f, kv{"locale", c.Locale})
-	}
-	if tok.DTSG != "" {
-		f = append(f, kv{"fb_dtsg", tok.DTSG})
-	}
-	f = append(f,
-		kv{"lsd", tok.LSD},
-		kv{"jazoest", tok.Jazoest()},
-		kv{"__spin_r", tok.SpinR},
-		kv{"__spin_b", tok.SpinB},
-		kv{"__spin_t", tok.SpinT},
-		kv{"fb_api_caller_class", params["fb_api_caller_class"]},
-		kv{"fb_api_req_friendly_name", q.FriendlyName},
-		kv{"variables", string(vars)},
-		kv{"server_timestamps", params["server_timestamps"]},
-		kv{"doc_id", q.DocID},
-	)
-	return f
-}
-
-func encodeForm(f []kv) []byte {
-	var b strings.Builder
-	for i, p := range f {
-		if p.v == "" && p.k != "variables" {
-			continue
-		}
-		if i > 0 && b.Len() > 0 {
-			b.WriteByte('&')
-		}
-		b.WriteString(url.QueryEscape(p.k))
-		b.WriteByte('=')
-		b.WriteString(url.QueryEscape(p.v))
-	}
-	return []byte(b.String())
 }

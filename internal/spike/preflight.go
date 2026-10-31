@@ -237,13 +237,13 @@ func preflightLoad(ctx context.Context, res *PreflightResult, d PreflightDeps, o
 	}
 	tok := htmlx.ExtractTokens(pl.HTML)
 	var missing []string
-	for k, ok := range map[string]bool{"lsd": tok.LSD != "", "spin_r": tok.SpinR != "", "hsi": tok.HSI != ""} {
+	for k, ok := range map[string]bool{"lsd": tok["lsd"] != "", "spin_r": tok["__spin_r"] != "", "hsi": tok["__hsi"] != ""} {
 		if !ok {
 			missing = append(missing, k)
 		}
 	}
 	detail := fmt.Sprintf("%s: class %s, status %d, %d ms, %s on the wire", ref, pl.Class, pl.Status, ms, human(float64(pl.Bytes)))
-	if tok.ConsentWall {
+	if htmlx.ConsentWall(pl.HTML) {
 		detail += ", consent wall shown"
 	}
 	switch {

@@ -133,10 +133,10 @@ func (b *Bootstrapper) Bootstrap(ctx context.Context, id *session.Identity, rawU
 		id.Doer.SetCookie(id.Base, c.Name, c.Value)
 	}
 	tok := htmlx.ExtractTokens(res.HTML)
-	if tok.JSDatr != "" && id.Doer.Cookie(id.Base, "datr") == "" {
-		id.Doer.SetCookie(id.Base, "datr", tok.JSDatr)
+	if tok["js_datr"] != "" && id.Doer.Cookie(id.Base, "datr") == "" {
+		id.Doer.SetCookie(id.Base, "datr", tok["js_datr"])
 	}
-	if !tok.Valid() {
+	if !htmlx.Valid(tok) {
 		metrics.Bootstraps.WithLabelValues("browser", "no_tokens").Inc()
 		session.Outcome(id, detect.SoftError)
 		pl.Class, pl.Reason = detect.SoftError, "no tokens after a browser render"

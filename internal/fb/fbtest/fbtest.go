@@ -99,6 +99,6 @@ func New(t testing.TB, o Options) *Env {
 	return &Env{
 		World: w, Fake: fs, HTTP: hs, Registry: reg, Pool: pool,
 		Loader: &session.Loader{Rules: rules, AcceptLanguage: "en-US,en;q=0.9"},
-		GQL:    &graphql.Client{Registry: reg, Rules: rules, AcceptLanguage: "en-US,en;q=0.9"},
+		GQL:    &graphql.Client{Registry: reg, Rules: rules, Builder: graphql.FacebookBuilder{AcceptLanguage: "en-US,en;q=0.9"}},
 	}
 }
