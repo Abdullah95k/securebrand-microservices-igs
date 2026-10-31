@@ -8,6 +8,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
 )
 
 // Version of the timeline parser, recorded in Observation.parser_version.
@@ -22,7 +23,7 @@ type PostBundle struct {
 // TimelineResult is one parsed timeline page.
 type TimelineResult struct {
 	Posts    []PostBundle
-	PageInfo PageInfo
+	PageInfo walk.PageInfo
 	NodeNull bool
 	// NoFeed: the node has no feed at all, which is not an empty timeline.
 	// The id named something without a timeline (a new-style page's older
@@ -36,10 +37,10 @@ var timelineConnections = []string{"timeline_list_feed_units", "timeline_feed_un
 // Timeline parses a timeline pagination response.
 func Timeline(parts []gjson.Result, pageID int64, baseURL string) (TimelineResult, Report) {
 	var rep Report
-	res := TimelineResult{PageInfo: FindPageInfo(parts, timelineConnections, "Story")}
-	nodes := Collect(parts, append([]string{"Story", "Comment", "Feedback"}, mediaTypenames...)...)
+	res := TimelineResult{PageInfo: walk.FindPageInfo(parts, timelineConnections, "Story")}
+	nodes := walk.Collect(parts, append([]string{"Story", "Comment", "Feedback"}, mediaTypenames...)...)
 	for _, n := range nodes {
-		if n.Typename != "Story" || n.Ancestor("Story") != nil {
+		if n.Kind != "Story" || n.Ancestor("Story") != nil {
 			continue
 		}
 		b, r := story(n, nodes, pageID, baseURL)
@@ -55,7 +56,7 @@ func Timeline(parts []gjson.Result, pageID int64, baseURL string) (TimelineResul
 		res.NoFeed = true
 	}
 	if !res.PageInfo.Found && len(res.Posts) > 0 {
-		rep.optional("page_info")
+		rep.AddOptional("page_info")
 	}
 	return res, rep
 }
@@ -63,7 +64,7 @@ func Timeline(parts []gjson.Result, pageID int64, baseURL string) (TimelineResul
 func hasFeed(parts []gjson.Result) bool {
 	for _, p := range parts {
 		for _, c := range timelineConnections {
-			if Find(p, c, "Story").Exists() {
+			if walk.Find(p, c, "Story").Exists() {
 				return true
 			}
 		}
@@ -87,28 +88,28 @@ func allNodesNull(parts []gjson.Result) bool {
 	return true
 }
 
-func story(n *Node, all []*Node, pageID int64, baseURL string) (PostBundle, Report) {
+func story(n *walk.Node, all []*walk.Node, pageID int64, baseURL string) (PostBundle, Report) {
 	var rep Report
 	v := n.V
 	skip := []string{"Story", "Comment"}
 
-	postID := Int64(v.Get("post_id"))
+	postID := walk.Int64(v.Get("post_id"))
 	if postID == 0 {
 		postID = PostIDFromStoryID(v.Get("id").String())
 	}
 	if postID == 0 {
-		postID = Int64(Find(v, "post_id", skip...))
+		postID = walk.Int64(walk.Find(v, "post_id", skip...))
 	}
 	if postID == 0 {
-		rep.missing("story.post_id")
+		rep.AddMissing("story.post_id")
 		return PostBundle{}, rep
 	}
-	created := Unix(First(v, "creation_time", "comet_sections.context_layout.story.comet_sections.metadata.0.story.creation_time"))
+	created := walk.Unix(walk.First(v, "creation_time", "comet_sections.context_layout.story.comet_sections.metadata.0.story.creation_time"))
 	if created == nil {
-		created = Unix(Find(v, "creation_time", skip...))
+		created = walk.Unix(walk.Find(v, "creation_time", skip...))
 	}
 	if created == nil {
-		rep.missing("story.creation_time")
+		rep.AddMissing("story.creation_time")
 		return PostBundle{}, rep
 	}
 
@@ -119,19 +120,19 @@ func story(n *Node, all []*Node, pageID int64, baseURL string) (PostBundle, Repo
 		StoryId:   v.Get("id").String(),
 		Status:    fbv1.PostStatus_POST_STATUS_VISIBLE,
 	}
-	p.Permalink = First(v, "permalink_url", "url", "comet_sections.context_layout.story.comet_sections.metadata.0.story.url").String()
+	p.Permalink = walk.First(v, "permalink_url", "url", "comet_sections.context_layout.story.comet_sections.metadata.0.story.url").String()
 	if p.Permalink == "" {
-		p.Permalink = Find(v, "permalink_url", skip...).String()
+		p.Permalink = walk.Find(v, "permalink_url", skip...).String()
 	}
 	if p.Permalink == "" {
-		rep.optional("story.permalink")
+		rep.AddOptional("story.permalink")
 		p.Permalink = strings.TrimRight(baseURL, "/") + "/" + strconv.FormatInt(pageID, 10) + "/posts/" + strconv.FormatInt(postID, 10)
 	}
 
 	hasText := func(r gjson.Result) bool { return r.Get("text").Exists() }
-	msg := First(v, "message", "comet_sections.content.story.message")
+	msg := walk.First(v, "message", "comet_sections.content.story.message")
 	if !hasText(msg) {
-		msg = FindWhere(v, "message", hasText, skip...)
+		msg = walk.FindWhere(v, "message", hasText, skip...)
 	}
 	if msg.IsObject() {
 		p.Text = msg.Get("text").String()
@@ -141,7 +142,7 @@ func story(n *Node, all []*Node, pageID int64, baseURL string) (PostBundle, Repo
 	}
 	p.Hashtags = Hashtags(p.Text, p.TextRanges)
 
-	if actor := First(v, "actors.0", "comet_sections.context_layout.story.comet_sections.actor_photo.story.actors.0"); actor.Exists() {
+	if actor := walk.First(v, "actors.0", "comet_sections.context_layout.story.comet_sections.actor_photo.story.actors.0"); actor.Exists() {
 		p.AuthorId = actor.Get("id").String()
 		p.AuthorName = actor.Get("name").String()
 	}
@@ -149,49 +150,49 @@ func story(n *Node, all []*Node, pageID int64, baseURL string) (PostBundle, Repo
 	// Feedback: merge every Feedback node owned by this story.
 	var fbs []gjson.Result
 	for _, x := range all {
-		if x.Typename == "Feedback" && x.Ancestor("Story", "Comment") == n {
+		if x.Kind == "Feedback" && x.Ancestor("Story", "Comment") == n {
 			fbs = append(fbs, x.V)
 		}
 	}
 	if len(fbs) == 0 {
-		if f := Find(v, "feedback", skip...); f.IsObject() {
+		if f := walk.Find(v, "feedback", skip...); f.IsObject() {
 			fbs = append(fbs, f)
 		}
 	}
 	applyFeedback(p, fbs, &rep)
 	if p.ViewCount == nil {
-		if vc := First(v, "video_view_count", "play_count"); vc.Exists() {
-			c := Int64(vc)
+		if vc := walk.First(v, "video_view_count", "play_count"); vc.Exists() {
+			c := walk.Int64(vc)
 			p.ViewCount = &c
-		} else if vc := Find(v, "play_count", skip...); vc.Exists() {
-			c := Int64(vc)
+		} else if vc := walk.Find(v, "play_count", skip...); vc.Exists() {
+			c := walk.Int64(vc)
 			p.ViewCount = &c
 		}
 	}
 
 	// Shared post.
 	for _, x := range all {
-		if x.Typename == "Story" && x.Parent == n {
-			sid := Int64(x.V.Get("post_id"))
+		if x.Kind == "Story" && x.Parent == n {
+			sid := walk.Int64(x.V.Get("post_id"))
 			if sid == 0 {
 				sid = PostIDFromStoryID(x.V.Get("id").String())
 			}
 			if sid != 0 {
 				p.SharedPostId = &sid
 			}
-			p.SharedPostUrl = First(x.V, "permalink_url", "url").String()
+			p.SharedPostUrl = walk.First(x.V, "permalink_url", "url").String()
 			break
 		}
 	}
 
-	if pin := Find(v, "is_pinned", skip...); pin.Exists() {
+	if pin := walk.Find(v, "is_pinned", skip...); pin.Exists() {
 		b := pin.Bool()
 		p.IsPinned = &b
 	}
-	if paid := Find(v, "is_paid_partnership", skip...); paid.Exists() && paid.Bool() {
+	if paid := walk.Find(v, "is_paid_partnership", skip...); paid.Exists() && paid.Bool() {
 		t := true
 		p.IsPaidPartnership = &t
-	} else if bc := Find(v, "branded_content_post_info", skip...); bc.IsObject() {
+	} else if bc := walk.Find(v, "branded_content_post_info", skip...); bc.IsObject() {
 		t := true
 		p.IsPaidPartnership = &t
 	}
@@ -202,23 +203,23 @@ func story(n *Node, all []*Node, pageID int64, baseURL string) (PostBundle, Repo
 	var media []*fbv1.Media
 	photos, videos := 0, 0
 	for _, x := range all {
-		if !isMedia(x.Typename) || x.Ancestor("Story", "Comment") != n {
+		if !isMedia(x.Kind) || x.Ancestor("Story", "Comment") != n {
 			continue
 		}
-		switch x.Typename {
+		switch x.Kind {
 		case "Photo":
 			photos++
 		case "Video":
 			videos++
 		}
-		for _, m := range MediaFromNode(x.V, x.Typename, owner) {
+		for _, m := range MediaFromNode(x.V, x.Kind, owner) {
 			media = append(media, m)
 			if m.Variant == "original" || m.Variant == "sd" || m.Variant == "link_preview" {
 				p.MediaIds = append(p.MediaIds, m.MediaId)
 			}
 		}
 	}
-	for _, att := range FindAll(v, "attachments", skip...) {
+	for _, att := range walk.FindAll(v, "attachments", skip...) {
 		att.ForEach(func(_, a gjson.Result) bool {
 			if l := linkAttachment(a); l != nil {
 				p.Links = append(p.Links, l)
@@ -233,7 +234,7 @@ func story(n *Node, all []*Node, pageID int64, baseURL string) (PostBundle, Repo
 
 func applyFeedback(p *fbv1.Post, fbs []gjson.Result, rep *Report) {
 	if len(fbs) == 0 {
-		rep.optional("story.feedback")
+		rep.AddOptional("story.feedback")
 		return
 	}
 	for _, fb := range fbs {
@@ -241,46 +242,46 @@ func applyFeedback(p *fbv1.Post, fbs []gjson.Result, rep *Report) {
 			p.FeedbackId = fb.Get("id").String()
 		}
 		if p.Reactions == nil || p.Reactions.Total == 0 {
-			if r := Reactions(fb); r.Total > 0 || First(fb, "reaction_count", "reactors").Exists() {
+			if r := Reactions(fb); r.Total > 0 || walk.First(fb, "reaction_count", "reactors").Exists() {
 				p.Reactions = r
 			}
 		}
 		if p.CommentCount == nil {
-			if c := First(fb, "comment_rendering_instance.comments.total_count",
+			if c := walk.First(fb, "comment_rendering_instance.comments.total_count",
 				"comments_count_summary_renderer.feedback.comment_rendering_instance.comments.total_count",
 				"total_comment_count", "comment_count.total_count", "comments.total_count"); c.Exists() {
-				v := Int64(c)
+				v := walk.Int64(c)
 				p.CommentCount = &v
 			}
 		}
 		if p.ShareCount == nil {
-			if s := First(fb, "share_count.count", "i18n_share_count", "share_count"); s.Exists() {
-				v := Int64(s)
+			if s := walk.First(fb, "share_count.count", "i18n_share_count", "share_count"); s.Exists() {
+				v := walk.Int64(s)
 				p.ShareCount = &v
 			}
 		}
 		if p.ViewCount == nil {
-			if s := First(fb, "video_view_count", "video_view_count_renderer.feedback.video_view_count", "play_count"); s.Exists() {
-				v := Int64(s)
+			if s := walk.First(fb, "video_view_count", "video_view_count_renderer.feedback.video_view_count", "play_count"); s.Exists() {
+				v := walk.Int64(s)
 				p.ViewCount = &v
 			}
 		}
 	}
 	if p.Reactions == nil {
-		rep.optional("story.reactions")
+		rep.AddOptional("story.reactions")
 		p.Reactions = &fbv1.Reactions{ByType: map[string]int64{}}
 	}
 	if p.CommentCount == nil {
-		rep.optional("story.comment_count")
+		rep.AddOptional("story.comment_count")
 	}
 }
 
 func linkAttachment(a gjson.Result) *fbv1.LinkAttachment {
-	att := First(a, "styles.attachment", "attachment", "style_type_renderer.attachment")
+	att := walk.First(a, "styles.attachment", "attachment", "style_type_renderer.attachment")
 	if !att.Exists() {
 		att = a
 	}
-	raw := First(att, "story_attachment_link_renderer.attachment.web_link.url", "web_link.url", "url", "target.url").String()
+	raw := walk.First(att, "story_attachment_link_renderer.attachment.web_link.url", "web_link.url", "url", "target.url").String()
 	if raw == "" {
 		return nil
 	}
@@ -291,10 +292,10 @@ func linkAttachment(a gjson.Result) *fbv1.LinkAttachment {
 	}
 	return &fbv1.LinkAttachment{
 		Url:         raw,
-		Title:       First(att, "title_with_entities.text", "title", "name").String(),
-		Description: First(att, "description.text", "description").String(),
-		Source:      First(att, "source.text", "source").String(),
-		ImageUrl:    First(att, "media.image.uri", "media.large_share_image.uri").String(),
+		Title:       walk.First(att, "title_with_entities.text", "title", "name").String(),
+		Description: walk.First(att, "description.text", "description").String(),
+		Source:      walk.First(att, "source.text", "source").String(),
+		ImageUrl:    walk.First(att, "media.image.uri", "media.large_share_image.uri").String(),
 	}
 }
 
@@ -317,10 +318,10 @@ func isFacebookHost(h string) bool {
 }
 
 func postType(v gjson.Result, p *fbv1.Post, photos, videos int, reel bool) fbv1.PostType {
-	if live := Find(v, "is_live_streaming", "Story", "Comment"); live.Bool() {
+	if live := walk.Find(v, "is_live_streaming", "Story", "Comment"); live.Bool() {
 		return fbv1.PostType_POST_TYPE_LIVE
 	}
-	if ev := Find(v, "event", "Story", "Comment"); ev.IsObject() && ev.Get("__typename").String() == "Event" {
+	if ev := walk.Find(v, "event", "Story", "Comment"); ev.IsObject() && ev.Get("__typename").String() == "Event" {
 		return fbv1.PostType_POST_TYPE_EVENT
 	}
 	switch {

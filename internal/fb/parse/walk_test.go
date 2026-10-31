@@ -3,6 +3,7 @@ package parse
 import (
 	"testing"
 
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
 	"github.com/tidwall/gjson"
 )
 
@@ -79,8 +80,8 @@ func TestCommentsQuotedTwice(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			n := 0
-			for _, x := range Collect([]gjson.Result{gjson.Parse(body)}, "Comment", "Feedback") {
-				if x.Typename == "Comment" {
+			for _, x := range walk.Collect([]gjson.Result{gjson.Parse(body)}, "Comment", "Feedback") {
+				if x.Kind == "Comment" {
 					n++
 				}
 			}

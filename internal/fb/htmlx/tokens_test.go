@@ -1,6 +1,10 @@
 package htmlx
 
-import "testing"
+import (
+	"testing"
+
+	scrapehtml "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/htmlx"
+)
 
 const sample = `<html><script type="application/json">{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"define":[["LSD",[],{"token":"AVqTok3n"},323],["SiteData",[],{"server_revision":1017000000,"haste_session":"20390.HYP:comet","hsi":"7431","__spin_r":1017000000,"__spin_b":"trunk","__spin_t":1730000000},317]]}}]],["CookieCoreConfig","set",null,[["_js_datr","DATR123",1]]]]}</script>
 <meta property="al:android:url" content="fb://page/100064000000000"/></html>`
@@ -26,7 +30,7 @@ func TestExtractTokens(t *testing.T) {
 	if id := PageID([]byte(sample)); id != 100064000000000 {
 		t.Fatalf("page id = %d", id)
 	}
-	if n := len(JSONBlobs([]byte(sample))); n != 1 {
+	if n := len(scrapehtml.JSONBlobs([]byte(sample))); n != 1 {
 		t.Fatalf("json blobs = %d", n)
 	}
 }
@@ -85,5 +89,25 @@ func TestPageIDHints(t *testing.T) {
 	}
 	if n := len(PageIDHints([]byte(`<html></html>`))); n != len(pageIDPatterns)+len(hintPatterns)+1 {
 		t.Fatalf("an empty page reports %d keys", n)
+	}
+}
+
+// The token sources the sample above lacks: DTSG, the second _js_datr
+// shape, the lsd form input, client_revision as a fallback for __rev,
+// __comet_req and the consent wall.
+func TestExtractTokensOtherSources(t *testing.T) {
+	html := `{"client_revision":1016999999,"__comet_req":15} ["DTSGInitialData",[],{"token":"DT1"}]` +
+		` "_js_datr":{"value":"D2"} <input name="lsd" value="L3"> <div data-cookiebanner="x">`
+	want := Tokens{LSD: "L3", DTSG: "DT1", JSDatr: "D2", Rev: "1016999999", CometReq: "15", ConsentWall: true}
+	if got := ExtractTokens([]byte(html)); got != want {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+	// server_revision wins over client_revision wherever each stands.
+	if got := ExtractTokens([]byte(`"client_revision":1 "server_revision":2`)); got.Rev != "2" || got.ConsentWall {
+		t.Fatalf("got %+v", got)
+	}
+	// The last lsd source in the table wins when several match.
+	if got := ExtractTokens([]byte(`["LSD",[],{"token":"A"}] <input name="lsd" value="B">`)); got.LSD != "B" {
+		t.Fatalf("lsd = %q", got.LSD)
 	}
 }

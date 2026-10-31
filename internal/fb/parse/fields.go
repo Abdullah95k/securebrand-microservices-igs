@@ -3,87 +3,16 @@ package parse
 import (
 	"crypto/sha1" //nolint:gosec // required by UUIDv5
 	"encoding/base64"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
 )
-
-// Report lists fields that could not be found.
-type Report struct {
-	Missing  []string // required fields: the response is drifted
-	Optional []string // optional fields: metrics only
-}
-
-func (r *Report) missing(field string)  { r.Missing = append(r.Missing, field) }
-func (r *Report) optional(field string) { r.Optional = append(r.Optional, field) }
-
-// OK reports whether every required field was found.
-func (r *Report) OK() bool { return len(r.Missing) == 0 }
-
-// Merge appends other's findings.
-func (r *Report) Merge(o Report) {
-	r.Missing = append(r.Missing, o.Missing...)
-	r.Optional = append(r.Optional, o.Optional...)
-}
-
-// Int64 parses a JSON number or numeric string.
-func Int64(r gjson.Result) int64 {
-	switch r.Type {
-	case gjson.Number:
-		return r.Int()
-	case gjson.String:
-		v, _ := strconv.ParseInt(strings.TrimSpace(r.Str), 10, 64)
-		return v
-	}
-	return 0
-}
-
-// Unix converts a unix-seconds field to a timestamp.
-func Unix(r gjson.Result) *timestamppb.Timestamp {
-	s := Int64(r)
-	if s <= 0 {
-		return nil
-	}
-	return timestamppb.New(time.Unix(s, 0).UTC())
-}
-
-var countRe = regexp.MustCompile(`(?i)([\d][\d.,]*)\s*([kmb])?`)
-
-// ParseCount parses "1,234", "1.2K", "3.4M followers" into a number.
-func ParseCount(s string) (int64, bool) {
-	m := countRe.FindStringSubmatch(s)
-	if m == nil {
-		return 0, false
-	}
-	num := m[1]
-	mult := 1.0
-	switch strings.ToLower(m[2]) {
-	case "k":
-		mult = 1e3
-	case "m":
-		mult = 1e6
-	case "b":
-		mult = 1e9
-	}
-	if mult == 1 {
-		num = strings.NewReplacer(",", "", ".", "").Replace(num)
-	} else {
-		num = strings.ReplaceAll(num, ",", ".")
-	}
-	f, err := strconv.ParseFloat(num, 64)
-	if err != nil {
-		return 0, false
-	}
-	return int64(f*mult + 0.5), true
-}
 
 // decodeB64ID decodes Facebook's base64 graph ids ("feedback:123",
 // "comment:1_2", "S:_I1:2:3").
@@ -150,6 +79,9 @@ func FeedbackTarget(id string) (post, comment int64) {
 	return post, comment
 }
 
+// Report lists fields that could not be found (the walker's report).
+type Report = walk.Report
+
 // mediaNS namespaces deterministic media ids.
 var mediaNS = uuid.Must(uuid.Parse("6f1c1f7e-8d9b-5c2a-9e0f-3b1f6a7c2d10"))
 
@@ -157,23 +89,6 @@ var mediaNS = uuid.Must(uuid.Parse("6f1c1f7e-8d9b-5c2a-9e0f-3b1f6a7c2d10"))
 func MediaID(fbMediaID, variant string) string {
 	// UUIDv5 is defined over SHA-1 (RFC 9562); this is an identifier, not security.
 	return uuid.NewHash(sha1.New(), mediaNS, []byte(fbMediaID+"|"+variant), 5).String() //nolint:gosec
-}
-
-// URLExpiry reads the hex "oe" expiry of a signed fbcdn URL.
-func URLExpiry(raw string) *timestamppb.Timestamp {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return nil
-	}
-	oe := u.Query().Get("oe")
-	if oe == "" {
-		return nil
-	}
-	v, err := strconv.ParseInt(oe, 16, 64)
-	if err != nil || v <= 0 {
-		return nil
-	}
-	return timestamppb.New(time.Unix(v, 0).UTC())
 }
 
 // Ranges parses message.ranges into TextRange.
@@ -186,7 +101,7 @@ func Ranges(r gjson.Result) []*fbv1.TextRange {
 			Length:     int32(x.Get("length").Int()),
 			EntityType: e.Get("__typename").String(),
 			EntityId:   e.Get("id").String(),
-			Url:        First(e, "url", "external_url", "profile_url").String(),
+			Url:        walk.First(e, "url", "external_url", "profile_url").String(),
 			Name:       e.Get("name").String(),
 		})
 		return true
@@ -244,12 +159,12 @@ func reactionName(node gjson.Result) string {
 
 // Reactions reads a Feedback object's reaction totals and breakdown.
 func Reactions(fb gjson.Result) *fbv1.Reactions {
-	total := Int64(First(fb, "reaction_count.count", "reactors.count", "i18n_reaction_count", "reaction_count"))
+	total := walk.Int64(walk.First(fb, "reaction_count.count", "reactors.count", "i18n_reaction_count", "reaction_count"))
 	r := &fbv1.Reactions{Total: total, ByType: map[string]int64{}}
 	var sum int64
-	edges := First(fb, "top_reactions.edges", "reaction_breakdown.edges", "important_reactors.edges")
+	edges := walk.First(fb, "top_reactions.edges", "reaction_breakdown.edges", "important_reactors.edges")
 	edges.ForEach(func(_, e gjson.Result) bool {
-		n := Int64(First(e, "reaction_count", "count", "node.reaction_count"))
+		n := walk.Int64(walk.First(e, "reaction_count", "count", "node.reaction_count"))
 		name := reactionName(e.Get("node"))
 		r.ByType[name] += n
 		sum += n

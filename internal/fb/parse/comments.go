@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
 )
 
 // CommentsVersion is recorded in Observation.parser_version.
@@ -47,7 +48,7 @@ type ThreadRef struct {
 type CommentsResult struct {
 	Comments   []CommentBundle
 	Threads    []ThreadRef
-	PageInfo   PageInfo
+	PageInfo   walk.PageInfo
 	TotalCount int64
 	NodeNull   bool
 }
@@ -64,24 +65,24 @@ func Comments(parts []gjson.Result, cc CommentContext) (CommentsResult, Report) 
 	if cc.Replies {
 		keys = replyConnections
 	}
-	res := CommentsResult{PageInfo: FindPageInfo(parts, keys, "Comment")}
+	res := CommentsResult{PageInfo: walk.FindPageInfo(parts, keys, "Comment")}
 	for _, p := range parts {
-		if t := First(p, "data.node.comment_rendering_instance_for_feed_location.comments.total_count",
+		if t := walk.First(p, "data.node.comment_rendering_instance_for_feed_location.comments.total_count",
 			"data.node.display_comments.count", "data.node.comments.total_count"); t.Exists() {
-			res.TotalCount = Int64(t)
+			res.TotalCount = walk.Int64(t)
 			break
 		}
 	}
-	nodes := Collect(parts, append([]string{"Comment", "Feedback"}, mediaTypenames...)...)
-	byNode := map[*Node]*fbv1.Comment{}
-	inline := map[*Node]int64{}
+	nodes := walk.Collect(parts, append([]string{"Comment", "Feedback"}, mediaTypenames...)...)
+	byNode := map[*walk.Node]*fbv1.Comment{}
+	inline := map[*walk.Node]int64{}
 	// The same comment can be quoted twice in a response (highlighted, and in
 	// the list). It is emitted from its first copy; replies nested under a
 	// later copy belong to that first one.
-	first := map[int64]*Node{}
-	canon := map[*Node]*Node{}
+	first := map[int64]*walk.Node{}
+	canon := map[*walk.Node]*walk.Node{}
 	for _, n := range nodes {
-		if n.Typename != "Comment" {
+		if n.Kind != "Comment" {
 			continue
 		}
 		parent := n.Ancestor("Comment")
@@ -107,8 +108,8 @@ func Comments(parts []gjson.Result, cc CommentContext) (CommentsResult, Report) 
 		b := CommentBundle{Comment: c}
 		owner := Owner{Type: "comment", ID: c.CommentId, PostID: cc.PostID, PageID: cc.PageID, CommentID: c.CommentId, Comment: true}
 		for _, x := range nodes {
-			if isMedia(x.Typename) && x.Ancestor("Comment") == n {
-				for _, m := range MediaFromNode(x.V, x.Typename, owner) {
+			if isMedia(x.Kind) && x.Ancestor("Comment") == n {
+				for _, m := range MediaFromNode(x.V, x.Kind, owner) {
 					b.Media = append(b.Media, m)
 					c.Attachments = append(c.Attachments, &fbv1.Attachment{
 						Type: attachmentType(m.Kind), MediaId: m.MediaId, Url: m.SourceUrl,
@@ -125,9 +126,9 @@ func Comments(parts []gjson.Result, cc CommentContext) (CommentsResult, Report) 
 			continue
 		}
 		fb := n.V.Get("feedback")
-		token := First(fb, "expansion_info.expansion_token", "replies_connection.expansion_token").String()
+		token := walk.First(fb, "expansion_info.expansion_token", "replies_connection.expansion_token").String()
 		if token == "" {
-			token = First(n.V, "expansion_info.expansion_token").String()
+			token = walk.First(n.V, "expansion_info.expansion_token").String()
 		}
 		root := c.CommentId
 		if c.RootCommentId != nil {
@@ -147,20 +148,20 @@ func Comments(parts []gjson.Result, cc CommentContext) (CommentsResult, Report) 
 	return res, rep
 }
 
-func comment(n, parentNode *Node, parent *fbv1.Comment, cc CommentContext) (*fbv1.Comment, Report) {
+func comment(n, parentNode *walk.Node, parent *fbv1.Comment, cc CommentContext) (*fbv1.Comment, Report) {
 	var rep Report
 	v := n.V
-	id := Int64(First(v, "legacy_fbid", "comment_id"))
+	id := walk.Int64(walk.First(v, "legacy_fbid", "comment_id"))
 	if id == 0 {
 		id = CommentIDFromGraphID(v.Get("id").String())
 	}
 	if id == 0 {
-		rep.missing("comment.id")
+		rep.AddMissing("comment.id")
 		return nil, rep
 	}
-	created := Unix(First(v, "created_time", "creation_time"))
+	created := walk.Unix(walk.First(v, "created_time", "creation_time"))
 	if created == nil {
-		rep.missing("comment.created_time")
+		rep.AddMissing("comment.created_time")
 	}
 	c := &fbv1.Comment{
 		CommentId:     id,
@@ -169,7 +170,7 @@ func comment(n, parentNode *Node, parent *fbv1.Comment, cc CommentContext) (*fbv
 		PostCreatedAt: cc.PostCreatedAt,
 		GraphId:       v.Get("id").String(),
 		CreatedAt:     created,
-		Url:           First(v, "url", "comment_action_links.0.comment.url").String(),
+		Url:           walk.First(v, "url", "comment_action_links.0.comment.url").String(),
 	}
 
 	switch {
@@ -189,7 +190,7 @@ func comment(n, parentNode *Node, parent *fbv1.Comment, cc CommentContext) (*fbv
 		}
 		pid := cc.ParentCommentID
 		if pid == 0 {
-			pid = Int64(First(v, "comment_direct_parent.legacy_fbid", "comment_parent.legacy_fbid"))
+			pid = walk.Int64(walk.First(v, "comment_direct_parent.legacy_fbid", "comment_parent.legacy_fbid"))
 		}
 		if pid != 0 && c.Depth > 0 {
 			c.ParentCommentId = &pid
@@ -205,28 +206,28 @@ func comment(n, parentNode *Node, parent *fbv1.Comment, cc CommentContext) (*fbv
 		c.Author = &fbv1.Author{
 			Id:        a.Get("id").String(),
 			Name:      a.Get("name").String(),
-			Url:       First(a, "url", "profile_url", "uri").String(),
-			AvatarUrl: First(a, "profile_picture_depth_0.uri", "profile_picture_depth_1.uri", "profile_picture.uri").String(),
+			Url:       walk.First(a, "url", "profile_url", "uri").String(),
+			AvatarUrl: walk.First(a, "profile_picture_depth_0.uri", "profile_picture_depth_1.uri", "profile_picture.uri").String(),
 			Type:      a.Get("__typename").String(),
 		}
-		if ver := First(a, "is_verified", "is_blue_verified"); ver.Exists() {
+		if ver := walk.First(a, "is_verified", "is_blue_verified"); ver.Exists() {
 			b := ver.Bool()
 			c.Author.Verified = &b
 		}
 	} else {
-		rep.optional("comment.author")
+		rep.AddOptional("comment.author")
 	}
 
-	body := First(v, "body", "preferred_body", "body_renderer")
+	body := walk.First(v, "body", "preferred_body", "body_renderer")
 	if body.IsObject() {
 		c.Text = body.Get("text").String()
 		c.TextRanges = Ranges(body.Get("ranges"))
 	}
-	if e := First(v, "edit_history.count", "is_edited"); e.Exists() {
+	if e := walk.First(v, "edit_history.count", "is_edited"); e.Exists() {
 		b := e.Bool() || e.Int() > 0
 		c.Edited = &b
 	}
-	if op := First(v, "is_author_original_poster", "author_original_poster"); op.Exists() {
+	if op := walk.First(v, "is_author_original_poster", "author_original_poster"); op.Exists() {
 		b := op.Bool()
 		c.IsOp = &b
 	} else if cc.PageAuthorID != "" && c.Author != nil {
@@ -238,13 +239,13 @@ func comment(n, parentNode *Node, parent *fbv1.Comment, cc CommentContext) (*fbv
 	if fb.IsObject() {
 		c.FeedbackId = fb.Get("id").String()
 		c.Reactions = Reactions(fb)
-		if rc := First(fb, "replies_fields.total_count", "replies_fields.count", "total_reply_count",
+		if rc := walk.First(fb, "replies_fields.total_count", "replies_fields.count", "total_reply_count",
 			"replies_connection.count", "display_replies_count"); rc.Exists() {
-			x := Int64(rc)
+			x := walk.Int64(rc)
 			c.ReplyCount = &x
 		}
 	} else {
-		rep.optional("comment.feedback")
+		rep.AddOptional("comment.feedback")
 		c.Reactions = &fbv1.Reactions{ByType: map[string]int64{}}
 	}
 	return c, rep

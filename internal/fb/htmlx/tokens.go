@@ -1,5 +1,6 @@
-// Package htmlx extracts session tokens, the page id and the embedded JSON
-// payloads from Facebook's server-rendered HTML.
+// Package htmlx extracts session tokens and the page id from Facebook's
+// server-rendered HTML. The pattern engine and the embedded JSON reader are
+// platform-neutral and live in internal/scrape/htmlx.
 package htmlx
 
 import (
@@ -7,7 +8,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/tidwall/gjson"
+	scrapehtml "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/htmlx"
 )
 
 // Tokens are the request parameters a logged-out web client sends with
@@ -44,51 +45,37 @@ func (t Tokens) Jazoest() string {
 	return "2" + strconv.Itoa(sum)
 }
 
-type pattern struct {
-	re  *regexp.Regexp
-	set func(*Tokens, string)
-}
-
-// Several candidate patterns per token, tried in order. Facebook moves these
+// Several candidate patterns per token, tried in order, keyed by the form
+// field each token is sent as (the Tokens JSON names). Facebook moves these
 // around; unknown layouts show up as missing tokens in bootstrap metrics.
-var patterns = []pattern{
-	{regexp.MustCompile(`\["LSD",\[\],\{"token":"([^"]+)"`), func(t *Tokens, v string) { t.LSD = v }},
-	{regexp.MustCompile(`"LSD"\s*:\s*\{\s*"token"\s*:\s*"([^"]+)"`), func(t *Tokens, v string) { t.LSD = v }},
-	{regexp.MustCompile(`name="lsd" value="([^"]+)"`), func(t *Tokens, v string) { t.LSD = v }},
-	{regexp.MustCompile(`\["DTSGInitialData",\[\],\{"token":"([^"]+)"`), func(t *Tokens, v string) { t.DTSG = v }},
-	{regexp.MustCompile(`"_js_datr"\s*,\s*"([^"]+)"`), func(t *Tokens, v string) { t.JSDatr = v }},
-	{regexp.MustCompile(`"_js_datr"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"`), func(t *Tokens, v string) { t.JSDatr = v }},
-	{regexp.MustCompile(`"__spin_r"\s*:\s*(\d+)`), func(t *Tokens, v string) { t.SpinR = v }},
-	{regexp.MustCompile(`"__spin_b"\s*:\s*"([^"]+)"`), func(t *Tokens, v string) { t.SpinB = v }},
-	{regexp.MustCompile(`"__spin_t"\s*:\s*(\d+)`), func(t *Tokens, v string) { t.SpinT = v }},
-	{regexp.MustCompile(`"hsi"\s*:\s*"(\d+)"`), func(t *Tokens, v string) { t.HSI = v }},
-	{regexp.MustCompile(`"server_revision"\s*:\s*(\d+)`), func(t *Tokens, v string) { t.Rev = v }},
-	{regexp.MustCompile(`"client_revision"\s*:\s*(\d+)`), func(t *Tokens, v string) {
-		if t.Rev == "" {
-			t.Rev = v
-		}
-	}},
-	{regexp.MustCompile(`"haste_session"\s*:\s*"([^"]+)"`), func(t *Tokens, v string) { t.HasteSession = v }},
-	{regexp.MustCompile(`"__comet_req"\s*:\s*(\d+)`), func(t *Tokens, v string) { t.CometReq = v }},
+var patterns = []scrapehtml.Pattern{
+	{Key: "lsd", Re: regexp.MustCompile(`\["LSD",\[\],\{"token":"([^"]+)"`)},
+	{Key: "lsd", Re: regexp.MustCompile(`"LSD"\s*:\s*\{\s*"token"\s*:\s*"([^"]+)"`)},
+	{Key: "lsd", Re: regexp.MustCompile(`name="lsd" value="([^"]+)"`)},
+	{Key: "fb_dtsg", Re: regexp.MustCompile(`\["DTSGInitialData",\[\],\{"token":"([^"]+)"`)},
+	{Key: "js_datr", Re: regexp.MustCompile(`"_js_datr"\s*,\s*"([^"]+)"`)},
+	{Key: "js_datr", Re: regexp.MustCompile(`"_js_datr"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"`)},
+	{Key: "__spin_r", Re: regexp.MustCompile(`"__spin_r"\s*:\s*(\d+)`)},
+	{Key: "__spin_b", Re: regexp.MustCompile(`"__spin_b"\s*:\s*"([^"]+)"`)},
+	{Key: "__spin_t", Re: regexp.MustCompile(`"__spin_t"\s*:\s*(\d+)`)},
+	{Key: "__hsi", Re: regexp.MustCompile(`"hsi"\s*:\s*"(\d+)"`)},
+	{Key: "__rev", Re: regexp.MustCompile(`"server_revision"\s*:\s*(\d+)`)},
+	{Key: "__rev", Re: regexp.MustCompile(`"client_revision"\s*:\s*(\d+)`), Fallback: true},
+	{Key: "__hs", Re: regexp.MustCompile(`"haste_session"\s*:\s*"([^"]+)"`)},
+	{Key: "__comet_req", Re: regexp.MustCompile(`"__comet_req"\s*:\s*(\d+)`)},
 }
 
 var consentMarkers = [][]byte{[]byte(`"cookie_consent_dialog"`), []byte(`data-cookiebanner=`), []byte(`/cookie/consent/`)}
 
 // ExtractTokens scans html for every known token pattern.
 func ExtractTokens(html []byte) Tokens {
-	var t Tokens
-	for _, p := range patterns {
-		if m := p.re.FindSubmatch(html); m != nil {
-			p.set(&t, string(m[1]))
-		}
+	v := scrapehtml.Extract(html, patterns)
+	return Tokens{
+		LSD: v["lsd"], DTSG: v["fb_dtsg"], JSDatr: v["js_datr"],
+		SpinR: v["__spin_r"], SpinB: v["__spin_b"], SpinT: v["__spin_t"],
+		HSI: v["__hsi"], Rev: v["__rev"], HasteSession: v["__hs"], CometReq: v["__comet_req"],
+		ConsentWall: scrapehtml.ContainsAny(html, consentMarkers),
 	}
-	for _, m := range consentMarkers {
-		if bytes.Contains(html, m) {
-			t.ConsentWall = true
-			break
-		}
-	}
-	return t
 }
 
 // The page's id, the profile's first. A page made in the new Pages
@@ -171,20 +158,6 @@ func PageIDHints(html []byte) map[string]int {
 	}
 	for _, p := range hintPatterns {
 		count(p.name, p.re)
-	}
-	return out
-}
-
-var jsonScript = regexp.MustCompile(`(?s)<script type="application/json"[^>]*>(.*?)</script>`)
-
-// JSONBlobs returns every embedded <script type="application/json"> payload
-// that parses as JSON. Facebook preloads GraphQL results this way.
-func JSONBlobs(html []byte) []gjson.Result {
-	var out []gjson.Result
-	for _, m := range jsonScript.FindAllSubmatch(html, -1) {
-		if gjson.ValidBytes(m[1]) {
-			out = append(out, gjson.ParseBytes(m[1]))
-		}
 	}
 	return out
 }
