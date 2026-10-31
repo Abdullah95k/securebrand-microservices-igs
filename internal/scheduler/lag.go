@@ -10,7 +10,7 @@ import (
 )
 
 // LagGauges publishes the consumer lag of every fbs consumer group per
-// topic (fbs_kafka_consumer_lag), so dashboards and alerts do not depend on
+// topic (igs_kafka_consumer_lag), so dashboards and alerts do not depend on
 // a separate Kafka exporter. Group and topic labels drop the topic prefix.
 type LagGauges struct {
 	Admin  *kadm.Client

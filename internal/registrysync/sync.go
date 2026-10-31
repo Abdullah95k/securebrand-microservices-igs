@@ -118,7 +118,7 @@ type Report struct {
 }
 
 // Checked reports whether the run gave every query a verdict. Failing
-// queries count (fbs_registry_query_healthy reports them); unchecked ones
+// queries count (igs_registry_query_healthy reports them); unchecked ones
 // do not: a run whose probes are all blocked validates nothing.
 func (r Report) Checked() bool {
 	return (r.Status == StatusOK || r.Status == StatusDegraded) && len(r.Unchecked) == 0

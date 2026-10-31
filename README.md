@@ -134,10 +134,10 @@ A completed job looks like this. `completeness` compares what Facebook reported 
 
 ### Configuration
 
-Configuration is layered: `configs/default.yaml` (embedded), then the files in `--config` / `FBS_CONFIG` (comma separated, later files win), then environment variables `FBS_<SECTION>__<KEY>` (lists comma separated). Examples:
+Configuration is layered: `configs/default.yaml` (embedded), then the files in `--config` / `IGS_CONFIG` (comma separated, later files win), then environment variables `IGS_<SECTION>__<KEY>` (lists comma separated). Examples:
 
 ```bash
-FBS_POSTGRES__DSN=postgres://... FBS_KAFKA__BROKERS=k1:9092,k2:9092 FBS_FB__GLOBAL_RPS=200
+IGS_POSTGRES__DSN=postgres://... IGS_KAFKA__BROKERS=k1:9092,k2:9092 IGS_FB__GLOBAL_RPS=200
 ```
 
 Settings that matter most:
@@ -162,7 +162,7 @@ Settings that matter most:
 | `privacy.author_hmac_key` | dev key | Must be set in prod (validated) |
 | `kafka.topic_prefix` | empty | Namespaces topics **and** consumer groups |
 | `kafka.schema_registry.url` | empty | Registry for the fb.v1 schemas (`fbctl schemas apply`, Helm `hooks.schemas`); see the [record schemas contract](docs/contracts/kafka-schemas.md) |
-| `kafka.tls`, `kafka.sasl`, `redis.tls` | off | TLS (CA, client certificate, server name) to the brokers and Valkey; SASL `plain`, `scram-sha-256` or `scram-sha-512`. Put the password in `FBS_KAFKA__SASL__PASSWORD`. |
+| `kafka.tls`, `kafka.sasl`, `redis.tls` | off | TLS (CA, client certificate, server name) to the brokers and Valkey; SASL `plain`, `scram-sha-256` or `scram-sha-512`. Put the password in `IGS_KAFKA__SASL__PASSWORD`. |
 
 ### Phase 0, before scraping real Facebook at volume
 

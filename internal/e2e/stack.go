@@ -87,7 +87,7 @@ type Options struct {
 // Start brings up the stack; it stops at test cleanup.
 func Start(t *testing.T, o Options) *Stack {
 	t.Helper()
-	if os.Getenv("FBS_E2E_DEBUG") != "" {
+	if os.Getenv("IGS_E2E_DEBUG") != "" {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
 	brokers := testenv.Kafka(t)

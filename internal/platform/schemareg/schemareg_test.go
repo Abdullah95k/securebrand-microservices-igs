@@ -27,9 +27,9 @@ func TestImports(t *testing.T) {
 
 func registry(t *testing.T) *Client {
 	t.Helper()
-	u := os.Getenv("FBS_TEST_SCHEMA_REGISTRY")
+	u := os.Getenv("IGS_TEST_SCHEMA_REGISTRY")
 	if u == "" {
-		t.Skip("FBS_TEST_SCHEMA_REGISTRY not set")
+		t.Skip("IGS_TEST_SCHEMA_REGISTRY not set")
 	}
 	return &Client{URL: u}
 }
