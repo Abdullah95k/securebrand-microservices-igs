@@ -40,16 +40,16 @@ The owner's decisions doc (rev 743) still shows the old D7 answer ("share code .
 
 | # | Question | Status |
 |---|---|---|
-| U1 | Grid paging past 24 posts | open: the first two probe runs sent the grid query the user's `pk` instead of its `id`, so Instagram found no user (see Findings); rerun after the fix |
+| U1 | Grid paging past 24 posts | **answered (fourth probe run, ISP, 2026-10-31): yes.** All 5 profiles paged to the probe's cap of 32 pages (396 posts) with no wall; 182 queries, all OK. The cap reached 9 days back on the busiest account and 11 months on the quietest. How far back a 365-day backfill goes on busy accounts is for the full run (`--max-age-days 365`) |
 | U2 | Cheap post-detail query | open: HAR (C1) |
 | U3 | Client-state form fields needed? | **answered (first probe run, 2026-10-31): no.** Residential tier, 5 profiles: all 30 queries (profile, grid, comments, highlights) answered OK without `__dyn`, `__csr`, `__hblp`, `__hsdp`, `__sjsp` |
 | U4 | Per-IP tolerance and wire bytes per tier | open: Phase 0 (C3) |
-| U5 | Cursors bound to identity? | open: misread in the first run, as U1 |
+| U5 | Cursors bound to identity? | **answered: no.** A cursor from one identity worked for another (2 of 2, ISP) |
 | U6 | doc_ids in static bundles? | open: M9 |
 | U7 | Tagged posts logged out? | open: HAR (C1) |
 | U8 | Cookies set and expected | **answered for page loads (first probe run): `csrftoken`, `datr`, `ig_did` on every profile page, `ps_l` and `ps_n` on 3 of 5**; no `mid` |
-| U9 | Can a profile whose username changed be read by its pk alone (the grid `_connection` query with `id` and no cursor)? The profile and first-grid queries take a username | new (M0); open: probe (C2) |
-| U10 | Does a media pk encode its creation time? If so, the grid walk can stop at the age window without reading post details | new (M0), a hypothesis; open: check against the HAR timestamps in M5 |
+| U9 | Can a profile whose username changed be read by its pk alone (the grid `_connection` query with `id` and no cursor)? The profile and first-grid queries take a username | **answered: yes.** The grid's `_connection` query with the user object's `id` and no cursor returns the first page (5 of 5, ISP). Note: the `id` (17841…), not the `pk` |
+| U10 | Does a media pk encode its creation time? If so, the grid walk can stop at the age window without reading post details | **answered: yes.** `(pk >> 23) + 1314220021721` ms is the post's time, within about a minute of the post page's `taken_at` (5 of 5; one was 30 minutes off). The grid walk can stop at the age window without post pages; the probe's `--max-age-days` does |
 
 ## Findings
 
@@ -78,6 +78,12 @@ From the owner's first probe run (2026-10-31, droplet, 5 profiles from the owner
 - **Cost on the wire** (ISP, means): profile page 138 KB, first grid page 10.4 KB, a later grid page 3.7 KB, profile query 5.1 KB, comments 4.1 KB, profile picture 7.4 KB; latency 2 to 3.5 s per request. Residential was within 10% on every figure.
 - **U3 and U8 are answered** (table above).
 - **The probe misread the grid**, so U1, U5 and U9 need a rerun. Every grid first page reported 12 posts and no next page, and the cursor and pk checks found no posts in answers classed OK. The likely cause: Instagram streams the connection in parts (edges and the real `page_info` after the first part), and the probe read only the first part. Fixed: the probe reads every part (and a deferred `page_info`), follows a first page's cursor even when it says no next page, and saves the raw answers under `raw/` so the shape can be checked. Also fixed: every per-profile step in `report.json` pointed at one shared variable, so each showed the last request (the summary counts were right).
+
+From the fourth probe run (2026-10-31, after the fixes in #15 and #16):
+- **ISP: everything read.** 5 of 5 profiles, each grid to the 32-page cap (396 posts), comments (10 per post that has any), the newest post's page (likes, comment count, 11 to 12 embedded comments), no wall in 182 queries over 10.5 minutes.
+- **Cost on the wire (ISP, means):** profile page 138 KB, post page 117 KB, grid page 9.4 KB, comments 6.1 KB, profile query 5.3 KB, profile picture 13 KB; 2.7 to 3.5 s per request at 0.3 requests per second.
+- **A fresh ISP identity was walled on its page load** (302 to `/accounts/login`) 3 times out of 4: some of the ISP exits already get the login redirect for page loads. The identity that did load could query freely.
+- **Residential failed every page load** at the transport level (about 3.7 s each), where it had worked in the three runs before. The probe did not record the error text; it does now (credentials redacted). The owner should check the residential proxy (balance, credentials, gateway).
 
 From the M1d-2 to M1d-5a session:
 - **registry-sync must copy a query's route.** It builds a candidate doc_id's row by copying the active row; without copying `endpoint` and `headers`, a rotation would have sent Instagram's promoted highlights query to `/api/graphql`. Fixed in M1d-2 and covered by an integration test.

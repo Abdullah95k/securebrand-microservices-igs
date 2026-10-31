@@ -159,6 +159,16 @@ themselves out of git.
 | Tiers | `isp,residential` | `IGS_PROBE_TIERS=direct,isp` |
 | Output | `phase0/out-ig/` | `IGS_PROBE_OUT=...` |
 | Proxies | `phase0/proxies.yaml` | `PHASE0_CONFIG=...` |
+| Grid depth | 32 pages after the first (396 posts) | `IGS_PROBE_ARGS="--max-grid-pages 100"` |
+| Backfill window | none | `IGS_PROBE_ARGS="--max-age-days 365"`: stop each profile's grid at posts older than a year |
+
+**The full list.** The 348 accounts, back one year or 1,200 posts each (whichever comes first), with results kept apart from the test's:
+
+```bash
+make igs-probe IGS_PROBE_PROFILES=phase0/ig-profiles-all.txt IGS_PROBE_OUT=phase0/out-ig-all IGS_PROBE_ARGS="--max-age-days 365 --max-grid-pages 100"
+```
+
+A busy news account posts 30 or more times a day, so it reaches the 1,200-post cap after a few weeks; a quieter one reaches the year first. At one request every 3 seconds, a capped account takes about 6 minutes, so plan on a day or more per tier.
 
 The command behind it, for other options (pacing, grid depth, fingerprint):
 `go run ./cmd/igs-spike probe --help`.

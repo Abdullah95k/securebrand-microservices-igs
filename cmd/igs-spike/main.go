@@ -73,6 +73,7 @@ func runProbe(args []string) int {
 	raw := fs.Bool("raw", true, "save Instagram's raw answers under <out-dir>/raw (first of each query per profile, every failure, the first 3 pages' HTML)")
 	rps := fs.Float64("rps", 0.3, "requests per second per identity (0.3 = one every ~3.3 s, as in the recordings)")
 	maxPages := fs.Int("max-grid-pages", 32, "grid pages to read per profile after the first (12 posts each)")
+	maxAge := fs.Int("max-age-days", 0, "stop a profile's grid once its posts are older than this many days (0 = no limit; the backfill window is 365)")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
 	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
 	dryRun := fs.Bool("dry-run", false, "rehearse against a built-in fake Instagram (no traffic, no proxies)")
@@ -125,7 +126,7 @@ func runProbe(args []string) int {
 	defer stop()
 	fmt.Fprintf(os.Stderr, "probe: %d profiles, tier %s, %.2f requests/s per identity; Ctrl-C stops and keeps what was read\n", len(names), *tier, *rps)
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
-		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
+		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) }})
 	if err := probe.Write(*outDir, rep); err != nil {
 		fmt.Fprintln(os.Stderr, "probe: write:", err)
@@ -137,9 +138,9 @@ func runProbe(args []string) int {
 		return 1
 	}
 	s := rep.Summary
-	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  bootstrapped %d/%d; grid: %d ended, %d capped, walls %v at %v posts, %d paged past 24 (max %d)\n"+
+	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  bootstrapped %d/%d; grid: %d ended, %d capped, %d at the age limit, walls %v at %v posts, %d paged past 24 (max %d)\n"+
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
-		*outDir, bundle, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
+		*outDir, bundle, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
 	return 0
 }

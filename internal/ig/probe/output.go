@@ -27,8 +27,8 @@ func Write(dir string, rep Report) error {
 	}
 	profiles := [][]string{{"line", "username", "url", "full_name", "followers", "following", "verified", "private",
 		"biography", "bio_links", "linked_facebook_page", "highlights", "profile_pic_file", "profile_pic_url",
-		"page_load", "posts_read", "grid_stop", "comments_read"}}
-	posts := [][]string{{"username", "shortcode", "url", "media_type", "product_type", "caption", "alt_text", "thumbnail_url"}}
+		"page_load", "posts_read", "grid_stop", "oldest_post_read", "comments_read"}}
+	posts := [][]string{{"username", "shortcode", "url", "posted_at", "media_type", "product_type", "caption", "alt_text", "thumbnail_url"}}
 	comments := [][]string{{"username", "post_shortcode", "commenter", "commenter_verified", "created_at", "likes", "text"}}
 	for _, p := range rep.Profiles {
 		row := []string{strconv.Itoa(p.Index), p.Username, p.URL}
@@ -46,14 +46,21 @@ func Write(dir string, rep Report) error {
 		} else {
 			row = append(row, make([]string, 11)...)
 		}
-		stop := ""
+		stop, oldest := "", ""
 		if p.Grid != nil {
 			stop = p.Grid.Stop
+			if !p.Grid.Oldest.IsZero() {
+				oldest = p.Grid.Oldest.Format(time.RFC3339)
+			}
 		}
-		row = append(row, p.Bootstrap.Class, strconv.Itoa(len(p.Posts)), stop, strconv.Itoa(len(p.Comments)))
+		row = append(row, p.Bootstrap.Class, strconv.Itoa(len(p.Posts)), stop, oldest, strconv.Itoa(len(p.Comments)))
 		profiles = append(profiles, row)
 		for _, x := range p.Posts {
-			posts = append(posts, []string{p.Username, x.Shortcode, x.URL, x.MediaType, x.ProductType, x.Caption, x.AltText, x.ThumbnailURL})
+			posted := ""
+			if !x.PostedAt.IsZero() {
+				posted = x.PostedAt.Format(time.RFC3339)
+			}
+			posts = append(posts, []string{p.Username, x.Shortcode, x.URL, posted, x.MediaType, x.ProductType, x.Caption, x.AltText, x.ThumbnailURL})
 		}
 		for _, c := range p.Comments {
 			comments = append(comments, []string{p.Username, c.PostShortcode, c.Username, strconv.FormatBool(c.Verified),

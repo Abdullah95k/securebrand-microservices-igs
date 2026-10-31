@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
@@ -213,5 +214,32 @@ func TestProbeReadsAStreamedGrid(t *testing.T) {
 	// empty pages would be kept too.
 	if m, _ := filepath.Glob(filepath.Join(first, "*-grid-ok.json")); len(m) != 1 {
 		t.Errorf("grid pages saved: %v", m)
+	}
+}
+
+// A post's time comes from its pk, and MaxAge stops the walk at the
+// backfill window.
+func TestProbePostedAtAndAgeLimit(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 3, Profiles: 1, PostsPerProfile: 60, MaxComments: 2, PostSpacing: 24 * time.Hour}})
+	p := env.World.Profiles()[0]
+	now := func() time.Time { return fakeig.Epoch.Add(time.Hour) }
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: []string{p.Username}, Tier: "direct",
+		MaxGridPages: 20, MaxAge: 20 * 24 * time.Hour, Now: now, Pool: env.Pool, Loader: env.Loader, GQL: env.GQL})
+	got := rep.Profiles[0]
+	// Posts a day apart, 12 a page: the second page (days 12-23) reaches
+	// past the 20-day window, so the walk stops after 24 posts.
+	if got.Grid.Stop != "age" || len(got.Posts) != 24 || rep.Summary.GridAgeStops != 1 {
+		t.Fatalf("grid %+v, %d posts", got.Grid, len(got.Posts))
+	}
+	for i, x := range got.Posts {
+		if d := x.PostedAt.Sub(p.Posts[i].TakenAt); d < -time.Second || d > time.Second {
+			t.Fatalf("post %d posted %s, taken %s", i, x.PostedAt, p.Posts[i].TakenAt)
+		}
+	}
+	if !got.Grid.Oldest.Equal(got.Posts[23].PostedAt) {
+		t.Fatalf("oldest %s", got.Grid.Oldest)
+	}
+	if probe.PostedAt("not-a-pk").IsZero() != true || probe.PostedAt("12").IsZero() != true {
+		t.Fatal("implausible pks must give no time")
 	}
 }

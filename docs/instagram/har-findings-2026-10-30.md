@@ -39,6 +39,8 @@ All are `POST`, `application/x-www-form-urlencoded`, persisted queries (`doc_id`
 - The user object carries two ids: `pk` (for example 9 digits) and `id` (17 digits starting 17841). The grid's `_connection` query resolves `id`; given the `pk`, it answers `{"data":{"node":null}}` with no error.
 - The comments query with `"after": ""` answers its connection with three `field_exception` errors (on `edges`, `geoblocked_comment_notices` and `page_info`) beside an empty list. A first page needs `"after": null`, or the post page's embedded comments.
 - The first grid page answered in one part, with `has_next_page: true` and an `end_cursor`.
+- With the user's `id`, the grid kept paging past 24 posts: 5 of 5 profiles to the probe's cap of 396 posts, no wall (ISP).
+- A media `pk` encodes its creation time: `(pk >> 23) + 1314220021721` is the time in Unix milliseconds, within about a minute of the post page's `taken_at`.
 
 The page HTML of a profile, post or reel already embeds the first page of data as Relay JSON (`<script type="application/json" data-sjs>`):
 - **profile page:** the first 12 grid posts;
