@@ -17,7 +17,7 @@ The owner's decisions doc (rev 743) still shows the old D7 answer ("share code .
 
 | # | Milestone | State | PRs | Notes |
 |---|---|---|---|---|
-| M0 | Verify and decide (ADRs 0004, 0005, reuse matrix) | in review: waiting for the owner to merge it | PR_M0 (moved from fbs's [#25](https://github.com/Abdullah95k/securebrand-microservices/pull/25), now closed) | Every package classified at `df76ce1`; all brief §5 defects confirmed; new findings below |
+| M0 | Verify and decide (ADRs 0004, 0005, reuse matrix) | in review: waiting for the owner to merge it | [#1](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/1) (moved from fbs's [#25](https://github.com/Abdullah95k/securebrand-microservices/pull/25), now closed) | Every package classified at `df76ce1`; all brief §5 defects confirmed; new findings below |
 | M1 | Seed and neutralise (igs repository) | seeded; the rest not started | | Step 1 done (`c996ec5`, below); next ADR 0004 §7 steps 2–4 |
 | M2 | Fixes in igs's copy (§5 items 1–6, unknown-kind crash) | not started | | Item 6's Chrome 152 profile needs no dependency bump |
 | C1 | Owner: HARs of a grid click (post-detail query), reels tab, tagged tab | waiting for owner | | Re-share the Drive folder by link when recorded |
