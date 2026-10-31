@@ -14,8 +14,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	protosrc "github.com/abdullah95k/securebrand-microservices/api/proto"
-	"github.com/abdullah95k/securebrand-microservices/internal/topics"
+	protosrc "github.com/abdullah95k/securebrand-microservices-igs/api/proto"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
 func TestImports(t *testing.T) {

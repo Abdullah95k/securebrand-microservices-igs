@@ -24,17 +24,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/task"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/browser"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/docids"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/parse"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/session"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/transport"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/docids"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/transport"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 )
 
 // Verdict is the outcome of one check.

@@ -6,16 +6,16 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/abdullah95k/securebrand-microservices/configs"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/browser"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/docids"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/proxy"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/session"
-	"github.com/abdullah95k/securebrand-microservices/internal/media"
-	"github.com/abdullah95k/securebrand-microservices/internal/registrysync"
+	"github.com/abdullah95k/securebrand-microservices-igs/configs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/docids"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/media"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/registrysync"
 )
 
 // NewRegistrySync builds the registry sync: its own small identity pool

@@ -7,8 +7,8 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/htmlx"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
 )
 
 // PageVersion is recorded in Observation.parser_version.

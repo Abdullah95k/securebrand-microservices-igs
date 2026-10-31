@@ -10,13 +10,13 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
-	taskv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fbs/task/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/checkpoint"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/jobs"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/task"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/kafka"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/metrics"
-	"github.com/abdullah95k/securebrand-microservices/internal/topics"
+	taskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fbs/task/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/checkpoint"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
 // Worker runs stage tasks consumed from Kafka. It owns the generic task

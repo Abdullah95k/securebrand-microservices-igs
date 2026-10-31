@@ -14,17 +14,17 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
 
-	"github.com/abdullah95k/securebrand-microservices/configs"
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/api"
-	"github.com/abdullah95k/securebrand-microservices/internal/app"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
-	"github.com/abdullah95k/securebrand-microservices/internal/fixtures"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/kafka"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/pg"
-	"github.com/abdullah95k/securebrand-microservices/internal/store"
-	"github.com/abdullah95k/securebrand-microservices/internal/topics"
+	"github.com/abdullah95k/securebrand-microservices-igs/configs"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fixtures"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
 func migrate(ctx context.Context, cfg *config.Config, sub string) error {

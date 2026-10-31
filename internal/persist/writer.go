@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/metrics"
-	"github.com/abdullah95k/securebrand-microservices/internal/store"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 )
 
 // Writer performs batched upserts.

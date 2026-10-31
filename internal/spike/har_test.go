@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/parse"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 )
 
 const harCookie = "datr=HARCOOKIEVALUE123"

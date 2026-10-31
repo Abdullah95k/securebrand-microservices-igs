@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/configs"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/proxy"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/session"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/transport"
+	"github.com/abdullah95k/securebrand-microservices-igs/configs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/transport"
 )
 
 // Env is a ready-to-use client stack against fakefb.

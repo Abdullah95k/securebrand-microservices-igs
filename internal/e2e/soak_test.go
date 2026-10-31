@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/api"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/jobs"
-	"github.com/abdullah95k/securebrand-microservices/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
 )
 
 // TestSoak runs the scheduled pipeline for FBS_SOAK_DURATION (default 20m)

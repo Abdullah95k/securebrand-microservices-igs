@@ -7,7 +7,7 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
 )
 
 // Version of the timeline parser, recorded in Observation.parser_version.

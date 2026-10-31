@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 )
 
 func testScheduler(t *testing.T) config.Scheduler {

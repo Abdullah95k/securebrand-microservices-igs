@@ -17,12 +17,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	fbv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fb/v1"
-	taskv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fbs/task/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/jobs"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/task"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/kafka"
-	"github.com/abdullah95k/securebrand-microservices/internal/topics"
+	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
+	taskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fbs/task/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )
 
 // Job kinds.

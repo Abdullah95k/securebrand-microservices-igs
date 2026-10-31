@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/proxy"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/transport"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/transport"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 )
 
 // PoolConfig configures identity creation.

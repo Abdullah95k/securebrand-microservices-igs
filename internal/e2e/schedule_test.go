@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/api"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/ratelimit"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/ratelimit"
 )
 
 func (s *Stack) waitJob(t *testing.T, key, id string, d time.Duration) jobView {

@@ -27,8 +27,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	plog "github.com/abdullah95k/securebrand-microservices/internal/platform/log"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 )
 
 func usage() {

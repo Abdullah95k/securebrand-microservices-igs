@@ -10,16 +10,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
-	"github.com/abdullah95k/securebrand-microservices/configs"
-	"github.com/abdullah95k/securebrand-microservices/internal/app"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/browser"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
-	"github.com/abdullah95k/securebrand-microservices/internal/platform/metrics"
-	"github.com/abdullah95k/securebrand-microservices/internal/registrysync"
-	"github.com/abdullah95k/securebrand-microservices/internal/store"
-	"github.com/abdullah95k/securebrand-microservices/internal/testenv"
+	"github.com/abdullah95k/securebrand-microservices-igs/configs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/registrysync"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
 )
 
 type fixture struct {

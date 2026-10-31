@@ -12,9 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	taskv1 "github.com/abdullah95k/securebrand-microservices/gen/go/securebrand/fbs/task/v1"
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/task"
-	"github.com/abdullah95k/securebrand-microservices/internal/dispatch"
+	taskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fbs/task/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/dispatch"
 )
 
 // Page is the API view of a page.

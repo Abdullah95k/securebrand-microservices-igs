@@ -18,14 +18,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/configs"
-	"github.com/abdullah95k/securebrand-microservices/internal/config"
-	"github.com/abdullah95k/securebrand-microservices/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/fbtest"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/proxy"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/registry"
+	"github.com/abdullah95k/securebrand-microservices-igs/configs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/fbtest"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 )
 
 const (

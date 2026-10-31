@@ -16,10 +16,10 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/htmlx"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/proxy"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/transport"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/transport"
 )
 
 // Identity is used by one task at a time (see Pool.Acquire).

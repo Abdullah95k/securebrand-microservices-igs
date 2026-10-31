@@ -12,14 +12,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/abdullah95k/securebrand-microservices/internal/crawl/task"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/detect"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/docids"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/graphql"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/htmlx"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/parse"
-	"github.com/abdullah95k/securebrand-microservices/internal/fb/session"
-	"github.com/abdullah95k/securebrand-microservices/internal/fixtures"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/docids"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/fixtures"
 )
 
 // Capture records real responses of one page as parser fixtures under
