@@ -98,7 +98,7 @@ func TestRequests(t *testing.T) {
 	c := &graphql.Client{Registry: registry.NewStatic(seed), Rules: igdetect.Rules(), Builder: Builder{AcceptLanguage: "en-US,en;q=0.9"}}
 	ctx := context.Background()
 	for _, r := range []graphql.Request{
-		{Query: "grid", Vars: map[string]any{"user_pk": "1", "cursor": "CUR"}, Referer: BaseURL + "/brand/"},
+		{Query: "grid", Vars: map[string]any{"user_id": "1", "cursor": "CUR"}, Referer: BaseURL + "/brand/"},
 		{Query: "highlights", Vars: map[string]any{"reel_ids": []string{"highlight:9"}, "initial_reel_id": "highlight:9"}},
 	} {
 		if resp, err := c.Do(ctx, id, r); err != nil || resp.Class != detect.OK {

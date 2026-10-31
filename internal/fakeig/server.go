@@ -128,7 +128,10 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		data = map[string]any{"xig_polaris_media": mediaJSON(post, true)}
+		// The post page embeds the media object and its first comments.
+		m := mediaJSON(post, true)
+		m["comments_connection"] = s.commentPage(post, 0, "")
+		data = map[string]any{"xig_polaris_media": m}
 	case len(parts) == 1 && parts[0] != "":
 		p := s.World.Profile(parts[0])
 		if p == nil {
@@ -139,7 +142,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, r.URL.Path+"/", http.StatusMovedPermanently)
 			return
 		}
-		data = map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "username": p.Username,
+		data = map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID, "username": p.Username,
 			"polaris_ordered_timeline_connection": s.gridPage(p, 0, "")}}
 	default:
 		http.NotFound(w, r)
@@ -258,15 +261,17 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeGrid(w, p, 0, id, func(conn any) any {
-			return map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "polaris_ordered_timeline_connection": conn}}
+			return map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID, "polaris_ordered_timeline_connection": conn}}
 		})
 	case OpGrid:
-		pk, _ := strconv.ParseInt(sv(vars["id"]), 10, 64)
-		p := s.World.byPK[pk]
+		// The connection query resolves the user's id, not its pk: a pk
+		// answers a null node, as Instagram does.
+		p := s.World.byID[sv(vars["id"])]
 		if p == nil {
 			write(w, data(map[string]any{"node": nil}))
 			return
 		}
+		pk := p.PK
 		offset := 0
 		if c := sv(vars["after"]); c != "" {
 			var ok bool
@@ -286,6 +291,14 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 		post := s.World.posts[pk]
 		if post == nil {
 			write(w, data(map[string]any{"xig_polaris_media": nil}))
+			return
+		}
+		if a, ok := vars["after"]; ok && a == "" {
+			// An empty cursor fails the connection, as on Instagram.
+			write(w, map[string]any{"data": map[string]any{"xig_polaris_media": map[string]any{"id": "POLARIS_" + str(pk),
+				"comments_connection": map[string]any{"edges": []any{}, "page_info": nil}}},
+				"errors": []any{map[string]any{"message": "A server error field_exception occurred. Check server logs for details.",
+					"severity": "ERROR", "path": []any{"xig_polaris_media", "comments_connection", "edges"}}}})
 			return
 		}
 		offset := 0
@@ -423,7 +436,7 @@ func profileJSON(p *Profile, host string) map[string]any {
 	for _, h := range p.Highlights {
 		hl = append(hl, map[string]any{"node": map[string]any{"id": "highlight:" + str(h.ID), "title": h.Title}})
 	}
-	return map[string]any{"pk": str(p.PK), "id": str(p.PK), "username": p.Username, "full_name": p.FullName,
+	return map[string]any{"pk": str(p.PK), "id": p.ID, "username": p.Username, "full_name": p.FullName,
 		"biography": p.Bio, "is_verified": p.Verified, "is_private": false, "is_memorialized": false,
 		"follower_count": p.Followers, "following_count": p.Following, "all_media_count": nil, "has_any_clips": true,
 		"profile_pic_url": host + "/fake-cdn/" + str(p.PK) + ".jpg", "linked_fb_info": nil,
@@ -436,7 +449,8 @@ func mediaJSON(post *Post, detail bool) map[string]any {
 	m := map[string]any{"pk": str(post.PK), "id": str(post.PK) + "_" + str(post.Owner.PK), "code": post.Code,
 		"media_type": post.MediaType, "product_type": post.ProductType, "caption": map[string]any{"text": post.Caption},
 		"display_uri": "https://scontent.cdninstagram.example/v/" + post.Code + ".jpg",
-		"owner":       map[string]any{"pk": str(post.Owner.PK), "id": str(post.Owner.PK)}}
+		"owner":       map[string]any{"pk": str(post.Owner.PK), "id": post.Owner.ID},
+		"user":        map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}
 	if detail {
 		m["taken_at"] = post.TakenAt.Unix()
 		m["like_count"] = post.Likes

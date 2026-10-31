@@ -45,8 +45,10 @@ queries:
       first: 12
       __relay_internal__pv__PolarisSEOIsCrawlerrelayprovider: false
 
-  # Later grid pages, by user pk and cursor. U9: whether it also answers
-  # with no cursor (a profile read by pk alone).
+  # Later grid pages, by the user's id and a cursor. The id is the user
+  # object's "id" (17841...), not its "pk": with the pk, Instagram answers
+  # {"data":{"node":null}} (the owner's probe run, 2026-10-31). U9: whether
+  # it also answers with no cursor (a profile read by id alone).
   - name: grid
     friendly_name: PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery_connection
     doc_id: "28904005159232689"
@@ -54,12 +56,14 @@ queries:
     parser_version: 1
     priority: 10
     variables:
-      id: "{{user_pk}}"
+      id: "{{user_id}}"
       after: "{{cursor}}"
       first: 12
       __relay_internal__pv__PolarisSEOIsCrawlerrelayprovider: false
 
-  # Top-level comments, 10 per page, newest first.
+  # Top-level comments, 10 per page, newest first. With "after": "" the
+  # comments connection fails (field_exception); a first page needs null
+  # (an absent cursor renders as null) or the post page's embedded comments.
   - name: comments
     friendly_name: PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery
     doc_id: "27837656105907150"

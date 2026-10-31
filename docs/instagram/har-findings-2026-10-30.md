@@ -30,10 +30,15 @@ All are `POST`, `application/x-www-form-urlencoded`, persisted queries (`doc_id`
 |---|---|---|---|---|---|
 | Profile | `PolarisLoggedOutDesktopWWWProfileRootContentQuery` | `/api/graphql` | `27981003384861049` | `username` | `data.xig_user_by_username` |
 | Profile grid, first page | `PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery` | `/api/graphql` | `29483846714553007` | `username`, `first: 12`, `__relay_internal__pv__PolarisSEOIsCrawlerrelayprovider: false` | `data.xig_user_by_username.polaris_ordered_timeline_connection` |
-| Profile grid, next pages | `PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery_connection` | `/api/graphql` | `28904005159232689` | `id` (user pk), `after` (90-char cursor), `first: 12`, the same provider flag | `data.node.polaris_ordered_timeline_connection` |
+| Profile grid, next pages | `PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery_connection` | `/api/graphql` | `28904005159232689` | `id` (the user object's `id`, 17841…, **not** its `pk`; see the correction below), `after` (90-char cursor), `first: 12`, the same provider flag | `data.node.polaris_ordered_timeline_connection` |
 | Comments | `PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery` | `/api/graphql` | `27837656105907150` | `media_id` (media pk), `after` (142-char cursor), `first: 10` | `data.xig_polaris_media.comments_connection` |
 | Highlights | `PolarisStoriesV3HighlightsLoggedOutPageQuery` | `/graphql/query` | `39683663864580775` | `reel_ids: ["highlight:<id>"]`, `initial_reel_id`, `first: 1`, `apply_new_highlights_filter`, a community-notes provider flag | root field `xdt_api__v1__feed__reels_media__connection` (header `x-root-field-name`) |
 | UI only (no data needed) | `PolarisLoggedOutDynamicDialogQuery` (login prompt), `PolarisLoggedOutDesktopWWWAYMLQuery` ("accounts you may like"), `fetchPolarisLoggedOutExperimentQuery`, `QuickPromotionSupportIGSchemaBatchFetchQuery` | `/api/graphql` | — | — | — |
+
+**Corrections from the owner's probe runs (2026-10-31, droplet, ISP and residential):**
+- The user object carries two ids: `pk` (for example 9 digits) and `id` (17 digits starting 17841). The grid's `_connection` query resolves `id`; given the `pk`, it answers `{"data":{"node":null}}` with no error.
+- The comments query with `"after": ""` answers its connection with three `field_exception` errors (on `edges`, `geoblocked_comment_notices` and `page_info`) beside an empty list. A first page needs `"after": null`, or the post page's embedded comments.
+- The first grid page answered in one part, with `has_next_page: true` and an `end_cursor`.
 
 The page HTML of a profile, post or reel already embeds the first page of data as Relay JSON (`<script type="application/json" data-sjs>`):
 - **profile page:** the first 12 grid posts;

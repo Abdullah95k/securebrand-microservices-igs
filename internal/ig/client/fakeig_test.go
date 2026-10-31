@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
@@ -59,7 +61,7 @@ func TestClientAgainstFakeig(t *testing.T) {
 			seen := len(conn.Get("edges").Array())
 			cursor := conn.Get("page_info.end_cursor").String()
 			for conn.Get("page_info.has_next_page").Bool() {
-				next := do(t, env, id, "grid", map[string]any{"user_pk": u.Get("pk").String(), "cursor": cursor})
+				next := do(t, env, id, "grid", map[string]any{"user_id": u.Get("id").String(), "cursor": cursor})
 				if next.Class != detect.OK {
 					t.Fatalf("grid page after %d: %s %s", seen, next.Class, next.Reason)
 				}
@@ -81,9 +83,18 @@ func TestClientAgainstFakeig(t *testing.T) {
 			if post == nil {
 				t.Fatal("no post with more than one comment page")
 			}
+			// By pk the grid's connection query finds no user, as on
+			// Instagram: it takes the user's id.
+			if r := do(t, env, id, "grid", map[string]any{"user_id": u.Get("pk").String()}); r.Parts[0].Get("data.node").Type != gjson.Null {
+				t.Fatalf("grid by pk: %s", r.Body)
+			}
 			comments, cursor := 0, ""
 			for {
-				resp := do(t, env, id, "comments", map[string]any{"media_pk": strconv.FormatInt(post.PK, 10), "cursor": cursor})
+				vars := map[string]any{"media_pk": strconv.FormatInt(post.PK, 10)}
+				if cursor != "" {
+					vars["cursor"] = cursor
+				}
+				resp := do(t, env, id, "comments", vars)
 				cc := resp.Parts[0].Get("data.xig_polaris_media.comments_connection")
 				if resp.Class != detect.OK {
 					t.Fatalf("comments: %s %s", resp.Class, resp.Reason)

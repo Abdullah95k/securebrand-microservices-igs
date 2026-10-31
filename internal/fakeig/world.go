@@ -30,7 +30,10 @@ func DefaultSpec() Spec {
 
 // Profile is one account.
 type Profile struct {
-	PK         int64
+	PK int64
+	// ID is the user object's "id", which the grid's _connection query
+	// takes; it differs from the pk, as on Instagram.
+	ID         string
 	Username   string
 	FullName   string
 	Bio        string
@@ -76,6 +79,7 @@ type World struct {
 	profiles []*Profile
 	byName   map[string]*Profile
 	byPK     map[int64]*Profile
+	byID     map[string]*Profile
 	posts    map[int64]*Post
 }
 
@@ -85,13 +89,14 @@ var Epoch = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 // NewWorld generates a world from s.
 func NewWorld(s Spec) *World {
 	r := rand.New(rand.NewPCG(s.Seed, 0x1a))
-	w := &World{byName: map[string]*Profile{}, byPK: map[int64]*Profile{}, posts: map[int64]*Post{}}
+	w := &World{byName: map[string]*Profile{}, byPK: map[int64]*Profile{}, byID: map[string]*Profile{}, posts: map[int64]*Post{}}
 	nextPK := int64(3_000_000_000_000_000_000)
 	pk := func() int64 { nextPK += 1 + r.Int64N(1000); return nextPK }
 	for i := range s.Profiles {
 		p := &Profile{PK: 50_000_000_000 + int64(i)*7919, Username: fmt.Sprintf("profile_%02d", i+1),
 			FullName: fmt.Sprintf("Profile %02d", i+1), Bio: "synthetic biography",
 			Followers: 1000 + r.Int64N(100000), Following: r.Int64N(500), Verified: i%2 == 0}
+		p.ID = fmt.Sprintf("178414%011d", p.PK%100_000_000_000)
 		for j := range s.PostsPerProfile {
 			post := &Post{PK: pk(), MediaType: []int{1, 2, 8}[r.IntN(3)], Caption: fmt.Sprintf("synthetic caption %d", j+1),
 				TakenAt: Epoch.Add(-time.Duration(j) * s.PostSpacing), Likes: r.Int64N(5000), Owner: p}
@@ -115,6 +120,7 @@ func NewWorld(s Spec) *World {
 		w.profiles = append(w.profiles, p)
 		w.byName[p.Username] = p
 		w.byPK[p.PK] = p
+		w.byID[p.ID] = p
 	}
 	return w
 }
