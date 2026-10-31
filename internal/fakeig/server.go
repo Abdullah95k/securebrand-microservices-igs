@@ -408,7 +408,7 @@ func mediaJSON(post *Post, detail bool) map[string]any {
 	m := map[string]any{"pk": str(post.PK), "id": str(post.PK) + "_" + str(post.Owner.PK), "code": post.Code,
 		"media_type": post.MediaType, "product_type": post.ProductType, "caption": map[string]any{"text": post.Caption},
 		"display_uri": "https://scontent.cdninstagram.example/v/" + post.Code + ".jpg",
-		"owner": map[string]any{"pk": str(post.Owner.PK), "id": str(post.Owner.PK)}}
+		"owner":       map[string]any{"pk": str(post.Owner.PK), "id": str(post.Owner.PK)}}
 	if detail {
 		m["taken_at"] = post.TakenAt.Unix()
 		m["like_count"] = post.Likes
