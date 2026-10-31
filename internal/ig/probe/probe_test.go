@@ -73,6 +73,12 @@ func TestProbeAgainstFakeig(t *testing.T) {
 			!strings.HasSuffix(p.Posts[0].URL, "/"+want.Posts[0].Code+"/") || p.Posts[0].MediaType == "" || p.Posts[0].ThumbnailURL == "" {
 			t.Fatalf("profile %d posts: %d, first %+v", p.Index, len(p.Posts), p.Posts[0])
 		}
+		// Each step keeps its own outcome (they once shared one variable).
+		if p.GridFirst.Items != fakeig.GridPageSize || !p.GridFirst.HasNext || p.GridByPK.Items != fakeig.GridPageSize ||
+			p.CommentsRead.Items != len(p.Comments) || p.Highlights.Items != d.Highlights[0].Items || p.Profile.Items != 0 {
+			t.Fatalf("profile %d steps: first %+v, by pk %+v, comments %+v, highlights %+v, profile %+v",
+				p.Index, p.GridFirst, p.GridByPK, p.CommentsRead, p.Highlights, p.Profile)
+		}
 		newest := want.Posts[0]
 		if len(p.Comments) != min(len(newest.Comments), fakeig.CommentPageSize) {
 			t.Fatalf("profile %d comments: %d of %d", p.Index, len(p.Comments), len(newest.Comments))
@@ -159,4 +165,44 @@ func TestProbeFindsTheWalls(t *testing.T) {
 			t.Fatalf("grid %+v", g)
 		}
 	})
+}
+
+// A grid streamed in parts, as Relay sends a connection (edges in their own
+// parts, the real page_info deferred), is read whole: every post, the walk
+// to the end, the other identity's cursor and the grid by pk. The raw
+// answers and the first pages' HTML are saved.
+func TestProbeReadsAStreamedGrid(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Faults: fakeig.Faults{StreamGrid: true}})
+	var names []string
+	for _, p := range env.World.Profiles() {
+		names = append(names, p.Username)
+	}
+	raw := filepath.Join(t.TempDir(), "raw")
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct",
+		MaxGridPages: 10, Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, RawDir: raw, RawPages: 2})
+	n := len(names)
+	posts := len(env.World.Profiles()[0].Posts)
+	s := rep.Summary
+	if s.GridEnds != n || s.MaxPosts != posts || s.PagedPast24 != n || s.CursorPortable != n || s.GridByPKWorks != n {
+		t.Fatalf("summary %+v", s)
+	}
+	for _, p := range rep.Profiles {
+		if len(p.Posts) != posts || p.GridFirst.Items != fakeig.GridPageSize || !p.GridFirst.HasNext {
+			t.Fatalf("profile %d: %d posts, first page %+v", p.Index, len(p.Posts), p.GridFirst)
+		}
+	}
+	first := filepath.Join(raw, "001-"+names[0])
+	for _, pattern := range []string{"page.html", "*-profile-ok.json", "*-grid_first-ok.json", "*-grid-ok.json", "*-comments-ok.json"} {
+		if m, _ := filepath.Glob(filepath.Join(first, pattern)); len(m) == 0 {
+			t.Errorf("no %s in %s", pattern, first)
+		}
+	}
+	if m, _ := filepath.Glob(filepath.Join(raw, "003-*", "page.html")); len(m) != 0 {
+		t.Error("page HTML saved past RawPages")
+	}
+	// One grid page per profile is enough to check the shape; failures and
+	// empty pages would be kept too.
+	if m, _ := filepath.Glob(filepath.Join(first, "*-grid-ok.json")); len(m) != 1 {
+		t.Errorf("grid pages saved: %v", m)
+	}
 }

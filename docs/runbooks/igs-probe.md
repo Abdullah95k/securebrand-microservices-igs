@@ -132,6 +132,7 @@ For each tier, `phase0/out-ig/<tier>/` holds:
 | `posts.csv` | One row per post read: link, type, caption, thumbnail link |
 | `comments.csv` | The newest post's first comments |
 | `images/` | The profile pictures |
+| `raw/` | Instagram's raw answers, to check their shape: per profile the first answer of each query and every failed or empty one, and the page HTML of the first 3 profiles |
 | `report.json` | Everything above, plus every request's outcome, timing and size, and the answers to U1 to U9 under `summary` |
 
 and `phase0/out-ig/<tier>.tar.gz` packs the folder for downloading.

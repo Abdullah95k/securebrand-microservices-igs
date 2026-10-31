@@ -40,14 +40,14 @@ The owner's decisions doc (rev 743) still shows the old D7 answer ("share code .
 
 | # | Question | Status |
 |---|---|---|
-| U1 | Grid paging past 24 posts | open: probe (C2) |
+| U1 | Grid paging past 24 posts | open: the first probe run's grid counts were misread by the probe (see Findings); rerun after the fix |
 | U2 | Cheap post-detail query | open: HAR (C1) |
-| U3 | Client-state form fields needed? | open: probe (C2) |
+| U3 | Client-state form fields needed? | **answered (first probe run, 2026-10-31): no.** Residential tier, 5 profiles: all 30 queries (profile, grid, comments, highlights) answered OK without `__dyn`, `__csr`, `__hblp`, `__hsdp`, `__sjsp` |
 | U4 | Per-IP tolerance and wire bytes per tier | open: Phase 0 (C3) |
-| U5 | Cursors bound to identity? | open: probe (C2) |
+| U5 | Cursors bound to identity? | open: misread in the first run, as U1 |
 | U6 | doc_ids in static bundles? | open: M9 |
 | U7 | Tagged posts logged out? | open: HAR (C1) |
-| U8 | Cookies set and expected | open: probe (C2) |
+| U8 | Cookies set and expected | **answered for page loads (first probe run): `csrftoken`, `datr`, `ig_did` on every profile page, `ps_l` and `ps_n` on 3 of 5**; no `mid` |
 | U9 | Can a profile whose username changed be read by its pk alone (the grid `_connection` query with `id` and no cursor)? The profile and first-grid queries take a username | new (M0); open: probe (C2) |
 | U10 | Does a media pk encode its creation time? If so, the grid walk can stop at the age window without reading post details | new (M0), a hypothesis; open: check against the HAR timestamps in M5 |
 
@@ -64,6 +64,14 @@ From M0 (details and evidence in the [reuse matrix](reuse-matrix.md)):
 - **Go cannot import another module's `internal/` packages**, which is why a separate repository means a copy (ADR 0004).
 - **A flaky test in the copied suite:** `TestBlockedIdentitiesRetryAndTruncation` (`internal/e2e`) failed once in PR #1's CI (a thread task used up its 5 stalled retries under fakefb's rate-limit fault; job `partial`, 329/349 comments) and passed on re-run, with identical code. It is part of the regression net for M1 and M2; make it deterministic before relying on it for M2's retry fixes.
 - The GitHub integration in build sessions cannot create repositories (HTTP 403); the owner creates them, and a session attaches one with `add_repo`.
+
+From the owner's first probe run (2026-10-31, droplet, 5 profiles from the owner's list, ISP and residential):
+- **Logged-out pages bootstrap through both proxy tiers**: 5 of 5 page loads on ISP and on residential carried all 11 tokens the probe looks for (`lsd`, `csrf_token`, `app_id`, `jazoest`, `__spin_r/b/t`, `__rev`, `__hs`, `__hsi`, `rollout_hash`); no wall, no challenge, no rate limit in 59 queries.
+- **The profile query works**: follower and following counts, verified and private flags, biography, bio links and the profile picture (3 to 9 KB, so the small version) were read for every profile. The first grid page's 12 posts (link, caption, thumbnail, type) too, and it said there is a next page.
+- **Not read yet (the probe's fault, not Instagram's):** later grid pages, comments and highlights. Their queries answered OK, but the probe found no items in them, and no highlights list in the profile answer.
+- **Cost on the wire** (ISP, means): profile page 138 KB, first grid page 10.4 KB, a later grid page 3.7 KB, profile query 5.1 KB, comments 4.1 KB, profile picture 7.4 KB; latency 2 to 3.5 s per request. Residential was within 10% on every figure.
+- **U3 and U8 are answered** (table above).
+- **The probe misread the grid**, so U1, U5 and U9 need a rerun. Every grid first page reported 12 posts and no next page, and the cursor and pk checks found no posts in answers classed OK. The likely cause: Instagram streams the connection in parts (edges and the real `page_info` after the first part), and the probe read only the first part. Fixed: the probe reads every part (and a deferred `page_info`), follows a first page's cursor even when it says no next page, and saves the raw answers under `raw/` so the shape can be checked. Also fixed: every per-profile step in `report.json` pointed at one shared variable, so each showed the last request (the summary counts were right).
 
 From the M1d-2 to M1d-5a session:
 - **registry-sync must copy a query's route.** It builds a candidate doc_id's row by copying the active row; without copying `endpoint` and `headers`, a rotation would have sent Instagram's promoted highlights query to `/api/graphql`. Fixed in M1d-2 and covered by an integration test.

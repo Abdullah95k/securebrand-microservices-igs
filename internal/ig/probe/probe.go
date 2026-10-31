@@ -39,6 +39,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
 )
 
 // Options configure a run.
@@ -56,6 +57,12 @@ type Options struct {
 	Version     string
 	// ImageDir, when set, receives each profile picture as <username>.jpg.
 	ImageDir string
+	// RawDir, when set, receives Instagram's raw answers, to check their
+	// shape: per profile the first response of each query and every
+	// response that did not answer OK or held no items, and the page HTML of
+	// the first RawPages profiles.
+	RawDir   string
+	RawPages int
 	// Progress, when set, gets one line per finished profile.
 	Progress func(string)
 	Now      func() time.Time
@@ -247,11 +254,20 @@ type runner struct {
 	o      Options
 	sum    Summary
 	second *session.Identity // the U5 identity, bootstrapped once
+	// The profile being read, for the raw answers.
+	rawDir   string
+	rawSeq   int
+	rawSaved map[string]bool
+	pages    int // page HTML files saved
 }
 
 func (r *runner) profile(ctx context.Context, index int, username string) Profile {
 	page := strings.TrimRight(r.o.BaseURL, "/") + "/" + username + "/"
 	out := Profile{Index: index, Username: username, URL: page}
+	r.rawSeq, r.rawSaved = 0, map[string]bool{}
+	if r.o.RawDir != "" {
+		r.rawDir = filepath.Join(r.o.RawDir, fmt.Sprintf("%03d-%s", index, unsafeName.ReplaceAllString(username, "_")))
+	}
 	id, err := r.o.Pool.Acquire(ctx, r.o.Tier)
 	if err != nil {
 		out.Bootstrap = Step{Class: "no_identity", Reason: err.Error()}
@@ -268,6 +284,10 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	out.Bootstrap.Class, out.Bootstrap.Status, out.Bootstrap.WireBytes = pl.Class.String(), pl.Status, pl.Bytes
 	out.Bootstrap.Reason = pl.Reason
 	r.cost("page", out.Bootstrap)
+	if r.rawDir != "" && pl.Class == detect.OK && r.pages < r.o.RawPages {
+		r.pages++
+		r.saveRaw("page.html", pl.HTML)
+	}
 	if pl.Class == detect.OK {
 		out.TokensFound = htmlx.Found(htmlx.ExtractTokens(pl.HTML))
 		for k, ok := range out.TokensFound {
@@ -297,17 +317,29 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 
 	// Profile: the user pk and the highlights list.
 	resp, s := r.do(ctx, id, "profile", map[string]any{"username": username}, page)
-	out.Profile = &s
+	out.Profile = ptr(s)
 	if resp == nil || resp.Class != detect.OK {
 		return out
 	}
 	user := first(resp.Parts, "data.xig_user_by_username")
+	if !user.Exists() {
+		user = findAll(resp.Parts, "xig_user_by_username")
+	}
 	pk := user.Get("pk").String()
 	if pk == "" {
+		r.keepRaw("profile", resp, 0)
 		out.Profile.Reason = "no user in the response"
 		return out
 	}
+	r.keepRaw("profile", resp, 1)
 	out.Data = profileData(user)
+	if len(out.Data.Highlights) == 0 {
+		// The first run found no highlights on any profile: the list may
+		// come in another part of the answer.
+		for _, e := range findAll(resp.Parts, "lox_highlights_connection").Get("edges").Array() {
+			out.Data.Highlights = append(out.Data.Highlights, Highlight{ID: e.Get("node.id").String(), Title: e.Get("node.title").String()})
+		}
+	}
 	if r.o.ImageDir != "" && out.Data.ProfilePicURL != "" {
 		out.Data.ProfilePicFile = r.saveImage(ctx, id, out.Data.ProfilePicURL, username, page)
 	}
@@ -318,14 +350,14 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 
 	// First grid page, by username.
 	resp, s = r.do(ctx, id, "grid_first", map[string]any{"username": username}, page)
-	out.GridFirst = &s
+	out.GridFirst = ptr(s)
 	if resp == nil || resp.Class != detect.OK {
 		return out
 	}
-	conn := first(resp.Parts, "data.xig_user_by_username.polaris_ordered_timeline_connection")
-	edges := conn.Get("edges").Array()
-	out.GridFirst.Items, out.GridFirst.HasNext = len(edges), conn.Get("page_info.has_next_page").Bool()
-	cursor := conn.Get("page_info.end_cursor").String()
+	edges, pi := connection(resp.Parts, gridConn)
+	out.GridFirst.Items, out.GridFirst.HasNext = len(edges), pi.HasNext
+	r.keepRaw("grid_first", resp, len(edges))
+	cursor := pi.EndCursor
 	out.Posts = append(out.Posts, r.posts(edges)...)
 	var mediaPK, newest string
 	if len(out.Posts) > 0 {
@@ -337,7 +369,8 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		if other := r.otherIdentity(ctx, page); other != nil {
 			resp, s := r.do(ctx, other, "grid", map[string]any{"user_pk": pk, "cursor": cursor}, page)
 			s.Items = gridItems(resp)
-			out.OtherCursor = &s
+			r.keepRaw("grid_other_identity", resp, s.Items)
+			out.OtherCursor = ptr(s)
 			if s.Class == detect.OK.String() && s.Items > 0 {
 				r.sum.CursorPortable++
 			} else {
@@ -352,7 +385,8 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	// U9: the grid by pk with no cursor.
 	resp, s = r.do(ctx, id, "grid", map[string]any{"user_pk": pk, "cursor": ""}, page)
 	s.Items = gridItems(resp)
-	out.GridByPK = &s
+	r.keepRaw("grid_by_pk", resp, s.Items)
+	out.GridByPK = ptr(s)
 	if s.Class == detect.OK.String() && s.Items > 0 {
 		r.sum.GridByPKWorks++
 	} else {
@@ -362,10 +396,11 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	// Comments of the newest post, and the first highlight.
 	if mediaPK != "" {
 		resp, s = r.do(ctx, id, "comments", map[string]any{"media_pk": mediaPK, "cursor": ""}, page)
-		cc := first(respParts(resp), "data.xig_polaris_media.comments_connection")
-		s.Items, s.HasNext = len(cc.Get("edges").Array()), cc.Get("page_info.has_next_page").Bool()
-		out.CommentsRead = &s
-		for _, e := range cc.Get("edges").Array() {
+		cedges, cpi := connection(respParts(resp), "comments_connection")
+		s.Items, s.HasNext = len(cedges), cpi.HasNext
+		r.keepRaw("comments", resp, s.Items)
+		out.CommentsRead = ptr(s)
+		for _, e := range cedges {
 			n := e.Get("node")
 			out.Comments = append(out.Comments, Comment{PostShortcode: newest, PK: n.Get("pk").String(),
 				Username: n.Get("user.username").String(), Verified: n.Get("user.is_verified").Bool(), Text: n.Get("text").String(),
@@ -374,8 +409,9 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 	if highlight != "" {
 		resp, s = r.do(ctx, id, "highlights", map[string]any{"reel_ids": []string{highlight}, "initial_reel_id": highlight}, page)
-		s.Items = len(first(respParts(resp), "data.xdt_api__v1__feed__reels_media__connection.edges.0.node.items").Array())
-		out.Highlights = &s
+		s.Items = len(findAll(respParts(resp), "items").Array())
+		r.keepRaw("highlights", resp, s.Items)
+		out.Highlights = ptr(s)
 		out.Data.Highlights[0].Items = s.Items
 	} else {
 		out.NoHighlights = true
@@ -386,7 +422,9 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor string, out *Profile, page string) *Grid {
 	firstPage := out.GridFirst
 	g := &Grid{Posts: firstPage.Items, Stop: "end"}
-	if !firstPage.HasNext {
+	// A first page that names a cursor is followed even when it says no
+	// next page, so the answer comes from what the next query returns.
+	if !firstPage.HasNext && cursor == "" {
 		r.sum.GridEnds++
 		r.sum.GridFirstAlone++
 		r.sum.MaxPosts = max(r.sum.MaxPosts, g.Posts)
@@ -402,14 +440,22 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, pk, cursor stri
 			g.Stop, g.Failed = "wall:"+s.Class, &s
 			break
 		}
-		g.Pages++
-		conn := first(resp.Parts, "data.node.polaris_ordered_timeline_connection")
-		g.Posts += len(conn.Get("edges").Array())
-		out.Posts = append(out.Posts, r.posts(conn.Get("edges").Array())...)
-		cursor = ""
-		if conn.Get("page_info.has_next_page").Bool() {
-			cursor = conn.Get("page_info.end_cursor").String()
+		edges, pi := connection(resp.Parts, gridConn)
+		r.keepRaw("grid", resp, len(edges))
+		if len(edges) == 0 {
+			break // nothing more, whatever page_info says
 		}
+		g.Pages++
+		g.Posts += len(edges)
+		out.Posts = append(out.Posts, r.posts(edges)...)
+		next := ""
+		if pi.HasNext || pi.EndCursor != cursor {
+			next = pi.EndCursor
+		}
+		if next == cursor {
+			next = ""
+		}
+		cursor = next
 	}
 	g.PastPage = g.Posts > 24
 	switch g.Stop {
@@ -457,6 +503,10 @@ func (r *runner) do(ctx context.Context, id *session.Identity, query string, var
 	}
 	s.Class, s.Status, s.WireBytes, s.Reason = resp.Class.String(), resp.Status, resp.BytesIn+resp.BytesOut, resp.Reason
 	r.sum.QueriesWithoutClientState[s.Class]++
+	if resp.Class != detect.OK && r.rawDir != "" {
+		r.rawSeq++
+		r.saveRaw(fmt.Sprintf("%02d-%s-%s.json", r.rawSeq, query, resp.Class), resp.Body)
+	}
 	r.cost(query, s)
 	return resp, s
 }
@@ -468,6 +518,10 @@ func (r *runner) cost(kind string, s Step) {
 	c.sumBytes += s.WireBytes
 	r.sum.Requests[kind] = c
 }
+
+// ptr copies a step: each report field keeps its own, though the step
+// variable is reused for the next request.
+func ptr(s Step) *Step { return &s }
 
 func first(parts []gjson.Result, path string) gjson.Result {
 	for _, p := range parts {
@@ -486,7 +540,81 @@ func respParts(resp *graphql.Response) []gjson.Result {
 }
 
 func gridItems(resp *graphql.Response) int {
-	return len(first(respParts(resp), "data.node.polaris_ordered_timeline_connection.edges").Array())
+	edges, _ := connection(respParts(resp), gridConn)
+	return len(edges)
+}
+
+// gridConn names the profile grid's connection in both grid queries.
+const gridConn = "polaris_ordered_timeline_connection"
+
+// connection reads the connection named key from every part of a response:
+// its edges wherever they stand (inside the connection object, or in parts
+// Relay streams separately, whose path ends in the connection's edges), and
+// its page_info, including a deferred page_info part (walk.FindPageInfo).
+// Edges repeated across parts count once.
+func connection(parts []gjson.Result, key string) ([]gjson.Result, walk.PageInfo) {
+	var edges []gjson.Result
+	seen := map[string]bool{}
+	add := func(e gjson.Result) {
+		if !e.Get("node").Exists() {
+			return
+		}
+		k := e.Get("node.pk").String() + "|" + e.Get("node.id").String()
+		if k != "|" && seen[k] {
+			return
+		}
+		seen[k] = true
+		edges = append(edges, e)
+	}
+	for _, p := range parts {
+		for _, c := range walk.FindAll(p, key) {
+			for _, e := range c.Get("edges").Array() {
+				add(e)
+			}
+		}
+		if path := p.Get("path"); path.IsArray() && strings.Contains(path.Raw, `"`+key+`"`) && strings.Contains(path.Raw, `"edges"`) {
+			d := p.Get("data")
+			if d.IsArray() {
+				for _, e := range d.Array() {
+					add(e)
+				}
+			} else {
+				add(d)
+			}
+		}
+	}
+	return edges, walk.FindPageInfo(parts, []string{key})
+}
+
+// findAll returns the first value stored under key in any part.
+func findAll(parts []gjson.Result, key string) gjson.Result {
+	for _, p := range parts {
+		if v := walk.Find(p, key); v.Exists() {
+			return v
+		}
+	}
+	return gjson.Result{}
+}
+
+// keepRaw saves an OK response's body when it is the first of its kind for
+// this profile, or held no items. do saves every response that was not OK.
+func (r *runner) keepRaw(kind string, resp *graphql.Response, items int) {
+	if r.rawDir == "" || resp == nil || resp.Class != detect.OK {
+		return
+	}
+	if r.rawSaved[kind] && items > 0 {
+		return
+	}
+	r.rawSaved[kind] = true
+	r.rawSeq++
+	r.saveRaw(fmt.Sprintf("%02d-%s-%s.json", r.rawSeq, kind, resp.Class), resp.Body)
+}
+
+func (r *runner) saveRaw(name string, body []byte) {
+	if err := os.MkdirAll(r.rawDir, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(r.rawDir, name), body, 0o600)
 }
 
 func gridLine(g *Grid) string {
