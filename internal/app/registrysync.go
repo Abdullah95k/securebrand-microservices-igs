@@ -9,6 +9,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/media"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/registrysync"
@@ -60,12 +61,12 @@ func NewRegistrySync(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, 
 	rules := detect.DefaultRules()
 	s := &registrysync.Sync{
 		DB: db, Cfg: rc, Pool: pool, Rules: rules, Params: reg.ClientParams,
-		Loader:         &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage},
+		Loader:         &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage, Hooks: fbclient.Hooks(cfg.FB.AcceptLanguage)},
 		AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale,
 		Fetch: docids.HTTPFetcher(media.NewHTTPClient()),
 	}
 	if cfg.FB.Browser.Enabled {
-		b, err := browser.NewBootstrapper(cfg.FB.Browser, cfg.FB.AcceptLanguage)
+		b, err := browser.NewBootstrapper(cfg.FB.Browser, cfg.FB.AcceptLanguage, fbclient.Hooks(cfg.FB.AcceptLanguage))
 		if err != nil {
 			return nil, nil, fmt.Errorf("fb.browser is enabled: %w", err)
 		}

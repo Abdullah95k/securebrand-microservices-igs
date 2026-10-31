@@ -17,6 +17,7 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/fbtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
@@ -148,7 +149,7 @@ func TestBootstrapFallback(t *testing.T) {
 	}
 	env.Pool.Release(id)
 
-	b, err := NewBootstrapper(config.Browser{MaxConcurrent: 1, MaxShare: 0.02, Timeout: time.Minute}, "en-US,en;q=0.9")
+	b, err := NewBootstrapper(config.Browser{MaxConcurrent: 1, MaxShare: 0.02, Timeout: time.Minute}, "en-US,en;q=0.9", fbclient.Hooks("en-US,en;q=0.9"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +169,7 @@ func TestBootstrapFallback(t *testing.T) {
 func TestBootstrapperShareCap(t *testing.T) {
 	env := fbtest.New(t, fbtest.Options{})
 	var renders atomic.Int32
-	b := &Bootstrapper{MaxShare: 0.1, Timeout: time.Second, sem: make(chan struct{}, 1), credit: 1, burst: 1,
+	b := &Bootstrapper{MaxShare: 0.1, Timeout: time.Second, sem: make(chan struct{}, 1), credit: 1, burst: 1, Hooks: fbclient.Hooks(""),
 		render: func(context.Context, string, Options) (*Result, error) {
 			renders.Add(1)
 			return &Result{HTML: []byte("<html></html>")}, nil
@@ -232,7 +233,7 @@ func TestSocksProxyWithCredentialsIsRefused(t *testing.T) {
 func TestBootstrapRefusesWalls(t *testing.T) {
 	env := fbtest.New(t, fbtest.Options{})
 	b := &Bootstrapper{MaxShare: 1, Timeout: time.Second, sem: make(chan struct{}, 1), credit: 1, burst: 1, Rules: detect.DefaultRules(),
-		render: func(context.Context, string, Options) (*Result, error) {
+		Hooks: fbclient.Hooks(""), render: func(context.Context, string, Options) (*Result, error) {
 			return &Result{URL: "https://www.facebook.com/login/?next=x", Status: 200,
 				HTML: []byte(`<html><script>["LSD",[],{"token":"AVq1"},323] "_js_datr","abc"</script></html>`)}, nil
 		}}

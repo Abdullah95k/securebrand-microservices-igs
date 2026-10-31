@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
@@ -26,6 +25,10 @@ type PageLoad struct {
 // ErrBootstrap means no usable tokens could be obtained.
 var ErrBootstrap = errors.New("session: bootstrap failed")
 
+// ErrNoHooks means a loader or bootstrapper was built without its
+// platform's Extract hook.
+var ErrNoHooks = errors.New("session: no Extract hook: the platform's page hooks are not set")
+
 // ErrTransport marks a page load that got no response at all (a timeout, a
 // refused or reset connection): the exit failed, not Facebook.
 var ErrTransport = errors.New("transport")
@@ -42,11 +45,31 @@ type BrowserFallback interface {
 	Bootstrap(ctx context.Context, id *Identity, rawURL string) (*PageLoad, error)
 }
 
-// Loader loads Facebook HTML pages for an identity and refreshes its tokens
-// from them. Every page load doubles as a bootstrap.
+// Hooks are what the loader needs to know about a platform's pages.
+type Hooks struct {
+	// Extract returns the tokens a page carries and whether they are
+	// enough to send queries. Required.
+	Extract func(html []byte) (tok Tokens, ok bool)
+	// IsWall reports a redirect path that leads to a login or checkpoint
+	// wall; the loader does not follow it, so the redirect is classified.
+	IsWall func(path string) bool
+	// AfterLoad, when set, runs on every good page before its tokens are
+	// checked. It may set cookies, or answer an interstitial (Facebook's
+	// cookie-consent wall) and return true to load the page again;
+	// canReload is false when the loader has no redirects left, or after a
+	// browser render.
+	AfterLoad func(ctx context.Context, id *Identity, page string, html []byte, tok Tokens, canReload bool) (reload bool)
+}
+
+// Wall reports whether path is a wall under h.
+func (h Hooks) Wall(path string) bool { return h.IsWall != nil && h.IsWall(path) }
+
+// Loader loads a platform's HTML pages for an identity and refreshes its
+// tokens from them. Every page load doubles as a bootstrap.
 type Loader struct {
 	Rules          detect.Rules
 	AcceptLanguage string
+	Hooks          Hooks
 	// Browser, when set, bootstraps identities whose HTML carries no
 	// tokens (fb.browser).
 	Browser BrowserFallback
@@ -71,10 +94,14 @@ func NavHeaders(fp Fingerprint, acceptLanguage, secFetchSite string) [][2]string
 	}
 }
 
-// Load fetches rawURL, follows same-site redirects (locale, consent),
-// accepts the cookie-consent wall if shown, and installs the tokens found in
-// the HTML on id.
+// Load fetches rawURL, follows same-site redirects (locale, consent) other
+// than walls, runs the platform's AfterLoad hook (Facebook accepts the
+// cookie-consent wall there), and installs the tokens found in the HTML on
+// id.
 func (l *Loader) Load(ctx context.Context, id *Identity, rawURL string) (*PageLoad, error) {
+	if l.Hooks.Extract == nil {
+		return nil, ErrNoHooks
+	}
 	target := rawURL
 	site := "none"
 	var total int64
@@ -97,7 +124,7 @@ func (l *Loader) Load(ctx context.Context, id *Identity, rawURL string) (*PageLo
 
 		if resp.Status >= 300 && resp.Status < 400 && resp.Location != "" {
 			next, err := id.Base.Parse(resp.Location)
-			if err == nil && sameSite(id.Base, next) && !isWall(next.Path) {
+			if err == nil && sameSite(id.Base, next) && !l.Hooks.Wall(next.Path) {
 				target, site = next.String(), "same-origin"
 				continue
 			}
@@ -113,17 +140,12 @@ func (l *Loader) Load(ctx context.Context, id *Identity, rawURL string) (*PageLo
 			Outcome(id, cls)
 			return pl, nil
 		}
-		tok := Tokens(htmlx.ExtractTokens(resp.Body))
-		if tok["js_datr"] != "" && id.Doer.Cookie(id.Base, "datr") == "" {
-			id.Doer.SetCookie(id.Base, "datr", tok["js_datr"])
+		tok, ok := l.Hooks.Extract(resp.Body)
+		if l.Hooks.AfterLoad != nil && l.Hooks.AfterLoad(ctx, id, target, resp.Body, tok, hop < 3) {
+			site = "same-origin"
+			continue
 		}
-		if tok["lsd"] != "" && hop < 3 && htmlx.ConsentWall(resp.Body) {
-			if err := l.acceptConsent(ctx, id, tok, target); err == nil {
-				site = "same-origin"
-				continue
-			}
-		}
-		if !htmlx.Valid(tok) {
+		if !ok {
 			metrics.Bootstraps.WithLabelValues("http", "no_tokens").Inc()
 			if l.Browser != nil {
 				bpl, err := l.Browser.Bootstrap(ctx, id, target)
@@ -164,42 +186,9 @@ func (l *Loader) Bootstrap(ctx context.Context, id *Identity, rawURL string) (*P
 	return pl, nil
 }
 
-func (l *Loader) acceptConsent(ctx context.Context, id *Identity, tok Tokens, referer string) error {
-	form := url.Values{}
-	form.Set("accept_only_essential", "true")
-	form.Set("lsd", tok["lsd"])
-	form.Set("jazoest", htmlx.Jazoest(tok))
-	u, _ := id.Base.Parse("/cookie/consent/")
-	hdr := [][2]string{
-		{"sec-ch-ua", id.FP.SecChUa}, {"sec-ch-ua-mobile", id.FP.SecChUaMobile}, {"sec-ch-ua-platform", id.FP.SecChUaPlatform},
-		{"user-agent", id.FP.UserAgent}, {"content-type", "application/x-www-form-urlencoded"}, {"accept", "*/*"},
-		{"origin", originOf(id.Base)}, {"sec-fetch-site", "same-origin"}, {"sec-fetch-mode", "cors"},
-		{"sec-fetch-dest", "empty"}, {"referer", referer}, {"accept-encoding", "gzip, deflate, br, zstd"},
-		{"accept-language", l.AcceptLanguage},
-	}
-	if err := id.Wait(ctx); err != nil {
-		return err
-	}
-	resp, err := id.Doer.Do(ctx, &transport.Request{Method: "POST", URL: u.String(), Header: hdr, Body: []byte(form.Encode())})
-	if err != nil {
-		return err
-	}
-	if resp.Status >= 400 {
-		return fmt.Errorf("consent: http %d", resp.Status)
-	}
-	metrics.Bootstraps.WithLabelValues("http", "consent").Inc()
-	return nil
-}
-
 func sameSite(base, u *url.URL) bool {
 	return u.Host == "" || u.Host == base.Host || strings.HasSuffix(u.Hostname(), "."+strings.TrimPrefix(base.Hostname(), "www."))
 }
 
-// IsWall reports a login or checkpoint path.
-func IsWall(path string) bool { return isWall(path) }
-
-func isWall(path string) bool {
-	return strings.HasPrefix(path, "/login") || strings.HasPrefix(path, "/checkpoint")
-}
-
-func originOf(u *url.URL) string { return u.Scheme + "://" + u.Host }
+// Origin is u's scheme and host, as browsers send it in the origin header.
+func Origin(u *url.URL) string { return u.Scheme + "://" + u.Host }

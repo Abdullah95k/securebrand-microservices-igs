@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/htmlx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
@@ -35,6 +34,9 @@ type Bootstrapper struct {
 	MaxShare       float64
 	NoSandbox      bool
 	Rules          detect.Rules
+	// Hooks are the platform's page hooks, as the HTTP loader's: tokens,
+	// wall paths and AfterLoad (run with canReload false).
+	Hooks session.Hooks
 
 	sem    chan struct{}
 	mu     sync.Mutex
@@ -45,7 +47,7 @@ type Bootstrapper struct {
 
 // NewBootstrapper returns a fallback for cfg, or an error when no browser
 // binary is found.
-func NewBootstrapper(cfg config.Browser, acceptLanguage string) (*Bootstrapper, error) {
+func NewBootstrapper(cfg config.Browser, acceptLanguage string, hooks session.Hooks) (*Bootstrapper, error) {
 	bin, err := FindBinary(cfg.Binary)
 	if err != nil {
 		return nil, err
@@ -58,8 +60,8 @@ func NewBootstrapper(cfg config.Browser, acceptLanguage string) (*Bootstrapper, 
 	// The burst lets the first pages of a fresh pod through; the credit
 	// then grows by MaxShare per HTML load.
 	return &Bootstrapper{Binary: bin, AcceptLanguage: acceptLanguage, Timeout: timeout, MaxShare: cfg.MaxShare, NoSandbox: cfg.NoSandbox,
-		Rules: detect.DefaultRules(),
-		sem:   make(chan struct{}, n), credit: float64(n), burst: float64(n), render: Render}, nil
+		Rules: detect.DefaultRules(), Hooks: hooks,
+		sem: make(chan struct{}, n), credit: float64(n), burst: float64(n), render: Render}, nil
 }
 
 // Observe counts one HTTP page load.
@@ -83,6 +85,9 @@ func (b *Bootstrapper) take() bool {
 // happened, with the outcome recorded on the identity (see
 // session.BrowserFallback), and nil when it was capped or failed to run.
 func (b *Bootstrapper) Bootstrap(ctx context.Context, id *session.Identity, rawURL string) (*session.PageLoad, error) {
+	if b.Hooks.Extract == nil {
+		return nil, session.ErrNoHooks
+	}
 	if !b.take() {
 		metrics.Bootstraps.WithLabelValues("browser", "capped").Inc()
 		return nil, ErrCapped
@@ -117,10 +122,12 @@ func (b *Bootstrapper) Bootstrap(ctx context.Context, id *session.Identity, rawU
 	// The same classification as an HTTP load: a wall or a block is not a
 	// bootstrap, even when the page carries an LSD token.
 	cls, reason := b.Rules.Classify(detect.Input{Status: res.Status, Body: res.HTML, ContentType: "text/html", Expect: "html"})
-	if u, err := url.Parse(res.URL); err == nil && session.IsWall(u.Path) {
+	if u, err := url.Parse(res.URL); err == nil && b.Hooks.Wall(u.Path) {
 		cls, reason = detect.LoginWall, "browser landed on "+u.Path
-		if strings.HasPrefix(u.Path, "/checkpoint") {
-			cls = detect.Checkpoint
+		for _, p := range b.Rules.CheckpointPaths {
+			if strings.HasPrefix(u.Path, p) {
+				cls = detect.Checkpoint
+			}
 		}
 	}
 	if cls != detect.OK {
@@ -132,11 +139,11 @@ func (b *Bootstrapper) Bootstrap(ctx context.Context, id *session.Identity, rawU
 	for _, c := range res.Cookies {
 		id.Doer.SetCookie(id.Base, c.Name, c.Value)
 	}
-	tok := htmlx.ExtractTokens(res.HTML)
-	if tok["js_datr"] != "" && id.Doer.Cookie(id.Base, "datr") == "" {
-		id.Doer.SetCookie(id.Base, "datr", tok["js_datr"])
+	tok, ok := b.Hooks.Extract(res.HTML)
+	if b.Hooks.AfterLoad != nil {
+		b.Hooks.AfterLoad(ctx, id, res.URL, res.HTML, tok, false)
 	}
-	if !htmlx.Valid(tok) {
+	if !ok {
 		metrics.Bootstraps.WithLabelValues("browser", "no_tokens").Inc()
 		session.Outcome(id, detect.SoftError)
 		pl.Class, pl.Reason = detect.SoftError, "no tokens after a browser render"

@@ -21,6 +21,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
+	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/fbtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
@@ -70,7 +71,7 @@ func testKit(t *testing.T, o fbtest.Options) (*Kit, *fbtest.Env, *bytes.Buffer) 
 	k := &Kit{
 		Stack: Stack{BaseURL: env.HTTP.URL, Proxies: proxies, Pool: env.Pool, Loader: env.Loader, HTTP: http.DefaultClient,
 			NewGQL: func(s registry.Seed) *graphql.Client {
-				return &graphql.Client{Registry: registry.NewStatic(s), Rules: rules, Builder: graphql.FacebookBuilder{AcceptLanguage: "en-US,en;q=0.9"}}
+				return &graphql.Client{Registry: registry.NewStatic(s), Rules: rules, Builder: fbclient.Builder{AcceptLanguage: "en-US,en;q=0.9"}}
 			}},
 		Log: &log,
 		Cfg: KitConfig{Out: t.TempDir(), Tiers: []string{"direct"}, Pages: pages, BaseSeed: embeddedSeed(t),

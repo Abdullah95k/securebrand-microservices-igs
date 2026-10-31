@@ -16,8 +16,12 @@ import (
 
 // PoolConfig configures identity creation.
 type PoolConfig struct {
-	BaseURL        string
-	Profile        string // default fingerprint profile
+	BaseURL string
+	Profile string // default fingerprint profile
+	// Profiles, when set, are the fingerprint profiles new identities pick
+	// from at random, so one pool does not show a single browser build;
+	// empty means Profile alone.
+	Profiles       []string
 	Timeout        time.Duration
 	IdentityRPS    float64
 	IdentityBurst  int
@@ -49,8 +53,13 @@ func NewPool(cfg PoolConfig, proxies *proxy.Pool, fps map[string]Fingerprint, f 
 	if err != nil {
 		return nil, fmt.Errorf("session: base url: %w", err)
 	}
-	if _, ok := fps[cfg.Profile]; !ok {
-		return nil, fmt.Errorf("session: no fingerprint for profile %q", cfg.Profile)
+	if len(cfg.Profiles) == 0 {
+		cfg.Profiles = []string{cfg.Profile}
+	}
+	for _, name := range cfg.Profiles {
+		if _, ok := fps[name]; !ok {
+			return nil, fmt.Errorf("session: no fingerprint for profile %q", name)
+		}
 	}
 	if f == nil {
 		f = transport.NewTLS
@@ -147,7 +156,7 @@ func (p *Pool) create(tier string) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	fp := p.fps[p.cfg.Profile]
+	fp := p.fps[p.cfg.Profiles[randRange(0, len(p.cfg.Profiles))]]
 	d, err := p.newDoer(transport.Options{Profile: fp.Profile, ProxyURL: ep.URL, Timeout: p.cfg.Timeout})
 	if err != nil {
 		return nil, err

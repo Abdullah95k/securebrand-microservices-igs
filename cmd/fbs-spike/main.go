@@ -41,6 +41,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/browser"
+	fbclient "github.com/abdullah95k/securebrand-microservices-igs/internal/fb/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/media"
@@ -449,11 +450,11 @@ func newStack(cfg *config.Config, f flags) (spike.Stack, error) {
 	rules := detect.DefaultRules()
 	return spike.Stack{
 		BaseURL: cfg.FB.BaseURL, Proxies: proxies, Pool: pool,
-		Loader: &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage},
+		Loader: &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage, Hooks: fbclient.Hooks(cfg.FB.AcceptLanguage)},
 		HTTP:   media.NewHTTPClient(),
 		NewGQL: func(s registry.Seed) *graphql.Client {
 			return &graphql.Client{Registry: registry.NewStatic(s), Rules: rules,
-				Builder: graphql.FacebookBuilder{AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale}}
+				Builder: fbclient.Builder{AcceptLanguage: cfg.FB.AcceptLanguage, Locale: cfg.FB.Locale}}
 		},
 	}, nil
 }
@@ -608,7 +609,7 @@ func render(ctx context.Context, cfg *config.Config, f flags, st spike.Stack, se
 	if err != nil {
 		fail(err)
 	}
-	b, err := browser.NewBootstrapper(cfg.FB.Browser, cfg.FB.AcceptLanguage)
+	b, err := browser.NewBootstrapper(cfg.FB.Browser, cfg.FB.AcceptLanguage, fbclient.Hooks(cfg.FB.AcceptLanguage))
 	if err != nil {
 		fail(err)
 	}
