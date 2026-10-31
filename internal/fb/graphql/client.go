@@ -101,6 +101,29 @@ func (c *Client) Parsed(resp *Response, ok bool) {
 	}
 }
 
+// DefaultEndpoint is the request path of a query whose registry entry names
+// none.
+const DefaultEndpoint = "/api/graphql/"
+
+// withHeaders applies a query's headers to the client's list: a name already
+// in the list takes the query's value in place, so the browser's header
+// order holds; a new name is appended.
+func withHeaders(hdr [][2]string, extra []registry.Header) [][2]string {
+	for _, h := range extra {
+		found := false
+		for i := range hdr {
+			if hdr[i][0] == h.Name {
+				hdr[i][1], found = h.Value, true
+				break
+			}
+		}
+		if !found {
+			hdr = append(hdr, [2]string{h.Name, h.Value})
+		}
+	}
+	return hdr
+}
+
 // ErrTransport wraps network/proxy failures.
 var ErrTransport = errors.New("graphql: transport")
 
@@ -147,7 +170,14 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 	tok := id.Tokens()
 	params := c.Registry.ClientParams()
 	body := encodeForm(c.form(id, tok, params, q, vars))
-	endpoint, _ := id.Base.Parse("/api/graphql/")
+	path := q.Endpoint
+	if path == "" {
+		path = DefaultEndpoint
+	}
+	endpoint, err := id.Base.Parse(path)
+	if err != nil {
+		return nil, fmt.Errorf("graphql: %s endpoint: %w", q.Name, err)
+	}
 	referer := req.Referer
 	if referer == "" {
 		referer = id.Base.String()
@@ -171,6 +201,7 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 		{"accept-language", c.AcceptLanguage},
 		{"priority", "u=1, i"},
 	}
+	hdr = withHeaders(hdr, q.Headers)
 	start := time.Now()
 	tr, err := id.Doer.Do(ctx, &transport.Request{Method: "POST", URL: endpoint.String(), Header: hdr, Body: body})
 	elapsed := time.Since(start)

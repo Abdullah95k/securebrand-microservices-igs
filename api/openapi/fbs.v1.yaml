@@ -274,6 +274,16 @@ paths:
                 status: {type: string, enum: [active, fallback, candidate, retired]}
                 priority: {type: integer}
                 variables: {type: object, description: 'JSON template; "{{name}}" placeholders are filled at request time'}
+                endpoint: {type: string, description: 'Request path on the platform host (e.g. /graphql/query); empty = the client default'}
+                headers:
+                  type: array
+                  description: Extra request headers for this query, in send order; a header the client already sends takes this value in place
+                  items:
+                    type: object
+                    required: [name, value]
+                    properties:
+                      name: {type: string}
+                      value: {type: string}
       responses:
         "200": {description: Saved}
   /admin/registry-sync/runs:

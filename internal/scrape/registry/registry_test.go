@@ -92,3 +92,90 @@ func TestSeedRoundTripAndPlaceholders(t *testing.T) {
 		t.Fatal("client params changed")
 	}
 }
+
+// A query's endpoint and headers come from the seed, with lower-case header
+// names, survive a round trip in send order, and are checked: no host,
+// query string or path tricks, no transport headers, no duplicates.
+func TestSeedEndpointAndHeaders(t *testing.T) {
+	const doc = `
+queries:
+  - name: highlights
+    friendly_name: HighlightsQuery
+    doc_id: "1"
+    parser: highlights
+    endpoint: /graphql/query
+    headers:
+      - {name: X-Root-Field-Name, value: xdt_root}
+      - {name: x-bloks-version-id, value: abc123}
+    variables: {id: "{{id}}"}
+  - name: plain
+    friendly_name: PlainQuery
+    doc_id: "2"
+    parser: plain
+    variables: {}
+`
+	s, err := ParseSeed([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := s.Queries[0]
+	want := []Header{{"x-root-field-name", "xdt_root"}, {"x-bloks-version-id", "abc123"}}
+	if q.Endpoint != "/graphql/query" || fmt.Sprint(q.Headers) != fmt.Sprint(want) {
+		t.Fatalf("parsed %q %v", q.Endpoint, q.Headers)
+	}
+	if p := s.Queries[1]; p.Endpoint != "" || p.Headers != nil {
+		t.Fatalf("a query without them gets none: %q %v", p.Endpoint, p.Headers)
+	}
+	out, err := MarshalSeed(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := ParseSeed(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := back.Queries[0]; b.Endpoint != q.Endpoint || fmt.Sprint(b.Headers) != fmt.Sprint(want) {
+		t.Fatalf("round trip: %q %v\n%s", b.Endpoint, b.Headers, out)
+	}
+	if b := back.Queries[1]; b.Endpoint != "" || b.Headers != nil {
+		t.Fatalf("round trip added a route: %q %v", b.Endpoint, b.Headers)
+	}
+
+	// The embedded Facebook seed names no endpoint or header: fbs's
+	// client defaults apply.
+	fb, _ := configs.FS.ReadFile("queries.seed.yaml")
+	seed, err := ParseSeed(fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range seed.Queries {
+		if q.Endpoint != "" || q.Headers != nil {
+			t.Fatalf("%s: %q %v", q.Name, q.Endpoint, q.Headers)
+		}
+	}
+
+	for _, e := range []string{"/api/graphql", "/api/graphql/", "/graphql/query"} {
+		if _, err := normalizeRoute("q", e, nil); err != nil {
+			t.Fatalf("%s: %v", e, err)
+		}
+	}
+	for _, e := range []string{"api/graphql", "https://example.com/api/graphql", "//example.com/api/graphql",
+		"/api/../graphql", "/api//graphql", "/api/graphql?x=1", "/api/graphql#x", "/api/%2e%2e/x", "/api/graphql\n"} {
+		if _, err := normalizeRoute("q", e, nil); err == nil {
+			t.Fatalf("endpoint %q accepted", e)
+		}
+	}
+	for _, h := range [][]Header{
+		{{"Cookie", "a=b"}},
+		{{"host", "example.com"}},
+		{{"content-length", "1"}},
+		{{"x-a", "1"}, {"X-A", "2"}},
+		{{"x a", "1"}},
+		{{"", "1"}},
+		{{"x-a", "1\r\nx-b: 2"}},
+	} {
+		if _, err := normalizeRoute("q", "", h); err == nil {
+			t.Fatalf("headers %v accepted", h)
+		}
+	}
+}
