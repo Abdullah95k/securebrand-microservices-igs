@@ -1,6 +1,7 @@
 package htmlx
 
 import (
+	"maps"
 	"testing"
 
 	scrapehtml "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/htmlx"
@@ -11,12 +12,12 @@ const sample = `<html><script type="application/json">{"require":[["ScheduledSer
 
 func TestExtractTokens(t *testing.T) {
 	tok := ExtractTokens([]byte(sample))
-	want := Tokens{LSD: "AVqTok3n", JSDatr: "DATR123", SpinR: "1017000000", SpinB: "trunk", SpinT: "1730000000",
-		HSI: "7431", Rev: "1017000000", HasteSession: "20390.HYP:comet"}
-	if tok != want {
-		t.Fatalf("got %+v\nwant %+v", tok, want)
+	want := map[string]string{"lsd": "AVqTok3n", "js_datr": "DATR123", "__spin_r": "1017000000", "__spin_b": "trunk",
+		"__spin_t": "1730000000", "__hsi": "7431", "__rev": "1017000000", "__hs": "20390.HYP:comet"}
+	if !maps.Equal(tok, want) {
+		t.Fatalf("got %v\nwant %v", tok, want)
 	}
-	if !tok.Valid() {
+	if !Valid(tok) || ConsentWall([]byte(sample)) {
 		t.Fatal("tokens should be valid")
 	}
 	// "2" + sum of char codes of the lsd.
@@ -24,8 +25,8 @@ func TestExtractTokens(t *testing.T) {
 	for _, r := range "AVqTok3n" {
 		sum += int(r)
 	}
-	if tok.Jazoest() != "2"+itoa(sum) {
-		t.Fatalf("jazoest = %s", tok.Jazoest())
+	if Jazoest(tok) != "2"+itoa(sum) {
+		t.Fatalf("jazoest = %s", Jazoest(tok))
 	}
 	if id := PageID([]byte(sample)); id != 100064000000000 {
 		t.Fatalf("page id = %d", id)
@@ -98,16 +99,24 @@ func TestPageIDHints(t *testing.T) {
 func TestExtractTokensOtherSources(t *testing.T) {
 	html := `{"client_revision":1016999999,"__comet_req":15} ["DTSGInitialData",[],{"token":"DT1"}]` +
 		` "_js_datr":{"value":"D2"} <input name="lsd" value="L3"> <div data-cookiebanner="x">`
-	want := Tokens{LSD: "L3", DTSG: "DT1", JSDatr: "D2", Rev: "1016999999", CometReq: "15", ConsentWall: true}
-	if got := ExtractTokens([]byte(html)); got != want {
-		t.Fatalf("got %+v\nwant %+v", got, want)
+	want := map[string]string{"lsd": "L3", "fb_dtsg": "DT1", "js_datr": "D2", "__rev": "1016999999", "__comet_req": "15"}
+	if got := ExtractTokens([]byte(html)); !maps.Equal(got, want) || !ConsentWall([]byte(html)) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+	// The CSRF source of jazoest is fb_dtsg when present.
+	sum := 0
+	for _, r := range "DT1" {
+		sum += int(r)
+	}
+	if Jazoest(want) != "2"+itoa(sum) {
+		t.Fatalf("jazoest = %s", Jazoest(want))
 	}
 	// server_revision wins over client_revision wherever each stands.
-	if got := ExtractTokens([]byte(`"client_revision":1 "server_revision":2`)); got.Rev != "2" || got.ConsentWall {
-		t.Fatalf("got %+v", got)
+	if got := ExtractTokens([]byte(`"client_revision":1 "server_revision":2`)); got["__rev"] != "2" || Valid(got) {
+		t.Fatalf("got %v", got)
 	}
 	// The last lsd source in the table wins when several match.
-	if got := ExtractTokens([]byte(`["LSD",[],{"token":"A"}] <input name="lsd" value="B">`)); got.LSD != "B" {
-		t.Fatalf("lsd = %q", got.LSD)
+	if got := ExtractTokens([]byte(`["LSD",[],{"token":"A"}] <input name="lsd" value="B">`)); got["lsd"] != "B" {
+		t.Fatalf("lsd = %q", got["lsd"])
 	}
 }

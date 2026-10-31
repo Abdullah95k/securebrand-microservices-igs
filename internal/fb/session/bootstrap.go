@@ -113,17 +113,17 @@ func (l *Loader) Load(ctx context.Context, id *Identity, rawURL string) (*PageLo
 			Outcome(id, cls)
 			return pl, nil
 		}
-		tok := htmlx.ExtractTokens(resp.Body)
-		if tok.JSDatr != "" && id.Doer.Cookie(id.Base, "datr") == "" {
-			id.Doer.SetCookie(id.Base, "datr", tok.JSDatr)
+		tok := Tokens(htmlx.ExtractTokens(resp.Body))
+		if tok["js_datr"] != "" && id.Doer.Cookie(id.Base, "datr") == "" {
+			id.Doer.SetCookie(id.Base, "datr", tok["js_datr"])
 		}
-		if tok.ConsentWall && tok.LSD != "" && hop < 3 {
+		if tok["lsd"] != "" && hop < 3 && htmlx.ConsentWall(resp.Body) {
 			if err := l.acceptConsent(ctx, id, tok, target); err == nil {
 				site = "same-origin"
 				continue
 			}
 		}
-		if !tok.Valid() {
+		if !htmlx.Valid(tok) {
 			metrics.Bootstraps.WithLabelValues("http", "no_tokens").Inc()
 			if l.Browser != nil {
 				bpl, err := l.Browser.Bootstrap(ctx, id, target)
@@ -164,11 +164,11 @@ func (l *Loader) Bootstrap(ctx context.Context, id *Identity, rawURL string) (*P
 	return pl, nil
 }
 
-func (l *Loader) acceptConsent(ctx context.Context, id *Identity, tok htmlx.Tokens, referer string) error {
+func (l *Loader) acceptConsent(ctx context.Context, id *Identity, tok Tokens, referer string) error {
 	form := url.Values{}
 	form.Set("accept_only_essential", "true")
-	form.Set("lsd", tok.LSD)
-	form.Set("jazoest", tok.Jazoest())
+	form.Set("lsd", tok["lsd"])
+	form.Set("jazoest", htmlx.Jazoest(tok))
 	u, _ := id.Base.Parse("/cookie/consent/")
 	hdr := [][2]string{
 		{"sec-ch-ua", id.FP.SecChUa}, {"sec-ch-ua-mobile", id.FP.SecChUaMobile}, {"sec-ch-ua-platform", id.FP.SecChUaPlatform},

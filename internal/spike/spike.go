@@ -131,9 +131,9 @@ func (r *Runner) emit(rec Record) {
 func boolp(b bool) *bool { return &b }
 
 // tokensFound reports which page tokens were found, without their values.
-func tokensFound(tok htmlx.Tokens) map[string]bool {
-	return map[string]bool{"lsd": tok.LSD != "", "js_datr": tok.JSDatr != "", "spin_r": tok.SpinR != "",
-		"hsi": tok.HSI != "", "rev": tok.Rev != "", "haste_session": tok.HasteSession != "", "dtsg": tok.DTSG != ""}
+func tokensFound(tok map[string]string) map[string]bool {
+	return map[string]bool{"lsd": tok["lsd"] != "", "js_datr": tok["js_datr"] != "", "spin_r": tok["__spin_r"] != "",
+		"hsi": tok["__hsi"] != "", "rev": tok["__rev"] != "", "haste_session": tok["__hs"] != "", "dtsg": tok["fb_dtsg"] != ""}
 }
 
 // Run writes a run header, then measures every page. Each page ends with a
@@ -245,7 +245,7 @@ func (r *Runner) page(ctx context.Context, p PageRef) error {
 	tok := htmlx.ExtractTokens(pl.HTML)
 	brec.OK = boolp(pl.Class == detect.OK && id.Bootstrapped())
 	brec.Class, brec.Reason, brec.Status, brec.Bytes, brec.Wire = pl.Class.String(), pl.Reason, pl.Status, len(pl.HTML), pl.Bytes
-	brec.Consent = tok.ConsentWall
+	brec.Consent = htmlx.ConsentWall(pl.HTML)
 	brec.TokensFound = tokensFound(tok)
 	r.emit(brec)
 	if !*brec.OK {

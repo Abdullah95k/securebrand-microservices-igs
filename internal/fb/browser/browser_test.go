@@ -59,7 +59,7 @@ func TestRenderCapturesThePagesOwnGraphQL(t *testing.T) {
 	raw, _ := http.Get(base + "/" + page.Vanity)
 	html, _ := io.ReadAll(raw.Body)
 	_ = raw.Body.Close()
-	if htmlx.ExtractTokens(html).Valid() {
+	if htmlx.Valid(htmlx.ExtractTokens(html)) {
 		t.Fatal("JSOnlyTokens: the served markup must not carry the tokens")
 	}
 
@@ -68,7 +68,7 @@ func TestRenderCapturesThePagesOwnGraphQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("rendered %s (%d) in %s: %d bytes, %d captured", res.URL, res.Status, res.Elapsed, len(res.HTML), len(res.Captured))
-	if res.Status != 200 || !strings.Contains(string(res.HTML), page.Name) || !htmlx.ExtractTokens(res.HTML).Valid() {
+	if res.Status != 200 || !strings.Contains(string(res.HTML), page.Name) || !htmlx.Valid(htmlx.ExtractTokens(res.HTML)) {
 		t.Fatalf("status %d, tokens %+v", res.Status, htmlx.ExtractTokens(res.HTML))
 	}
 	if len(res.Captured) != 1 {
