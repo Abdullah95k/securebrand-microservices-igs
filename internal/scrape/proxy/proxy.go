@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/breaker"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 )
 
 // Endpoint is one proxy exit to use for an identity's lifetime.

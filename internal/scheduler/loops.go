@@ -18,9 +18,9 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/dispatch"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )

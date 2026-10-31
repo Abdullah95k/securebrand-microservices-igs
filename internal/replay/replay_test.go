@@ -14,11 +14,11 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/rawsink"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/fbtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 )
 
 // response fetches one real fakefb response of query.

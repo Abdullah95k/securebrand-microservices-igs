@@ -16,8 +16,8 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/parse"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fixtures"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 )
 
 // HAR import: a browser recording of a logged-out session is the most

@@ -19,10 +19,10 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/fb/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fixtures"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/topics"
 )

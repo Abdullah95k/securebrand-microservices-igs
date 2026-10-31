@@ -62,7 +62,7 @@ possible later:
 | `internal/scrape/session` | identities, pool, fingerprints, HTML loader with hooks | `internal/fb/session` |
 | `internal/scrape/htmlx` | `JSONBlobs`, ordered pattern extraction | the neutral half of `internal/fb/htmlx` |
 | `internal/scrape/registry` | query registry with per-query endpoint and headers | `internal/fb/registry` |
-| `internal/scrape/gql` | persisted-query client with a request builder | the core of `internal/fb/graphql` |
+| `internal/scrape/graphql` | persisted-query client with a request builder (the package keeps its name, so callers need no edits) | the core of `internal/fb/graphql` |
 | `internal/scrape/docids` | HTML and bundle scanner with patterns and hosts | `internal/fb/docids` |
 | `internal/scrape/browser` | CDP engine, render, capture, bootstrapper | `internal/fb/browser` |
 | `internal/scrape/walk` | JSON walker with a kind predicate | `internal/fb/parse/walk.go` |
