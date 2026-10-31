@@ -191,12 +191,13 @@ phase0-dryrun:
 	GO=$(GO) phase0/dryrun.sh
 
 IGS_PROBE_PROFILES ?= phase0/ig-profiles.txt
-IGS_PROBE_TIERS ?= isp,residential
+IGS_PROBE_TIERS ?= isp
 IGS_PROBE_OUT ?= phase0/out-ig
 IGS_PROBE_ARGS ?=
 
 ## igs probe against real Instagram (checkpoint C2, docs/runbooks/igs-probe.md).
-## One run per tier in IGS_PROBE_TIERS ("direct" = this machine's own IP);
+## One run per tier in IGS_PROBE_TIERS (default isp, the owner's choice; "direct" =
+## this machine's own IP);
 ## each writes $(IGS_PROBE_OUT)/<tier>/ and <tier>.tar.gz.
 igs-probe:
 	@test -f $(IGS_PROBE_PROFILES) || { echo "missing $(IGS_PROBE_PROFILES): cp phase0/ig-profiles.example.txt $(IGS_PROBE_PROFILES) and fill it in"; exit 2; }
