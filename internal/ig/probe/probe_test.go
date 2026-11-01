@@ -400,7 +400,7 @@ func TestProbeParallel(t *testing.T) {
 		}
 	}
 	strip := func(s probe.Summary) probe.Summary {
-		s.Requests = nil
+		s.Requests, s.CommentMs = nil, 0 // timings
 		return s
 	}
 	ja, _ := json.Marshal(strip(a))
@@ -469,5 +469,99 @@ func TestProbeRetriesWalledPageLoads(t *testing.T) {
 	}
 	if s := rep.Summary; s.PageLoadWalls != 4 || s.Bootstrapped != 2 || s.Requests["page"].N != 7 {
 		t.Fatalf("summary: walls %d, bootstrapped %d, page loads %d", s.PageLoadWalls, s.Bootstrapped, s.Requests["page"].N)
+	}
+}
+
+// Test 1, bigger pages: the probe asks for the page sizes given, reports the
+// largest pages served, and still reads every post and comment; a server
+// that caps the size (as Instagram may) shows in the report.
+func TestProbePageSizes(t *testing.T) {
+	spec := fakeig.Spec{Seed: 9, Profiles: 2, PostsPerProfile: 70, MaxComments: 120, PostSpacing: time.Hour}
+	for _, tc := range []struct {
+		name               string
+		maxPage            int // fakeig's cap; 0 = none
+		wantGrid, wantComm int
+	}{{"served", 0, 30, 50}, {"capped", 20, 20, 20}} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := igtest.New(t, igtest.Options{Spec: spec, Faults: fakeig.Faults{MaxPageSize: tc.maxPage}})
+			var names []string
+			for _, p := range env.World.Profiles() {
+				names = append(names, p.Username)
+			}
+			rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 10,
+				Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, GridPageSize: 30, CommentPageSize: 50, CommentPosts: 3, CommentPages: 100})
+			s := rep.Summary
+			if s.GridMaxPage != tc.wantGrid || s.CommentMaxPage != tc.wantComm {
+				t.Fatalf("largest pages: grid %d, comments %d", s.GridMaxPage, s.CommentMaxPage)
+			}
+			for i, p := range rep.Profiles {
+				want := env.World.Profiles()[i]
+				n := 0
+				for _, post := range want.Posts[:3] {
+					n += len(post.Comments)
+				}
+				if len(p.Posts) != 70 || len(p.Comments) != n {
+					t.Fatalf("profile %d: %d posts, %d comments, want 70 and %d", p.Index, len(p.Posts), len(p.Comments), n)
+				}
+			}
+		})
+	}
+}
+
+// Test 2, faster comments: comment requests run at CommentRPS while
+// everything else keeps RPS.
+func TestProbeCommentRPS(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 10, Profiles: 1, PostsPerProfile: 12, MaxComments: 60, PostSpacing: time.Hour}})
+	p := env.World.Profiles()[0]
+	want := 0
+	for _, post := range p.Posts[:4] {
+		want += max(1, (len(post.Comments)+9)/10)
+	}
+	start := time.Now()
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: []string{p.Username}, Tier: "direct",
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, CommentPosts: 4, CommentPages: 10, RPS: 4, CommentRPS: 1000})
+	took := time.Since(start)
+	s := rep.Summary
+	if s.CommentRequests < want || s.CommentAnswers["ok"] != s.CommentRequests {
+		t.Fatalf("comment requests %d (want at least %d), answers %v", s.CommentRequests, want, s.CommentAnswers)
+	}
+	// About 5 other requests at 4 a second take a second; the comment
+	// requests, at 4 a second, would add as many quarter seconds.
+	if took < 750*time.Millisecond || took > time.Second+time.Duration(s.CommentRequests)*250*time.Millisecond/2 {
+		t.Fatalf("took %s for %d comment requests", took, s.CommentRequests)
+	}
+}
+
+// Test 3, hopping: comment requests go through CommentHop identities in
+// turn and read the same comments; when a cursor is bound to the identity
+// that got it (fakeig's CursorBound), the later pages fail, and the report
+// shows it.
+func TestProbeCommentHop(t *testing.T) {
+	spec := fakeig.Spec{Seed: 11, Profiles: 2, PostsPerProfile: 15, MaxComments: 45, PostSpacing: time.Hour}
+	run := func(f fakeig.Faults) (probe.Report, *igtest.Env) {
+		env := igtest.New(t, igtest.Options{Spec: spec, Faults: f})
+		var names []string
+		for _, p := range env.World.Profiles() {
+			names = append(names, p.Username)
+		}
+		return probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 5,
+			Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, CommentPosts: 3, CommentPages: 10, CommentHop: 3}), env
+	}
+	rep, env := run(fakeig.Faults{})
+	if s := rep.Summary; s.CommentHopIdentities != 3 || s.CommentAnswers["ok"] != s.CommentRequests {
+		t.Fatalf("hop identities %d, answers %v", s.CommentHopIdentities, s.CommentAnswers)
+	}
+	for i, p := range rep.Profiles {
+		n := 0
+		for _, post := range env.World.Profiles()[i].Posts[:3] {
+			n += len(post.Comments)
+		}
+		if len(p.Comments) != n {
+			t.Fatalf("profile %d: %d comments, want %d", p.Index, len(p.Comments), n)
+		}
+	}
+	bound, _ := run(fakeig.Faults{CursorBound: true})
+	if s := bound.Summary; s.CommentAnswers["ok"] == s.CommentRequests || s.Comments >= rep.Summary.Comments {
+		t.Fatalf("bound cursors: answers %v, %d comments (unbound %d)", s.CommentAnswers, s.Comments, rep.Summary.Comments)
 	}
 }

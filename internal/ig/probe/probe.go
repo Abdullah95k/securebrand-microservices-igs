@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"golang.org/x/time/rate"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/htmlx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
@@ -98,7 +99,21 @@ type Options struct {
 	// when it gets the login redirect (some ISP exits are flagged for page
 	// loads); 0 means 3.
 	PageLoadTries int
-	Now           func() time.Time
+	// GridPageSize and CommentPageSize ask Instagram for that many posts
+	// or comments per page ("first"); 0 keeps the web app's 12 and 10.
+	// Whether Instagram serves more is what a test run shows.
+	GridPageSize    int
+	CommentPageSize int
+	// RPS is the pace of each identity's requests; CommentRPS, when higher,
+	// is the pace of comment requests only (the pool's identities run at
+	// CommentRPS, and the probe holds everything else to RPS).
+	RPS        float64
+	CommentRPS float64
+	// CommentHop, when above 1, sends comment requests through that many
+	// extra identities in turn (a post's comment pages each from another
+	// exit), bootstrapped once and shared by the workers.
+	CommentHop int
+	Now        func() time.Time
 }
 
 // Step is one request's outcome.
@@ -295,6 +310,15 @@ type Summary struct {
 	GridByPKFails int `json:"grid_by_pk_fails"`
 	// Cost: per request kind, count, mean latency and mean wire bytes.
 	Requests map[string]Cost `json:"requests"`
+	// The speed tests: the largest grid and comment pages served, comment
+	// requests by answer and their time (summed over workers, so per
+	// chain), and the identities comment requests hopped across.
+	GridMaxPage          int            `json:"grid_max_page"`
+	CommentMaxPage       int            `json:"comment_max_page"`
+	CommentRequests      int            `json:"comment_requests"`
+	CommentAnswers       map[string]int `json:"comment_answers"`
+	CommentMs            int64          `json:"comment_ms"`
+	CommentHopIdentities int            `json:"comment_hop_identities,omitempty"`
 }
 
 // Cost aggregates one request kind.
@@ -407,6 +431,9 @@ func Run(ctx context.Context, o Options) Report {
 	if sh.second != nil {
 		o.Pool.Release(sh.second)
 	}
+	for _, h := range sh.hops {
+		o.Pool.Release(h)
+	}
 	for _, r := range runners {
 		sum.add(r.sum)
 	}
@@ -417,6 +444,7 @@ func Run(ctx context.Context, o Options) Report {
 	slices.SortFunc(rep.Profiles, func(a, b Profile) int { return a.Index - b.Index })
 	sum.Profiles = len(rep.Profiles)
 	slices.Sort(sum.WalledAtPosts)
+	sum.CommentHopIdentities = sh.hopCreated
 	if sum.StoppedEarly {
 		rep.ContinueAt = continueAt(rep.Profiles, max(o.StartAt, 1), len(o.Profiles))
 	}
@@ -469,7 +497,8 @@ func continueAt(profiles []Profile, start, n int) int {
 
 func newSummary() Summary {
 	return Summary{TokensFound: map[string]int{}, GridWalls: map[string]int{},
-		QueriesWithoutClientState: map[string]int{}, Cookies: map[string]int{}, Requests: map[string]Cost{}}
+		QueriesWithoutClientState: map[string]int{}, Cookies: map[string]int{}, Requests: map[string]Cost{},
+		CommentAnswers: map[string]int{}}
 }
 
 // add adds a worker's counts to s. Profiles, Posts, Comments and
@@ -504,6 +533,11 @@ func (s *Summary) add(o Summary) {
 		t.N, t.sumMs, t.sumBytes = t.N+c.N, t.sumMs+c.sumMs, t.sumBytes+c.sumBytes
 		s.Requests[k] = t
 	}
+	s.GridMaxPage = max(s.GridMaxPage, o.GridMaxPage)
+	s.CommentMaxPage = max(s.CommentMaxPage, o.CommentMaxPage)
+	s.CommentRequests += o.CommentRequests
+	addMap(s.CommentAnswers, o.CommentAnswers)
+	s.CommentMs += o.CommentMs
 }
 
 // shared is what the workers of a run share.
@@ -513,6 +547,12 @@ type shared struct {
 	// The U5 identity, bootstrapped once and used by one worker at a time.
 	otherMu sync.Mutex
 	second  *session.Identity
+	// The comment-hop identities (Options.CommentHop), used in turn.
+	hopMu      sync.Mutex
+	hops       []*session.Identity
+	hopNext    int
+	hopCreated int
+	hopRetryAt time.Time // after a failed bootstrap, wait before another
 }
 
 // takePage reports whether this profile may save its page HTML (the first
@@ -532,6 +572,9 @@ type runner struct {
 	o   Options
 	sh  *shared
 	sum Summary
+	// pace holds everything but comment requests to RPS when comment
+	// requests run faster (CommentRPS).
+	pace *rate.Limiter
 	// The profile being read, for the raw answers.
 	rawDir    string
 	rawSeq    int
@@ -539,7 +582,56 @@ type runner struct {
 	savePages bool // this profile saves its page HTML
 }
 
-func newRunner(o Options, sh *shared) *runner { return &runner{o: o, sh: sh, sum: newSummary()} }
+func newRunner(o Options, sh *shared) *runner {
+	r := &runner{o: o, sh: sh, sum: newSummary()}
+	if o.RPS > 0 && o.CommentRPS > o.RPS {
+		r.pace = rate.NewLimiter(rate.Limit(o.RPS), 1)
+	}
+	return r
+}
+
+// paceWait holds a request that is not a comment request to RPS (see pace).
+func (r *runner) paceWait(ctx context.Context) {
+	if r.pace != nil {
+		_ = r.pace.Wait(ctx)
+	}
+}
+
+// hopIdentity is the next comment-hop identity, creating and bootstrapping
+// them (on page) up to CommentHop and replacing retired ones; nil when none
+// is available, and the worker's own identity serves.
+func (r *runner) hopIdentity(ctx context.Context, page string) *session.Identity {
+	sh := r.sh
+	sh.hopMu.Lock()
+	defer sh.hopMu.Unlock()
+	live := sh.hops[:0]
+	for _, h := range sh.hops {
+		if h.RetireReason() == "" {
+			live = append(live, h)
+		} else {
+			r.o.Pool.Release(h)
+		}
+	}
+	sh.hops = live
+	if len(sh.hops) < r.o.CommentHop && time.Now().After(sh.hopRetryAt) {
+		if h, err := r.o.Pool.Acquire(ctx, r.o.Tier); err == nil {
+			r.paceWait(ctx)
+			if _, err := r.o.Loader.Bootstrap(ctx, h, page); err != nil {
+				r.o.Pool.Release(h)
+				sh.hopRetryAt = time.Now().Add(2 * time.Minute)
+			} else {
+				sh.hops = append(sh.hops, h)
+				sh.hopCreated++
+			}
+		}
+	}
+	if len(sh.hops) == 0 {
+		return nil
+	}
+	h := sh.hops[sh.hopNext%len(sh.hops)]
+	sh.hopNext++
+	return h
+}
 
 func (r *runner) profile(ctx context.Context, index int, username string) Profile {
 	page := strings.TrimRight(r.o.BaseURL, "/") + "/" + username + "/"
@@ -573,6 +665,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 			return out
 		}
 		out.Identity, out.Exit = id.ID, id.Endpoint.Bucket
+		r.paceWait(ctx)
 		start := time.Now()
 		pl, err = r.o.Loader.Load(ctx, id, page)
 		out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
@@ -673,6 +766,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 	edges, pi := connection(resp.Parts, gridConn)
 	out.GridFirst.Items, out.GridFirst.HasNext = len(edges), pi.HasNext
+	r.sum.GridMaxPage = max(r.sum.GridMaxPage, len(edges))
 	r.keepRaw("grid_first", resp, len(edges))
 	cursor := pi.EndCursor
 	out.Posts = append(out.Posts, r.posts(edges)...)
@@ -760,12 +854,19 @@ func (r *runner) comments(ctx context.Context, id *session.Identity, out *Profil
 			if cursor != "" {
 				vars["cursor"] = cursor
 			}
-			resp, s := r.do(ctx, id, "comments", vars, page)
+			cid := id
+			if r.o.CommentHop > 1 {
+				if h := r.hopIdentity(ctx, page); h != nil {
+					cid = h
+				}
+			}
+			resp, s := r.do(ctx, cid, "comments", vars, page)
 			if s.Class == stopped {
 				return false
 			}
 			edges, pi := connection(respParts(resp), "comments_connection")
 			s.Items, s.HasNext = len(edges), pi.HasNext
+			r.sum.CommentMaxPage = max(r.sum.CommentMaxPage, len(edges))
 			r.keepRaw("comments", resp, s.Items)
 			if i == 0 && pg == 0 {
 				out.CommentsRead = ptr(s)
@@ -817,6 +918,7 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor 
 		}
 		g.Pages++
 		g.Posts += len(edges)
+		r.sum.GridMaxPage = max(r.sum.GridMaxPage, len(edges))
 		out.Posts = append(out.Posts, r.posts(edges)...)
 		if r.o.Progress != nil && g.Pages%progressEvery == 0 {
 			line := fmt.Sprintf("  %s: %d posts so far", out.Username, g.Posts)
@@ -874,6 +976,7 @@ func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *
 		out.OtherBootstrap = &Step{Class: "no_identity", Reason: err.Error()}
 		return nil
 	}
+	r.paceWait(ctx)
 	start := time.Now()
 	pl, err := r.o.Loader.Bootstrap(ctx, id, page)
 	st := &Step{Ms: time.Since(start).Milliseconds()}
@@ -903,6 +1006,7 @@ func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *
 func (r *runner) postPage(ctx context.Context, id *session.Identity, url, shortcode string, out *Profile) *PostPage {
 	pp := &PostPage{URL: url}
 	start := time.Now()
+	r.paceWait(ctx)
 	pl, err := r.o.Loader.Load(ctx, id, url)
 	pp.Ms = time.Since(start).Milliseconds()
 	if err != nil {
@@ -957,9 +1061,25 @@ func (r *runner) postPage(ctx context.Context, id *session.Identity, url, shortc
 }
 
 func (r *runner) do(ctx context.Context, id *session.Identity, query string, vars map[string]any, referer string) (*graphql.Response, Step) {
+	switch {
+	case (query == "grid" || query == "grid_first") && r.o.GridPageSize > 0:
+		vars["first"] = r.o.GridPageSize
+	case query == "comments" && r.o.CommentPageSize > 0:
+		vars["first"] = r.o.CommentPageSize
+	}
+	if query != "comments" {
+		r.paceWait(ctx)
+	}
 	start := time.Now()
 	resp, err := r.o.GQL.Do(ctx, id, graphql.Request{Query: query, Vars: vars, Referer: referer})
 	s := Step{Ms: time.Since(start).Milliseconds()}
+	if query == "comments" {
+		defer func() {
+			r.sum.CommentRequests++
+			r.sum.CommentAnswers[s.Class]++
+			r.sum.CommentMs += s.Ms
+		}()
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			// The operator stopped the run: not Instagram's answer, so it

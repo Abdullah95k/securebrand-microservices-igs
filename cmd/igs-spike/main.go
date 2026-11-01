@@ -80,6 +80,10 @@ func runProbe(args []string) int {
 	parallel := fs.Int("parallel", 1, "profiles read at once, each by its own identity and exit IP, each at --rps")
 	idRequests := fs.Int("identity-requests", 500, "retire an identity (and so move to another exit) after about this many requests; the full run met Instagram's rate limit after 1,100 to 1,300 on one IP (0 = never)")
 	maxWait := fs.Duration("max-wait", 20*time.Minute, "how long a profile waits when every exit of the tier is cooling down, before it is given up")
+	gridPageSize := fs.Int("grid-page-size", 0, "posts to ask for per grid page (0 = the web app's 12); a speed test: does Instagram serve more?")
+	commentPageSize := fs.Int("comment-page-size", 0, "comments to ask for per page (0 = the web app's 10); a speed test: does Instagram serve more?")
+	commentRPS := fs.Float64("comment-rps", 0, "requests per second per identity for comment requests only (0 = --rps); everything else keeps --rps")
+	commentHop := fs.Int("comment-hop", 0, "send comment requests through this many extra identities in turn, each page from another exit (0 = off)")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
 	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
 	dryRun := fs.Bool("dry-run", false, "rehearse against a built-in fake Instagram (no traffic, no proxies)")
@@ -116,7 +120,11 @@ func runProbe(args []string) int {
 	if *parallel < 1 {
 		*parallel = 1
 	}
-	stack, err := newStack(cfg, *base, *fingerprint, *rps, *parallel, *idRequests)
+	poolRPS := *rps
+	if *commentRPS > poolRPS {
+		poolRPS = *commentRPS // the probe holds everything but comments to --rps
+	}
+	stack, err := newStack(cfg, *base, *fingerprint, poolRPS, *parallel+max(*commentHop, 0), *idRequests)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "probe:", err)
 		return 1
@@ -147,6 +155,7 @@ func runProbe(args []string) int {
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
 		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
 		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel, MaxWait: *maxWait,
+		GridPageSize: *gridPageSize, CommentPageSize: *commentPageSize, RPS: *rps, CommentRPS: *commentRPS, CommentHop: *commentHop,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) },
 		OnProfile: func(p probe.Profile) {
 			if err := saver.Add(p); err != nil {
@@ -170,6 +179,12 @@ func runProbe(args []string) int {
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
 		*outDir, bundle, s.Posts, s.Comments, s.Profiles, s.PageLoadWalls, s.TierWaits, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
+	perSec := 0.0
+	if s.CommentMs > 0 {
+		perSec = float64(s.Comments) / (float64(s.CommentMs) / 1000)
+	}
+	fmt.Fprintf(os.Stderr, "  speed: grid pages of up to %d posts; comments: %d requests, pages of up to %d, %.1f comments a second per chain, answers %v, %d hop identities\n",
+		s.GridMaxPage, s.CommentRequests, s.CommentMaxPage, perSec, s.CommentAnswers, s.CommentHopIdentities)
 	if s.StoppedEarly && rep.ContinueAt > 0 {
 		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C): profile %d of %d is the first not read completely (partial profiles count for no question).\n"+
 			"  To continue, run again with --start-at %d and a new output directory.\n", rep.ContinueAt, len(names), rep.ContinueAt)

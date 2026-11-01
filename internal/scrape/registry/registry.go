@@ -482,10 +482,11 @@ func Upsert(ctx context.Context, pool *pgxpool.Pool, q Query) error {
 	})
 }
 
-var placeholder = regexp.MustCompile(`^\{\{(\w+)\}\}$`)
+// placeholder is "{{name}}", or "{{name=default}}" with a JSON default.
+var placeholder = regexp.MustCompile(`^\{\{(\w+)(?:=(.+))?\}\}$`)
 
-// Render fills the variables template. Placeholders without a value become
-// JSON null.
+// Render fills the variables template. A placeholder without a value takes
+// its default ("{{first=12}}" renders 12), else JSON null.
 func Render(tmpl json.RawMessage, vars map[string]any) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(tmpl))
 	dec.UseNumber()
@@ -495,6 +496,21 @@ func Render(tmpl json.RawMessage, vars map[string]any) ([]byte, error) {
 	}
 	v = fill(v, vars)
 	return json.Marshal(v)
+}
+
+// placeholderDefault parses a placeholder's default as JSON (a number, a
+// boolean, a quoted string), else keeps it as a string; none is null.
+func placeholderDefault(raw string) any {
+	if raw == "" {
+		return nil
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil || dec.More() {
+		return raw
+	}
+	return v
 }
 
 func fill(v any, vars map[string]any) any {
@@ -513,7 +529,7 @@ func fill(v any, vars map[string]any) any {
 		if m := placeholder.FindStringSubmatch(t); m != nil {
 			val, ok := vars[m[1]]
 			if !ok {
-				return nil
+				return placeholderDefault(m[2])
 			}
 			return val
 		}
