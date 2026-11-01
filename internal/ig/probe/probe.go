@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tidwall/gjson"
@@ -83,7 +84,11 @@ type Options struct {
 	// each, newest first) per post. Both default to 1.
 	CommentPosts int
 	CommentPages int
-	Now          func() time.Time
+	// Parallel is how many profiles are read at once, each by its own
+	// identity (and so its own exit IP on a static list), each at the same
+	// pace. 0 or 1 reads one at a time.
+	Parallel int
+	Now      func() time.Time
 }
 
 // Step is one request's outcome.
@@ -212,6 +217,11 @@ type Profile struct {
 	// run (Ctrl-C): what it holds is partial, and its unanswered steps
 	// count for no question.
 	Stopped bool `json:"stopped,omitempty"`
+	// Identity and Exit say which identity read the profile and through
+	// which exit group (a static IP's /24; no credentials), to relate walls
+	// to exits.
+	Identity string `json:"identity,omitempty"`
+	Exit     string `json:"exit,omitempty"`
 }
 
 // Report is the whole run.
@@ -222,9 +232,14 @@ type Report struct {
 	StartedAt   time.Time `json:"started_at"`
 	FinishedAt  time.Time `json:"finished_at"`
 	// StartAt is the profile line the run started at, when not the first.
-	StartAt  int       `json:"start_at,omitempty"`
-	Profiles []Profile `json:"profiles"`
-	Summary  Summary   `json:"summary"`
+	StartAt int `json:"start_at,omitempty"`
+	// Parallel is how many profiles were read at once, when more than one.
+	Parallel int `json:"parallel,omitempty"`
+	// ContinueAt, after a stopped run, is the first profile line not read
+	// completely: run again with StartAt set to it.
+	ContinueAt int       `json:"continue_at,omitempty"`
+	Profiles   []Profile `json:"profiles"`
+	Summary    Summary   `json:"summary"`
 }
 
 // Summary answers the questions over all profiles.
@@ -288,68 +303,195 @@ func Run(ctx context.Context, o Options) Report {
 	if o.MaxGridPages <= 0 {
 		o.MaxGridPages = 32
 	}
-	o.CommentPosts, o.CommentPages = max(o.CommentPosts, 1), max(o.CommentPages, 1)
-	r := &runner{o: o, sum: Summary{TokensFound: map[string]int{}, GridWalls: map[string]int{},
-		QueriesWithoutClientState: map[string]int{}, Cookies: map[string]int{}, Requests: map[string]Cost{}}}
+	o.CommentPosts, o.CommentPages, o.Parallel = max(o.CommentPosts, 1), max(o.CommentPages, 1), max(o.Parallel, 1)
 	rep := Report{Version: o.Version, Tier: o.Tier, Fingerprint: o.Fingerprint, StartedAt: o.Now().UTC()}
 	if o.StartAt > 1 {
 		rep.StartAt = o.StartAt
 	}
-	for i, username := range o.Profiles {
-		if ctx.Err() != nil {
-			break
-		}
-		if i+1 < o.StartAt {
-			continue
-		}
-		p := r.profile(ctx, i+1, username)
-		if ctx.Err() != nil {
-			p.Stopped, r.sum.StoppedEarly = true, true
-		}
-		rep.Profiles = append(rep.Profiles, p)
-		r.sum.Posts += len(p.Posts)
-		r.sum.Comments += len(p.Comments)
-		if o.OnProfile != nil {
-			o.OnProfile(p)
-		}
+	if o.Parallel > 1 {
+		rep.Parallel = o.Parallel
+	}
+	// Workers share the progress callback (a long walk reports from its
+	// worker) and the U5 identity; everything else is per worker, and
+	// their summaries are added up at the end.
+	var progressMu sync.Mutex
+	progress := func(line string) {
 		if o.Progress != nil {
-			line := fmt.Sprintf("profile %d/%d %s: bootstrap %s, grid %s, %d comments; so far %d posts, %d comments",
-				i+1, len(o.Profiles), username, p.Bootstrap.Class, gridLine(p.Grid), len(p.Comments), r.sum.Posts, r.sum.Comments)
-			if p.Stopped {
-				line = fmt.Sprintf("profile %d/%d %s: stopped (Ctrl-C) after %d posts; the report keeps what was read", i+1, len(o.Profiles), username, len(p.Posts))
-			}
+			progressMu.Lock()
+			defer progressMu.Unlock()
 			o.Progress(line)
 		}
 	}
-	if r.second != nil {
-		o.Pool.Release(r.second)
+	wo := o
+	wo.Progress = progress
+	sh := &shared{}
+	type job struct {
+		index    int
+		username string
 	}
-	for k, c := range r.sum.Requests {
+	jobs := make(chan job)
+	results := make(chan Profile)
+	runners := make([]*runner, o.Parallel)
+	var wg sync.WaitGroup
+	for w := range runners {
+		r := newRunner(wo, sh)
+		runners[w] = r
+		wg.Go(func() {
+			for j := range jobs {
+				if ctx.Err() != nil {
+					continue // stopped: drain without starting another profile
+				}
+				results <- r.profile(ctx, j.index, j.username)
+			}
+		})
+	}
+	go func() {
+		defer close(jobs)
+		for i, username := range o.Profiles {
+			if i+1 < o.StartAt {
+				continue
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			select {
+			case jobs <- job{i + 1, username}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() { wg.Wait(); close(results) }()
+
+	sum := newSummary()
+	for p := range results {
+		if ctx.Err() != nil {
+			p.Stopped, sum.StoppedEarly = true, true
+		}
+		rep.Profiles = append(rep.Profiles, p)
+		sum.Posts += len(p.Posts)
+		sum.Comments += len(p.Comments)
+		if o.OnProfile != nil {
+			o.OnProfile(p)
+		}
+		line := fmt.Sprintf("profile %d/%d %s: bootstrap %s, grid %s, %d comments; so far %d posts, %d comments",
+			p.Index, len(o.Profiles), p.Username, p.Bootstrap.Class, gridLine(p.Grid), len(p.Comments), sum.Posts, sum.Comments)
+		if p.Stopped {
+			line = fmt.Sprintf("profile %d/%d %s: stopped (Ctrl-C) after %d posts; the report keeps what was read", p.Index, len(o.Profiles), p.Username, len(p.Posts))
+		}
+		progress(line)
+	}
+	if sh.second != nil {
+		o.Pool.Release(sh.second)
+	}
+	for _, r := range runners {
+		sum.add(r.sum)
+	}
+	for k, c := range sum.Requests {
 		c.MeanMs, c.MeanBytes = c.sumMs/int64(c.N), c.sumBytes/int64(c.N)
-		r.sum.Requests[k] = c
+		sum.Requests[k] = c
 	}
-	r.sum.Profiles = len(rep.Profiles)
-	slices.Sort(r.sum.WalledAtPosts)
-	rep.Summary = r.sum
+	slices.SortFunc(rep.Profiles, func(a, b Profile) int { return a.Index - b.Index })
+	sum.Profiles = len(rep.Profiles)
+	slices.Sort(sum.WalledAtPosts)
+	if sum.StoppedEarly {
+		rep.ContinueAt = continueAt(rep.Profiles, max(o.StartAt, 1), len(o.Profiles))
+	}
+	rep.Summary = sum
 	rep.FinishedAt = o.Now().UTC()
 	return rep
 }
 
-type runner struct {
-	o      Options
-	sum    Summary
-	second *session.Identity // the U5 identity, bootstrapped once
-	// The profile being read, for the raw answers.
-	rawDir   string
-	rawSeq   int
-	rawSaved map[string]bool
-	pages    int // page HTML files saved
+// continueAt is the first line from start that was not read completely.
+func continueAt(profiles []Profile, start, n int) int {
+	done := map[int]bool{}
+	for _, p := range profiles {
+		done[p.Index] = !p.Stopped
+	}
+	for i := start; i <= n; i++ {
+		if !done[i] {
+			return i
+		}
+	}
+	return 0
 }
+
+func newSummary() Summary {
+	return Summary{TokensFound: map[string]int{}, GridWalls: map[string]int{},
+		QueriesWithoutClientState: map[string]int{}, Cookies: map[string]int{}, Requests: map[string]Cost{}}
+}
+
+// add adds a worker's counts to s. Profiles, Posts, Comments and
+// StoppedEarly are the collector's.
+func (s *Summary) add(o Summary) {
+	addMap := func(dst, src map[string]int) {
+		for k, v := range src {
+			dst[k] += v
+		}
+	}
+	s.Bootstrapped += o.Bootstrapped
+	addMap(s.TokensFound, o.TokensFound)
+	s.GridEnds += o.GridEnds
+	s.GridCaps += o.GridCaps
+	s.GridAgeStops += o.GridAgeStops
+	addMap(s.GridWalls, o.GridWalls)
+	s.PagedPast24 += o.PagedPast24
+	s.MaxPosts = max(s.MaxPosts, o.MaxPosts)
+	s.WalledAtPosts = append(s.WalledAtPosts, o.WalledAtPosts...)
+	s.GridFirstAlone += o.GridFirstAlone
+	addMap(s.QueriesWithoutClientState, o.QueriesWithoutClientState)
+	s.CursorPortable += o.CursorPortable
+	s.CursorNotPortable += o.CursorNotPortable
+	addMap(s.Cookies, o.Cookies)
+	s.CSRFCookie += o.CSRFCookie
+	s.GridByPKWorks += o.GridByPKWorks
+	s.GridByPKFails += o.GridByPKFails
+	for k, c := range o.Requests {
+		t := s.Requests[k]
+		t.N, t.sumMs, t.sumBytes = t.N+c.N, t.sumMs+c.sumMs, t.sumBytes+c.sumBytes
+		s.Requests[k] = t
+	}
+}
+
+// shared is what the workers of a run share.
+type shared struct {
+	mu    sync.Mutex
+	pages int // profiles whose page HTML was saved
+	// The U5 identity, bootstrapped once and used by one worker at a time.
+	otherMu sync.Mutex
+	second  *session.Identity
+}
+
+// takePage reports whether this profile may save its page HTML (the first
+// limit profiles do).
+func (sh *shared) takePage(limit int) bool {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if sh.pages >= limit {
+		return false
+	}
+	sh.pages++
+	return true
+}
+
+// runner reads one profile at a time; a parallel run has one per worker.
+type runner struct {
+	o   Options
+	sh  *shared
+	sum Summary
+	// The profile being read, for the raw answers.
+	rawDir    string
+	rawSeq    int
+	rawSaved  map[string]bool
+	savePages bool // this profile saves its page HTML
+}
+
+func newRunner(o Options, sh *shared) *runner { return &runner{o: o, sh: sh, sum: newSummary()} }
 
 func (r *runner) profile(ctx context.Context, index int, username string) Profile {
 	page := strings.TrimRight(r.o.BaseURL, "/") + "/" + username + "/"
 	out := Profile{Index: index, Username: username, URL: page}
-	r.rawSeq, r.rawSaved = 0, map[string]bool{}
+	r.rawSeq, r.rawSaved, r.savePages = 0, map[string]bool{}, false
 	if r.o.RawDir != "" {
 		r.rawDir = filepath.Join(r.o.RawDir, fmt.Sprintf("%03d-%s", index, unsafeName.ReplaceAllString(username, "_")))
 	}
@@ -359,6 +501,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		return out
 	}
 	defer r.o.Pool.Release(id)
+	out.Identity, out.Exit = id.ID, id.Endpoint.Bucket
 	start := time.Now()
 	pl, err := r.o.Loader.Load(ctx, id, page)
 	out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
@@ -372,8 +515,8 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	out.Bootstrap.Class, out.Bootstrap.Status, out.Bootstrap.WireBytes = pl.Class.String(), pl.Status, pl.Bytes
 	out.Bootstrap.Reason = pl.Reason
 	r.cost("page", out.Bootstrap)
-	if r.rawDir != "" && pl.Class == detect.OK && r.pages < r.o.RawPages {
-		r.pages++
+	if r.rawDir != "" && pl.Class == detect.OK && r.sh.takePage(r.o.RawPages) {
+		r.savePages = true
 		r.saveRaw("page.html", pl.HTML)
 	}
 	if pl.Class == detect.OK {
@@ -458,8 +601,10 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		mediaPK, newest, newestURL = out.Posts[0].PK, out.Posts[0].Shortcode, out.Posts[0].URL
 	}
 
-	// U5: the first cursor, from another identity.
+	// U5: the first cursor, from another identity (shared by the workers,
+	// used by one at a time).
 	if cursor != "" {
+		r.sh.otherMu.Lock()
 		if other := r.otherIdentity(ctx, page, &out); other != nil {
 			resp, s := r.do(ctx, other, "grid", map[string]any{"user_id": userID, "cursor": cursor}, page)
 			s.Items = gridItems(resp)
@@ -473,6 +618,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 				r.sum.CursorNotPortable++
 			}
 		}
+		r.sh.otherMu.Unlock()
 	}
 
 	// U1: page the grid as far as it goes.
@@ -640,8 +786,8 @@ func (r *runner) walk(ctx context.Context, id *session.Identity, userID, cursor 
 // otherIdentity is a second identity for U5, bootstrapped on the first
 // profile page it is needed for and reused after.
 func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *session.Identity {
-	if r.second != nil {
-		return r.second
+	if r.sh.second != nil {
+		return r.sh.second
 	}
 	id, err := r.o.Pool.Acquire(ctx, r.o.Tier)
 	if err != nil {
@@ -667,7 +813,7 @@ func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *
 		return nil
 	}
 	out.OtherBootstrap = st
-	r.second = id
+	r.sh.second = id
 	return id
 }
 
@@ -689,7 +835,7 @@ func (r *runner) postPage(ctx context.Context, id *session.Identity, url, shortc
 	if pl.Class != detect.OK {
 		return pp
 	}
-	if r.rawDir != "" && r.pages <= r.o.RawPages {
+	if r.rawDir != "" && r.savePages {
 		r.saveRaw("post-page.html", pl.HTML)
 	}
 	blobs := scrapehtml.JSONBlobs(pl.HTML)
