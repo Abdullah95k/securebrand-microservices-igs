@@ -446,3 +446,28 @@ func TestProbeParallelStop(t *testing.T) {
 		t.Fatalf("continue at %d, want %d", rep.ContinueAt, want)
 	}
 }
+
+// A page load that gets the login redirect is retried on another identity
+// (exits flagged for page loads), up to PageLoadTries identities.
+func TestProbeRetriesWalledPageLoads(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 8, Profiles: 3, PostsPerProfile: 20, MaxComments: 3, PostSpacing: time.Hour},
+		Faults: fakeig.Faults{PageWallFirst: 5}})
+	var names []string
+	for _, p := range env.World.Profiles() {
+		names = append(names, p.Username)
+	}
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 10,
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL})
+	// Page loads 1-3 are profile 1's three tries (all walled); 4-5 walled
+	// and 6 loads for profile 2; profile 3 loads at once.
+	p1, p2, p3 := rep.Profiles[0], rep.Profiles[1], rep.Profiles[2]
+	if p1.Bootstrap.Class != "login_wall" || p1.PageLoadWalls != 2 || p1.Grid != nil {
+		t.Fatalf("profile 1: %+v, walls %d", p1.Bootstrap, p1.PageLoadWalls)
+	}
+	if p2.Bootstrap.Class != "ok" || p2.PageLoadWalls != 2 || len(p2.Posts) != 20 || p3.PageLoadWalls != 0 || len(p3.Posts) != 20 {
+		t.Fatalf("profile 2: %+v walls %d posts %d; profile 3 walls %d posts %d", p2.Bootstrap, p2.PageLoadWalls, len(p2.Posts), p3.PageLoadWalls, len(p3.Posts))
+	}
+	if s := rep.Summary; s.PageLoadWalls != 4 || s.Bootstrapped != 2 || s.Requests["page"].N != 7 {
+		t.Fatalf("summary: walls %d, bootstrapped %d, page loads %d", s.PageLoadWalls, s.Bootstrapped, s.Requests["page"].N)
+	}
+}

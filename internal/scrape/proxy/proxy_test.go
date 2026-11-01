@@ -36,9 +36,11 @@ func block(p *Pool, ep Endpoint, n int) {
 
 func TestBuckets(t *testing.T) {
 	for raw, want := range map[string]string{
-		"http://u:p@203.0.113.10:8000": "isp|203.0.113.0/24",
-		"http://proxy.example:8000":    "isp|proxy.example",
-		"socks5://[2001:db8::1]:1080":  "isp|2001:db8::/48",
+		"http://u:p@203.0.113.10:8000":  "isp|203.0.113.0/24",
+		"http://proxy.example:8000":     "isp|proxy.example:8000",
+		"http://u:p@proxy.example:8001": "isp|proxy.example:8001",
+		"http://proxy.example":          "isp|proxy.example",
+		"socks5://[2001:db8::1]:1080":   "isp|2001:db8::/48",
 	} {
 		if got := staticBucket("isp", raw); got != want {
 			t.Errorf("staticBucket(%q) = %q, want %q", raw, got, want)

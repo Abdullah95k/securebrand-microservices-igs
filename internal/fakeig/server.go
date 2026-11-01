@@ -40,6 +40,10 @@ type Faults struct {
 	LoginWallAfter int
 	// Challenge redirects every page load to /challenge/.
 	Challenge bool
+	// PageWallFirst redirects the first N page loads to /accounts/login/,
+	// whoever asks: exits already flagged for page loads, as some of the
+	// owner's ISP exits were (fourth and full probe runs).
+	PageWallFirst int
 	// GridWallAfter walls grid pages that start at or past this many posts
 	// (U1: the browser stopped at 24).
 	GridWallAfter int
@@ -74,7 +78,9 @@ type Server struct {
 	idents map[string]*ident // by lsd
 	byCSRF map[string]*ident
 	minted uint64
-	gql    atomic.Int64
+	// pageLoads counts page loads, for PageWallFirst.
+	pageLoads int
+	gql       atomic.Int64
 	// Requests counts GraphQL requests by friendly name.
 	Requests sync.Map
 }
@@ -113,6 +119,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Faults.Challenge {
 		http.Redirect(w, r, "/challenge/?next="+r.URL.Path, http.StatusFound)
+		return
+	}
+	s.mu.Lock()
+	s.pageLoads++
+	early := s.pageLoads <= s.opts.Faults.PageWallFirst
+	s.mu.Unlock()
+	if early {
+		http.Redirect(w, r, "/accounts/login/?next="+r.URL.Path, http.StatusFound)
 		return
 	}
 	if c, err := r.Cookie("csrftoken"); err == nil && s.walled(s.identByCSRF(c.Value)) {

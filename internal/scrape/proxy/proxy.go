@@ -159,11 +159,17 @@ func (p *Pool) Observe(ep Endpoint, c detect.Class) {
 	p.breakers.Observe(ep.Bucket, c.Blocking() || c == detect.Transport)
 }
 
-// staticBucket is the /24 of an IPv4 endpoint, else its host.
+// staticBucket is the /24 of an IPv4 endpoint (the /48 of an IPv6 one),
+// else its host and port: a provider that names its exits by port on one
+// host (Decodo's ISP list is isp.decodo.com:10001, :10002, ...) gives each
+// port its own exit IP, so one blocked port must not cool down the others.
 func staticBucket(tier, raw string) string {
 	host := raw
 	if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
 		host = u.Hostname()
+		if net.ParseIP(host) == nil && u.Port() != "" {
+			return tier + "|" + net.JoinHostPort(host, u.Port())
+		}
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		if v4 := ip.To4(); v4 != nil {

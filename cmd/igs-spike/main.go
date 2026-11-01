@@ -78,6 +78,8 @@ func runProbe(args []string) int {
 	commentPages := fs.Int("comment-pages", 1, "comment pages to read per post (10 comments each, newest first)")
 	startAt := fs.Int("start-at", 1, "start at this line of the profiles list, to continue a stopped run (use a new --out-dir)")
 	parallel := fs.Int("parallel", 1, "profiles read at once, each by its own identity and exit IP, each at --rps")
+	idRequests := fs.Int("identity-requests", 500, "retire an identity (and so move to another exit) after about this many requests; the full run met Instagram's rate limit after 1,100 to 1,300 on one IP (0 = never)")
+	maxWait := fs.Duration("max-wait", 20*time.Minute, "how long a profile waits when every exit of the tier is cooling down, before it is given up")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
 	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
 	dryRun := fs.Bool("dry-run", false, "rehearse against a built-in fake Instagram (no traffic, no proxies)")
@@ -114,7 +116,7 @@ func runProbe(args []string) int {
 	if *parallel < 1 {
 		*parallel = 1
 	}
-	stack, err := newStack(cfg, *base, *fingerprint, *rps, *parallel)
+	stack, err := newStack(cfg, *base, *fingerprint, *rps, *parallel, *idRequests)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "probe:", err)
 		return 1
@@ -144,7 +146,7 @@ func runProbe(args []string) int {
 	fmt.Fprintf(os.Stderr, "probe: %d profiles, tier %s, %d at once, %.2f requests/s per identity; Ctrl-C stops and keeps what was read\n", len(names), *tier, *parallel, *rps)
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
 		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
-		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel,
+		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel, MaxWait: *maxWait,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) },
 		OnProfile: func(p probe.Profile) {
 			if err := saver.Add(p); err != nil {
@@ -164,9 +166,9 @@ func runProbe(args []string) int {
 		return 1
 	}
 	s := rep.Summary
-	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  read %d posts and %d comments from %d profiles\n  bootstrapped %d/%d; grid: %d ended, %d capped, %d at the age limit, walls %v at %v posts, %d paged past 24 (max %d)\n"+
+	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  read %d posts and %d comments from %d profiles; %d page loads walled (retried), %d waits for a cooling tier\n  bootstrapped %d/%d; grid: %d ended, %d capped, %d at the age limit, walls %v at %v posts, %d paged past 24 (max %d)\n"+
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
-		*outDir, bundle, s.Posts, s.Comments, s.Profiles, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
+		*outDir, bundle, s.Posts, s.Comments, s.Profiles, s.PageLoadWalls, s.TierWaits, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
 	if s.StoppedEarly && rep.ContinueAt > 0 {
 		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C): profile %d of %d is the first not read completely (partial profiles count for no question).\n"+
@@ -181,7 +183,7 @@ type stack struct {
 	gql    *graphql.Client
 }
 
-func newStack(cfg *config.Config, base, fingerprint string, rps float64, parallel int) (stack, error) {
+func newStack(cfg *config.Config, base, fingerprint string, rps float64, parallel, idRequests int) (stack, error) {
 	fpBytes, err := configs.FS.ReadFile("fingerprints.yaml")
 	if err != nil {
 		return stack{}, err
@@ -194,8 +196,14 @@ func newStack(cfg *config.Config, base, fingerprint string, rps float64, paralle
 	if err != nil {
 		return stack{}, err
 	}
+	// An identity retires after a random count in [n, 1.5n), so exits
+	// rest in turn instead of each running until Instagram limits it.
+	reqMin, reqMax := 100000, 100001
+	if idRequests > 0 {
+		reqMin, reqMax = idRequests, idRequests+idRequests/2
+	}
 	pool, err := session.NewPool(session.PoolConfig{BaseURL: base, Profile: fingerprint, Timeout: 30 * time.Second,
-		IdentityRPS: rps, IdentityBurst: 1, MaxRequestsMin: 100000, MaxRequestsMax: 100001, MaxPerTier: parallel + 3}, proxies, fps, nil)
+		IdentityRPS: rps, IdentityBurst: 1, MaxRequestsMin: reqMin, MaxRequestsMax: reqMax, MaxPerTier: parallel + 3}, proxies, fps, nil)
 	if err != nil {
 		return stack{}, err
 	}

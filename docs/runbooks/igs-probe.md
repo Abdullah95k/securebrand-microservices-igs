@@ -191,18 +191,24 @@ themselves out of git.
 | Comments | the newest post, first page (10) | `IGS_PROBE_ARGS="--comment-posts 10 --comment-pages 3"`: the newest 10 posts, up to 30 comments each (each page is one more request, about 3 seconds) |
 | Start | the first profile | `IGS_PROBE_ARGS="--start-at 81"`, with a new `IGS_PROBE_OUT`: continue a stopped run at profile 81 |
 | Profiles at once | 1 | `IGS_PROBE_ARGS="--parallel 6"`: 6 profiles at a time, each by its own identity and ISP IP, each at the same pace, so about 6 times faster. Keep it below your number of ISP IPs (see below) |
+| Rotation | 500 | `--identity-requests 500`: each identity (and so each IP) retires after 500 to 750 requests and the next IP takes over, so IPs rest in turn. One IP met Instagram's rate limit after 1,100 to 1,300 requests in the full run |
+| Waiting | 20 minutes | `--max-wait 20m`: when every IP is cooling down after blocks, each profile waits this long before it is given up |
 
 **How many at once.** Each worker uses its own ISP IP at the same pace as a
 single run, so the load per IP does not change, as long as there are more
-IPs than workers (one more IP serves the cursor check). Count your ISP IPs,
-and the /24 groups they fall in, without showing the credentials:
+IPs than workers (one more IP serves the cursor check, and spares replace
+blocked ones). With 10 IPs, use 6. Count your ISP endpoints without showing
+the credentials (endpoints named by port on one host, such as
+`isp.decodo.com:10001`, count one IP per port):
 
 ```bash
-python3 -c "import re;t=open('phase0/proxies.yaml').read();s=t.split('name: isp',1)[1].split('- name:',1)[0];ips=re.findall(r'@([0-9.]+):',s);print(len(ips),'ISP IPs in',len({i.rsplit('.',1)[0] for i in ips}),'groups')"
+python3 -c "t=open('phase0/proxies.yaml').read();s=t.split('name: isp',1)[1].split('- name:',1)[0];print(sum(1 for l in s.splitlines() if l.strip().startswith('- ')),'ISP endpoints')"
 ```
 
-A block cools down the whole /24 group of the IP that got it for a while, so
-with few groups, start lower (4) and watch the progress lines for `wall:`.
+A block cools down the IP that got it for a while: for endpoints given as
+IP addresses, its whole /24; for endpoints named by host and port, that
+port alone. Watch the progress lines for `wall:`; while every IP is cooling
+down, a profile waits (`--max-wait`) rather than failing.
 
 **The full list.** The 348 accounts, back one year or 1,200 posts each (whichever comes first), with results kept apart from the test's:
 
