@@ -353,3 +353,96 @@ func readCSV(t *testing.T, path string) [][]string {
 	}
 	return rows
 }
+
+// Reading profiles in parallel gives the same report as one at a time:
+// the same profiles in line order, the same posts and comments, and the
+// same answers, from several identities at once.
+func TestProbeParallel(t *testing.T) {
+	spec := fakeig.Spec{Seed: 6, Profiles: 6, PostsPerProfile: 50, MaxComments: 15, Highlights: 1, PostSpacing: time.Hour}
+	runWith := func(parallel int) probe.Report {
+		env := igtest.New(t, igtest.Options{Spec: spec})
+		var names []string
+		for _, p := range env.World.Profiles() {
+			names = append(names, p.Username)
+		}
+		var lines []string
+		rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 10,
+			Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, CommentPosts: 2, Parallel: parallel,
+			Progress: func(line string) { lines = append(lines, line) }})
+		if len(lines) != len(names) {
+			t.Fatalf("parallel %d: %d progress lines", parallel, len(lines))
+		}
+		return rep
+	}
+	one, many := runWith(1), runWith(3)
+	if many.Parallel != 3 || one.Parallel != 0 {
+		t.Fatalf("parallel recorded as %d and %d", one.Parallel, many.Parallel)
+	}
+	ids := map[string]bool{}
+	for i, p := range many.Profiles {
+		q := one.Profiles[i]
+		if p.Index != i+1 || p.Username != q.Username || len(p.Posts) != len(q.Posts) || len(p.Comments) != len(q.Comments) ||
+			p.Grid.Stop != q.Grid.Stop || p.Highlights == nil || p.Highlights.Items != q.Highlights.Items {
+			t.Fatalf("profile %d differs: %d/%d posts, %d/%d comments", i+1, len(p.Posts), len(q.Posts), len(p.Comments), len(q.Comments))
+		}
+		ids[p.Identity] = true
+	}
+	if len(ids) < 2 {
+		t.Fatalf("one identity read every profile: %v", ids)
+	}
+	a, b := one.Summary, many.Summary
+	// Request counts must match; latency differs, and sizes by a byte or
+	// so (each identity's cookies and tokens have their own lengths).
+	for k, c := range a.Requests {
+		d := b.Requests[k]
+		if d.N != c.N || d.MeanBytes < c.MeanBytes*98/100 || d.MeanBytes > c.MeanBytes*102/100 {
+			t.Fatalf("requests %s: %+v vs %+v", k, c, d)
+		}
+	}
+	strip := func(s probe.Summary) probe.Summary {
+		s.Requests = nil
+		return s
+	}
+	ja, _ := json.Marshal(strip(a))
+	jb, _ := json.Marshal(strip(b))
+	if string(ja) != string(jb) {
+		t.Fatalf("summaries differ:\none:  %s\nmany: %s", ja, jb)
+	}
+}
+
+// Stopping a parallel run leaves several profiles partial; ContinueAt is
+// the first line not read completely, and no stop counts as a wall.
+func TestProbeParallelStop(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 7, Profiles: 6, PostsPerProfile: 200, MaxComments: 2, PostSpacing: time.Hour}})
+	var names []string
+	for _, p := range env.World.Profiles() {
+		names = append(names, p.Username)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rep := probe.Run(ctx, probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 100,
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, Parallel: 3, Progress: func(line string) {
+			if strings.Contains(line, "posts so far") {
+				cancel()
+			}
+		}})
+	s := rep.Summary
+	if !s.StoppedEarly || len(s.GridWalls) != 0 || len(rep.Profiles) == 0 || len(rep.Profiles) > 3 {
+		t.Fatalf("profiles %d, summary %+v", len(rep.Profiles), s)
+	}
+	want := 0
+	for i := 1; i <= len(names) && want == 0; i++ {
+		read := false
+		for _, p := range rep.Profiles {
+			if p.Index == i && !p.Stopped {
+				read = true
+			}
+		}
+		if !read {
+			want = i
+		}
+	}
+	if rep.ContinueAt != want || want == 0 {
+		t.Fatalf("continue at %d, want %d", rep.ContinueAt, want)
+	}
+}

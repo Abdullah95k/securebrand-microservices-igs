@@ -190,6 +190,19 @@ themselves out of git.
 | Backfill window | none | `IGS_PROBE_ARGS="--max-age-days 365"`: stop each profile's grid at posts older than a year |
 | Comments | the newest post, first page (10) | `IGS_PROBE_ARGS="--comment-posts 10 --comment-pages 3"`: the newest 10 posts, up to 30 comments each (each page is one more request, about 3 seconds) |
 | Start | the first profile | `IGS_PROBE_ARGS="--start-at 81"`, with a new `IGS_PROBE_OUT`: continue a stopped run at profile 81 |
+| Profiles at once | 1 | `IGS_PROBE_ARGS="--parallel 6"`: 6 profiles at a time, each by its own identity and ISP IP, each at the same pace, so about 6 times faster. Keep it below your number of ISP IPs (see below) |
+
+**How many at once.** Each worker uses its own ISP IP at the same pace as a
+single run, so the load per IP does not change, as long as there are more
+IPs than workers (one more IP serves the cursor check). Count your ISP IPs,
+and the /24 groups they fall in, without showing the credentials:
+
+```bash
+python3 -c "import re;t=open('phase0/proxies.yaml').read();s=t.split('name: isp',1)[1].split('- name:',1)[0];ips=re.findall(r'@([0-9.]+):',s);print(len(ips),'ISP IPs in',len({i.rsplit('.',1)[0] for i in ips}),'groups')"
+```
+
+A block cools down the whole /24 group of the IP that got it for a while, so
+with few groups, start lower (4) and watch the progress lines for `wall:`.
 
 **The full list.** The 348 accounts, back one year or 1,200 posts each (whichever comes first), with results kept apart from the test's:
 

@@ -77,6 +77,7 @@ func runProbe(args []string) int {
 	commentPosts := fs.Int("comment-posts", 1, "read the comments of each profile's newest N posts")
 	commentPages := fs.Int("comment-pages", 1, "comment pages to read per post (10 comments each, newest first)")
 	startAt := fs.Int("start-at", 1, "start at this line of the profiles list, to continue a stopped run (use a new --out-dir)")
+	parallel := fs.Int("parallel", 1, "profiles read at once, each by its own identity and exit IP, each at --rps")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
 	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
 	dryRun := fs.Bool("dry-run", false, "rehearse against a built-in fake Instagram (no traffic, no proxies)")
@@ -110,7 +111,10 @@ func runProbe(args []string) int {
 			return 1
 		}
 	}
-	stack, err := newStack(cfg, *base, *fingerprint, *rps)
+	if *parallel < 1 {
+		*parallel = 1
+	}
+	stack, err := newStack(cfg, *base, *fingerprint, *rps, *parallel)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "probe:", err)
 		return 1
@@ -137,10 +141,10 @@ func runProbe(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	fmt.Fprintf(os.Stderr, "probe: %d profiles, tier %s, %.2f requests/s per identity; Ctrl-C stops and keeps what was read\n", len(names), *tier, *rps)
+	fmt.Fprintf(os.Stderr, "probe: %d profiles, tier %s, %d at once, %.2f requests/s per identity; Ctrl-C stops and keeps what was read\n", len(names), *tier, *parallel, *rps)
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
 		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
-		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages,
+		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) },
 		OnProfile: func(p probe.Profile) {
 			if err := saver.Add(p); err != nil {
@@ -164,10 +168,9 @@ func runProbe(args []string) int {
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
 		*outDir, bundle, s.Posts, s.Comments, s.Profiles, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
-	if s.StoppedEarly && len(rep.Profiles) > 0 {
-		last := rep.Profiles[len(rep.Profiles)-1].Index
-		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C) at profile %d of %d; it is partial and counts for no question.\n"+
-			"  To continue, run again with --start-at %d and a new output directory.\n", last, len(names), last)
+	if s.StoppedEarly && rep.ContinueAt > 0 {
+		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C): profile %d of %d is the first not read completely (partial profiles count for no question).\n"+
+			"  To continue, run again with --start-at %d and a new output directory.\n", rep.ContinueAt, len(names), rep.ContinueAt)
 	}
 	return 0
 }
@@ -178,7 +181,7 @@ type stack struct {
 	gql    *graphql.Client
 }
 
-func newStack(cfg *config.Config, base, fingerprint string, rps float64) (stack, error) {
+func newStack(cfg *config.Config, base, fingerprint string, rps float64, parallel int) (stack, error) {
 	fpBytes, err := configs.FS.ReadFile("fingerprints.yaml")
 	if err != nil {
 		return stack{}, err
@@ -192,7 +195,7 @@ func newStack(cfg *config.Config, base, fingerprint string, rps float64) (stack,
 		return stack{}, err
 	}
 	pool, err := session.NewPool(session.PoolConfig{BaseURL: base, Profile: fingerprint, Timeout: 30 * time.Second,
-		IdentityRPS: rps, IdentityBurst: 1, MaxRequestsMin: 100000, MaxRequestsMax: 100001, MaxPerTier: 4}, proxies, fps, nil)
+		IdentityRPS: rps, IdentityBurst: 1, MaxRequestsMin: 100000, MaxRequestsMax: 100001, MaxPerTier: parallel + 3}, proxies, fps, nil)
 	if err != nil {
 		return stack{}, err
 	}
