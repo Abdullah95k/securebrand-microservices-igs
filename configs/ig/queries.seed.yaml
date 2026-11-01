@@ -1,6 +1,6 @@
 # Logged-out Instagram GraphQL query registry seed (igs).
 #
-# The five operations the logged-out web app used in the owner's recordings
+# The six operations the logged-out web app used in the owner's recordings
 # (docs/instagram/har-findings-2026-10-30.md §1). doc_ids were valid on
 # 2026-10-30 and rotate; registry sync (M9) follows them, or set a row by
 # hand. Variables are a JSON template: a string value "{{name}}" is replaced
@@ -78,6 +78,23 @@ queries:
       media_id: "{{media_pk}}"
       after: "{{cursor}}"
       first: "{{first=10}}"
+
+  # The profile's reels tab, by the user's id and a cursor: per reel the
+  # view (play_count), like and comment counts, which the grid lacks
+  # (the owner's recording of a reels tab, 2026-11-01; the web app asks 4
+  # at a time after the page's first 12). Whether it answers without a
+  # cursor, like the grid, the probe reports; the reels page
+  # (/<username>/reels/) embeds the first page otherwise.
+  - name: reels
+    friendly_name: PolarisLoggedOutDesktopWWWProfileReelsTabContentQuery_connection
+    doc_id: "27420265870989234"
+    parser: reels
+    parser_version: 1
+    priority: 10
+    variables:
+      id: "{{user_id}}"
+      after: "{{cursor}}"
+      first: "{{first=4}}"
 
   - name: highlights
     friendly_name: PolarisStoriesV3HighlightsLoggedOutPageQuery

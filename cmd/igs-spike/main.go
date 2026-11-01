@@ -84,6 +84,8 @@ func runProbe(args []string) int {
 	commentPageSize := fs.Int("comment-page-size", 0, "comments to ask for per page (0 = the web app's 10); a speed test: does Instagram serve more?")
 	commentRPS := fs.Float64("comment-rps", 0, "requests per second per identity for comment requests only (0 = --rps); everything else keeps --rps")
 	commentHop := fs.Int("comment-hop", 0, "send comment requests through this many extra identities in turn, each page from another exit (0 = off)")
+	reelsPages := fs.Int("reels-pages", 0, "pages of each profile's reels tab to read: view, like and comment counts per reel (0 = none)")
+	reelsPageSize := fs.Int("reels-page-size", 0, "reels to ask for per page (0 = the web app's 4); a speed test: does Instagram serve more?")
 	postDetails := fs.Int("post-details", 1, "read the pages of each profile's newest N posts (by time) for likes, comment count, tags, location, music, topics, duration (about 125 KB each)")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
 	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
@@ -157,6 +159,7 @@ func runProbe(args []string) int {
 		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
 		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel, MaxWait: *maxWait,
 		GridPageSize: *gridPageSize, CommentPageSize: *commentPageSize, RPS: *rps, CommentRPS: *commentRPS, CommentHop: *commentHop, PostDetails: *postDetails,
+		ReelsPages: *reelsPages, ReelsPageSize: *reelsPageSize,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) },
 		OnProfile: func(p probe.Profile) {
 			if err := saver.Add(p); err != nil {
@@ -183,6 +186,10 @@ func runProbe(args []string) int {
 	perSec := 0.0
 	if s.CommentMs > 0 {
 		perSec = float64(s.Comments) / (float64(s.CommentMs) / 1000)
+	}
+	if *reelsPages > 0 {
+		fmt.Fprintf(os.Stderr, "  reels: %d read (pages of up to %d); first page by id %d times, from the reels page %d times\n",
+			s.Reels, s.ReelsMaxPage, s.ReelsByIDWorks, s.ReelsPageFallback)
 	}
 	fmt.Fprintf(os.Stderr, "  speed: grid pages of up to %d posts; comments: %d requests, pages of up to %d, %.1f comments a second per chain, answers %v, %d hop identities\n",
 		s.GridMaxPage, s.CommentRequests, s.CommentMaxPage, perSec, s.CommentAnswers, s.CommentHopIdentities)

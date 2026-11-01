@@ -145,3 +145,22 @@ Every request returned HTTP 200. Per-IP limits at crawler scale are unknown and 
 - **Requests per post:** 1 post page plus ⌈top-level comments ÷ 10⌉ − 1 comment pages. Comments dominate the request budget on busy posts, so the "fetch comments only when the count went up" rule (owner's D2) matters a lot.
 - **Data model:** no reply rows, no view counts. Carousels have children, and collab posts have co-authors. Keep `like_count` nullable: `like_and_view_counts_disabled`.
 - **Scope answers for the owner:** replies, current stories, reel view counts, and probably follower and liker lists are **not reachable logged out**. Highlights are.
+
+## 8. The reels tab (owner's recording, 2026-11-01)
+
+The owner recorded a profile's reels tab, logged out. Logged out it is
+reached only by its URL, `/<username>/reels/`; the profile page has no
+tab to click. **It shows each reel's view count**, which earlier evidence
+(§3, §7) took to need a login:
+
+| Logical name | Friendly name | Endpoint | doc_id | Page size |
+|---|---|---|---|---|
+| `reels` | `PolarisLoggedOutDesktopWWWProfileReelsTabContentQuery_connection` | `/api/graphql` | `27420265870989234` | 4 (the page HTML embeds the first 12) |
+
+- **Variables:** `{"after": <cursor>, "first": 4, "id": <the user's id, 17841...>}`: the same shape as the grid's `_connection` query. Form and headers as the other queries (`x-fb-lsd`, `x-csrftoken`, `x-ig-app-id`, `x-asbd-id: 359341`, `x-fb-friendly-name`); the browser also sent the client-state fields, which U3 found unnecessary.
+- **Answer:** one part, `data.node.polaris_clips_connection` with `edges` and `page_info` (`end_cursor`, `has_next_page`). Each node: `pk`, `code`, `product_type` (`clips`), **`play_count`**, `like_count`, `comment_count`, `like_and_view_counts_disabled`, `clips_tab_pinned_user_ids` (pinned in the reels tab), `display_uri`, `user` (`pk`, `id`). No `taken_at`: the pk gives the time (U10).
+- **The page** (`/<username>/reels/`, about 600 KB) embeds the first 12 reels in the same shape, with the cursor of the next page, through the `PolarisLoggedOutDesktopWWWProfileReelsTabContentQuery` preloader.
+- **Size:** about 4.4 KB for 4 reels. 11 pages in the recording, all answered.
+- **Post pages** (owner, 2026-11-01): like and comment counts are on every post's page (reel, video, photo, carousel), never on the grid.
+
+What it changes: views, likes and comments for every reel cost about 1 KB a reel instead of a 125 KB post page, and the D1 scope gains reel view counts. Photos and carousels still need their page (or U2's post-detail query) for likes and comments. Not yet tested: whether the query answers without a cursor (the probe tries it and falls back to the page's HTML), and how many per page it serves (the probe's `--reels-page-size`).

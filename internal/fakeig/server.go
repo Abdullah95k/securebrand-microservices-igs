@@ -22,12 +22,16 @@ const (
 	OpGrid       = "PolarisLoggedOutDesktopWWWProfilePostsTabContentQuery_connection"
 	OpComments   = "PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery"
 	OpHighlights = "PolarisStoriesV3HighlightsLoggedOutPageQuery"
+	OpReels      = "PolarisLoggedOutDesktopWWWProfileReelsTabContentQuery_connection"
 )
 
 // GridPageSize and CommentPageSize are the recorded page sizes.
 const (
 	GridPageSize    = 12
 	CommentPageSize = 10
+	// ReelsPageSize is the reels tab's page (the owner's recording); its
+	// page HTML embeds the first 12.
+	ReelsPageSize = 4
 )
 
 // Faults model walls and the open questions.
@@ -43,6 +47,9 @@ type Faults struct {
 	// MaxPageSize caps the page size a query may ask for ("first"), as
 	// Instagram may; 0 serves whatever is asked.
 	MaxPageSize int
+	// NoCursorReels refuses the reels query without a cursor, so the first
+	// page must come from the reels page's HTML.
+	NoCursorReels bool
 	// PageWallFirst redirects the first N page loads to /accounts/login/,
 	// whoever asks: exits already flagged for page loads, as some of the
 	// owner's ISP exits were (fourth and full probe runs).
@@ -149,6 +156,14 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		m := mediaJSON(post, true)
 		m["comments_connection"] = s.commentPage(post, 0, CommentPageSize, "")
 		data = map[string]any{"xig_polaris_media": m}
+	case len(parts) == 2 && parts[1] == "reels":
+		p := s.World.Profile(parts[0])
+		if p == nil {
+			http.NotFound(w, r)
+			return
+		}
+		data = map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID,
+			"polaris_clips_connection": s.reelsPage(p, 0, 12, "")}}
 	case len(parts) == 1 && parts[0] != "":
 		p := s.World.Profile(parts[0])
 		if p == nil {
@@ -328,6 +343,29 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 		}
 		write(w, data(map[string]any{"xig_polaris_media": map[string]any{"pk": str(pk),
 			"comments_connection": s.commentPage(post, offset, s.pageSize(vars, CommentPageSize), id.lsd)}}))
+	case OpReels:
+		p := s.World.byID[sv(vars["id"])]
+		if p == nil {
+			write(w, data(map[string]any{"node": nil}))
+			return
+		}
+		offset := 0
+		if c := sv(vars["after"]); c != "" {
+			var ok bool
+			if offset, ok = s.cursor(c, "r", p.PK, id); !ok {
+				softError(w, "invalid cursor")
+				return
+			}
+		} else if s.opts.Faults.NoCursorReels {
+			softError(w, "missing cursor")
+			return
+		}
+		lsd := ""
+		if s.opts.Faults.CursorBound {
+			lsd = id.lsd
+		}
+		write(w, data(map[string]any{"node": map[string]any{"__typename": "User", "id": p.ID,
+			"polaris_clips_connection": s.reelsPage(p, offset, s.pageSize(vars, ReelsPageSize), lsd)}}))
 	case OpHighlights:
 		write(w, data(map[string]any{"xdt_api__v1__feed__reels_media__connection": s.highlights(vars["reel_ids"])}))
 	default:
@@ -389,6 +427,25 @@ func (s *Server) gridPage(p *Profile, offset, size int, lsd string) map[string]a
 	pi := map[string]any{"has_next_page": end < len(grid), "end_cursor": nil}
 	if end < len(grid) {
 		pi["end_cursor"] = encodeCursor("g", p.PK, end, lsd)
+	}
+	return map[string]any{"edges": edges, "page_info": pi}
+}
+
+// reelsPage is a page of the reels tab: the counts the grid lacks,
+// including the view count.
+func (s *Server) reelsPage(p *Profile, offset, size int, lsd string) map[string]any {
+	reels := p.Reels()
+	end := min(offset+size, len(reels))
+	edges := []any{}
+	for _, x := range reels[min(offset, end):end] {
+		edges = append(edges, map[string]any{"node": map[string]any{"__typename": "XIGPolarisVideoMedia", "id": "POLARIS_" + str(x.PK),
+			"pk": str(x.PK), "code": x.Code, "product_type": "clips", "like_and_view_counts_disabled": false,
+			"like_count": x.Likes, "comment_count": len(x.Comments), "play_count": x.Plays, "clips_tab_pinned_user_ids": []any{},
+			"display_uri": "https://scontent.cdninstagram.example/v/" + x.Code + ".jpg", "user": map[string]any{"pk": str(p.PK), "id": p.ID}}})
+	}
+	pi := map[string]any{"has_next_page": end < len(reels), "end_cursor": nil}
+	if end < len(reels) {
+		pi["end_cursor"] = encodeCursor("r", p.PK, end, lsd)
 	}
 	return map[string]any{"edges": edges, "page_info": pi}
 }

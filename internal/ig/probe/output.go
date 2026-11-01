@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// Write puts the report in dir: report.json, and profiles.csv, posts.csv
-// and comments.csv for a spreadsheet. Every file is 0600: the report holds
+// Write puts the report in dir: report.json, and profiles.csv, posts.csv,
+// comments.csv and reels.csv for a spreadsheet. Every file is 0600: the report holds
 // personal data. The profile pictures are already in dir/images.
 func Write(dir string, rep Report) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -25,11 +25,13 @@ func Write(dir string, rep Report) error {
 	if err := os.WriteFile(filepath.Join(dir, "report.json"), append(b, '\n'), 0o600); err != nil {
 		return err
 	}
-	tables := map[string][][]string{"profiles.csv": {profilesHeader}, "posts.csv": {postsHeader}, "comments.csv": {commentsHeader}}
+	tables := map[string][][]string{"profiles.csv": {profilesHeader}, "posts.csv": {postsHeader}, "comments.csv": {commentsHeader},
+		"reels.csv": {reelsHeader}}
 	for _, p := range rep.Profiles {
 		tables["profiles.csv"] = append(tables["profiles.csv"], profileRow(p))
 		tables["posts.csv"] = append(tables["posts.csv"], postRows(p)...)
 		tables["comments.csv"] = append(tables["comments.csv"], commentRows(p)...)
+		tables["reels.csv"] = append(tables["reels.csv"], reelRows(p)...)
 	}
 	for name, rows := range tables {
 		if err := writeCSV(filepath.Join(dir, name), rows); err != nil {
@@ -57,7 +59,7 @@ func NewSaver(dir string) (*Saver, error) {
 	for _, t := range []struct {
 		name   string
 		header []string
-	}{{"profiles.csv", profilesHeader}, {"posts.csv", postsHeader}, {"comments.csv", commentsHeader}} {
+	}{{"profiles.csv", profilesHeader}, {"posts.csv", postsHeader}, {"comments.csv", commentsHeader}, {"reels.csv", reelsHeader}} {
 		f, err := os.OpenFile(filepath.Join(dir, t.name), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) //nolint:gosec // the operator's output dir
 		if err != nil {
 			_ = s.Close()
@@ -74,7 +76,7 @@ func NewSaver(dir string) (*Saver, error) {
 
 // Add appends one profile's rows.
 func (s *Saver) Add(p Profile) error {
-	for i, rows := range [][][]string{{profileRow(p)}, postRows(p), commentRows(p)} {
+	for i, rows := range [][][]string{{profileRow(p)}, postRows(p), commentRows(p), reelRows(p)} {
 		if err := s.write(i, rows); err != nil {
 			return err
 		}
@@ -102,10 +104,24 @@ var (
 		"biography", "bio_links", "linked_facebook_page", "highlights", "profile_pic_file", "profile_pic_url",
 		"page_load", "posts_read", "grid_stop", "oldest_post_read", "comments_read"}
 	postsHeader = []string{"username", "shortcode", "url", "posted_at", "media_type", "product_type", "caption", "alt_text", "thumbnail_url",
-		"pinned", "details", "likes", "comment_count", "taken_at", "caption_edited", "likes_hidden", "tagged", "coauthors", "location",
+		"pinned", "details", "plays", "likes", "comment_count", "taken_at", "caption_edited", "likes_hidden", "tagged", "coauthors", "location",
 		"music", "topics", "duration_s", "width", "height", "has_audio", "ai_label", "carousel_count", "video_url", "image_url"}
 	commentsHeader = []string{"username", "post_shortcode", "commenter", "commenter_verified", "created_at", "likes", "text"}
+	reelsHeader    = []string{"username", "shortcode", "url", "posted_at", "plays", "likes", "comment_count", "counts_hidden", "pinned", "thumbnail_url"}
 )
+
+func reelRows(p Profile) [][]string {
+	var rows [][]string
+	for _, x := range p.Reels {
+		posted := ""
+		if !x.PostedAt.IsZero() {
+			posted = x.PostedAt.Format(time.RFC3339)
+		}
+		rows = append(rows, []string{p.Username, x.Shortcode, x.URL, posted, i64p(x.Plays), i64p(x.Likes), i64p(x.Comments),
+			yes(x.CountsHidden), yes(x.Pinned), x.ThumbnailURL})
+	}
+	return rows
+}
 
 func profileRow(p Profile) []string {
 	row := []string{strconv.Itoa(p.Index), p.Username, p.URL}
@@ -141,6 +157,11 @@ func postRows(p Profile) [][]string {
 			posted = x.PostedAt.Format(time.RFC3339)
 		}
 		row := []string{p.Username, x.Shortcode, x.URL, posted, x.MediaType, x.ProductType, x.Caption, x.AltText, x.ThumbnailURL, yes(x.Pinned)}
+		class := ""
+		if x.Details != nil {
+			class = x.Details.Class
+		}
+		row = append(row, class, i64p(x.Plays), i64p(x.Likes), i64p(x.Comments))
 		if d := x.Details; d != nil {
 			taken := ""
 			if !d.TakenAt.IsZero() {
@@ -150,11 +171,11 @@ func postRows(p Profile) [][]string {
 			if d.DurationS > 0 {
 				dur = strconv.FormatFloat(d.DurationS, 'f', -1, 64)
 			}
-			row = append(row, d.Class, i64p(d.Likes), i64p(d.Comments), taken, yes(d.CaptionEdited), yes(d.LikesHidden),
+			row = append(row, taken, yes(d.CaptionEdited), yes(d.LikesHidden),
 				strings.Join(d.Tagged, " | "), strings.Join(d.Coauthors, " | "), d.Location, d.Music, strings.Join(d.Topics, " | "),
 				dur, nz(d.Width), nz(d.Height), yes(d.HasAudio), d.AILabel, nz(d.CarouselCount), d.VideoURL, d.ImageURL)
 		} else {
-			row = append(row, make([]string, 19)...)
+			row = append(row, make([]string, 16)...)
 		}
 		rows = append(rows, row)
 	}

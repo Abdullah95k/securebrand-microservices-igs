@@ -50,6 +50,17 @@ type Profile struct {
 	Pinned []*Post
 }
 
+// Reels is the profile's videos, newest first: its reels tab.
+func (p *Profile) Reels() []*Post {
+	var out []*Post
+	for _, x := range p.Posts {
+		if x.MediaType == 2 {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 // Grid is the profile's posts in grid order: pinned first, then the rest
 // newest first.
 func (p *Profile) Grid() []*Post {
@@ -86,6 +97,9 @@ type Post struct {
 	Edited        bool
 	AILabel       string
 	CarouselCount int
+	// Plays is a video's view count, shown logged out only in the
+	// profile's reels tab.
+	Plays int64
 }
 
 // Comment is a top-level comment.
@@ -146,6 +160,7 @@ func NewWorld(s Spec) *World {
 			post.Topics = []string{fmt.Sprintf("topic %d", j%6), "synthetic"}
 			if post.MediaType == 2 {
 				post.DurationS = float64(10+j%50) + 0.25
+				post.Plays = post.Likes*12 + int64(j)*37 + 100
 			}
 			if post.MediaType == 8 {
 				post.CarouselCount = 2 + j%4
