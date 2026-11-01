@@ -380,13 +380,14 @@ func (s *Server) pageSize(vars map[string]any, def int) int {
 }
 
 func (s *Server) gridPage(p *Profile, offset, size int, lsd string) map[string]any {
-	end := min(offset+size, len(p.Posts))
+	grid := p.Grid()
+	end := min(offset+size, len(grid))
 	edges := []any{}
-	for _, post := range p.Posts[min(offset, end):end] {
+	for _, post := range grid[min(offset, end):end] {
 		edges = append(edges, map[string]any{"node": mediaJSON(post, false)})
 	}
-	pi := map[string]any{"has_next_page": end < len(p.Posts), "end_cursor": nil}
-	if end < len(p.Posts) {
+	pi := map[string]any{"has_next_page": end < len(grid), "end_cursor": nil}
+	if end < len(grid) {
 		pi["end_cursor"] = encodeCursor("g", p.PK, end, lsd)
 	}
 	return map[string]any{"edges": edges, "page_info": pi}
@@ -484,9 +485,52 @@ func mediaJSON(post *Post, detail bool) map[string]any {
 		"owner":       map[string]any{"pk": str(post.Owner.PK), "id": post.Owner.ID},
 		"user":        map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}
 	if detail {
+		// The post page's fields, in the shapes of the owner's recordings
+		// and probe runs.
 		m["taken_at"] = post.TakenAt.Unix()
 		m["like_count"] = post.Likes
 		m["comment_count"] = len(post.Comments)
+		m["like_and_view_counts_disabled"] = false
+		m["caption_is_edited"] = post.Edited
+		m["has_audio"] = post.MediaType == 2
+		m["original_width"], m["original_height"] = 1080, 1350
+		tags := []any{}
+		for _, u := range post.Tagged {
+			tags = append(tags, map[string]any{"position": []any{0.5, 0.5}, "user": map[string]any{"id": "1", "username": u, "full_name": u, "is_verified": false}})
+		}
+		m["usertags"] = map[string]any{"in": tags}
+		co := []any{}
+		for _, u := range post.Coauthors {
+			co = append(co, map[string]any{"__typename": "User", "id": "2", "pk": "2", "username": u, "full_name": u, "is_verified": false})
+		}
+		m["coauthor_producers"] = co
+		m["location"] = nil
+		if post.Location != "" {
+			m["location"] = map[string]any{"__typename": "XDTLocationDict", "pk": 1, "lat": 33.3, "lng": 44.4, "name": post.Location}
+		}
+		pills := []any{}
+		for _, t := range post.Topics {
+			pills = append(pills, map[string]any{"seo_canonical_url": nil, "topic_id": strings.ReplaceAll(t, " ", "-"), "topic_name": t})
+		}
+		m["related_topic_pills"] = pills
+		m["ai_label_info"] = nil
+		if post.AILabel != "" {
+			m["ai_label_info"] = map[string]any{"attribution_label_text": post.AILabel}
+		}
+		if post.MediaType == 2 {
+			m["clips_metadata"] = map[string]any{"music_info": nil, "original_sound_info": map[string]any{"audio_asset_id": "1",
+				"original_audio_title": "Original audio", "ig_artist": map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}}
+			m["video_dash_manifest"] = fmt.Sprintf(`<?xml version="1.0"?><MPD mediaPresentationDuration="PT%gS"></MPD>`, post.DurationS)
+			m["video_versions"] = []any{map[string]any{"type": 101, "url": "https://scontent.cdninstagram.example/v/" + post.Code + ".mp4"}}
+		}
+		if post.MediaType == 8 {
+			children := []any{}
+			for k := range post.CarouselCount {
+				children = append(children, map[string]any{"pk": str(post.PK + int64(k) + 1)})
+			}
+			m["carousel_media"] = children
+			m["carousel_media_count"] = post.CarouselCount
+		}
 	}
 	return m
 }

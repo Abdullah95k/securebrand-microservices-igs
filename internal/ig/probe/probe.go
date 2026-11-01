@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -113,7 +114,12 @@ type Options struct {
 	// extra identities in turn (a post's comment pages each from another
 	// exit), bootstrapped once and shared by the workers.
 	CommentHop int
-	Now        func() time.Time
+	// PostDetails is how many of each profile's newest posts (by time, so
+	// pinned posts do not crowd them out) get their own page read for
+	// likes, comment count and the rest (PostDetails); 0 means 1. A post
+	// page is about 125 KB.
+	PostDetails int
+	Now         func() time.Time
 }
 
 // Step is one request's outcome.
@@ -189,6 +195,37 @@ type Post struct {
 	Caption      string    `json:"caption,omitempty"`
 	AltText      string    `json:"alt_text,omitempty"`
 	ThumbnailURL string    `json:"thumbnail_url,omitempty"`
+	// Pinned is inferred: the grid shows pinned posts first, and nothing in
+	// its answer marks them, so a post among the first three that is older
+	// than a later one is taken as pinned.
+	Pinned bool `json:"pinned,omitempty"`
+	// Details are what the post's own page adds, for the newest posts
+	// (Options.PostDetails).
+	Details *PostDetails `json:"details,omitempty"`
+}
+
+// PostDetails is what a post's page shows that the grid does not. Logged
+// out, it holds no view, play or share counts (the owner's full run).
+type PostDetails struct {
+	Class         string    `json:"class"` // the page load's outcome
+	TakenAt       time.Time `json:"taken_at,omitzero"`
+	Likes         *int64    `json:"likes,omitempty"`
+	Comments      *int64    `json:"comments,omitempty"`
+	LikesHidden   bool      `json:"likes_hidden,omitempty"`
+	CaptionEdited bool      `json:"caption_edited,omitempty"`
+	Tagged        []string  `json:"tagged,omitempty"`    // usernames (full names when no username)
+	Coauthors     []string  `json:"coauthors,omitempty"` // usernames
+	Location      string    `json:"location,omitempty"`
+	Music         string    `json:"music,omitempty"`  // a licensed track, or the original audio and its artist
+	Topics        []string  `json:"topics,omitempty"` // Instagram's related topic pills
+	DurationS     float64   `json:"duration_s,omitempty"`
+	Width         int       `json:"width,omitempty"`
+	Height        int       `json:"height,omitempty"`
+	HasAudio      bool      `json:"has_audio,omitempty"`
+	AILabel       string    `json:"ai_label,omitempty"`
+	CarouselCount int       `json:"carousel_count,omitempty"`
+	VideoURL      string    `json:"video_url,omitempty"` // expires
+	ImageURL      string    `json:"image_url,omitempty"` // expires
 }
 
 // PostPage is what a post page held.
@@ -319,6 +356,9 @@ type Summary struct {
 	CommentAnswers       map[string]int `json:"comment_answers"`
 	CommentMs            int64          `json:"comment_ms"`
 	CommentHopIdentities int            `json:"comment_hop_identities,omitempty"`
+	// Post pages read for details, and posts inferred pinned.
+	PostDetails int `json:"post_details"`
+	PinnedPosts int `json:"pinned_posts"`
 }
 
 // Cost aggregates one request kind.
@@ -351,6 +391,7 @@ func Run(ctx context.Context, o Options) Report {
 	if o.PageLoadTries <= 0 {
 		o.PageLoadTries = 3
 	}
+	o.PostDetails = max(o.PostDetails, 1)
 	rep := Report{Version: o.Version, Tier: o.Tier, Fingerprint: o.Fingerprint, StartedAt: o.Now().UTC()}
 	if o.StartAt > 1 {
 		rep.StartAt = o.StartAt
@@ -538,6 +579,8 @@ func (s *Summary) add(o Summary) {
 	s.CommentRequests += o.CommentRequests
 	addMap(s.CommentAnswers, o.CommentAnswers)
 	s.CommentMs += o.CommentMs
+	s.PostDetails += o.PostDetails
+	s.PinnedPosts += o.PinnedPosts
 }
 
 // shared is what the workers of a run share.
@@ -770,10 +813,6 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	r.keepRaw("grid_first", resp, len(edges))
 	cursor := pi.EndCursor
 	out.Posts = append(out.Posts, r.posts(edges)...)
-	var mediaPK, newest, newestURL string
-	if len(out.Posts) > 0 {
-		mediaPK, newest, newestURL = out.Posts[0].PK, out.Posts[0].Shortcode, out.Posts[0].URL
-	}
 
 	// U5: the first cursor, from another identity (shared by the workers,
 	// used by one at a time).
@@ -800,6 +839,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	if ctx.Err() != nil {
 		return out // stopped: the remaining steps would only fail
 	}
+	r.sum.PinnedPosts += markPinned(out.Posts)
 
 	// U9: the grid by the user's id with no cursor (an absent cursor
 	// renders as null; "" fails).
@@ -817,16 +857,15 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	}
 
 	// Comments of the newest posts, and the first highlight.
-	if mediaPK != "" {
+	if len(out.Posts) > 0 {
 		if !r.comments(ctx, id, &out, page) {
 			return out
 		}
 	}
-	// The newest post's page: time and counts the grid lacks, and the first
-	// comments, which stand in when the comments query gave none.
-	if newestURL != "" {
-		out.NewestPost = r.postPage(ctx, id, newestURL, newest, &out)
-	}
+	// The newest posts' pages: time, counts and the rest the grid lacks;
+	// the newest one's embedded comments stand in when the comments query
+	// gave none.
+	r.details(ctx, id, &out)
 	if highlight != "" {
 		resp, s = r.do(ctx, id, "highlights", map[string]any{"reel_ids": []string{highlight}, "initial_reel_id": highlight}, page)
 		s.Items = len(findAll(respParts(resp), "items").Array())
@@ -843,8 +882,8 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 // each of the CommentPosts newest posts. The newest post's first page is
 // out.CommentsRead. It reports false when the run was stopped.
 func (r *runner) comments(ctx context.Context, id *session.Identity, out *Profile, page string) bool {
-	for i := range min(r.o.CommentPosts, len(out.Posts)) {
-		post := out.Posts[i]
+	for i, at := range newestByDate(out.Posts, r.o.CommentPosts) {
+		post := out.Posts[at]
 		if post.PK == "" {
 			continue
 		}
@@ -1000,64 +1039,206 @@ func (r *runner) otherIdentity(ctx context.Context, page string, out *Profile) *
 	return id
 }
 
-// postPage loads a post's page and reads what it holds: the post's time,
-// like and comment counts, and the embedded first comments (used for
-// Comments when the comments query gave none).
-func (r *runner) postPage(ctx context.Context, id *session.Identity, url, shortcode string, out *Profile) *PostPage {
-	pp := &PostPage{URL: url}
+// details reads the pages of the PostDetails newest posts (by time) into
+// their Details; the first is also NewestPost, and its embedded comments
+// stand in when the comments query gave none. A page that is walled stops
+// the rest for this profile.
+func (r *runner) details(ctx context.Context, id *session.Identity, out *Profile) {
+	for i, at := range newestByDate(out.Posts, r.o.PostDetails) {
+		post := &out.Posts[at]
+		pp, d := r.postPage(ctx, id, post, i == 0, out)
+		post.Details = d
+		if i == 0 {
+			out.NewestPost = pp
+		}
+		if pp.Class != detect.OK.String() {
+			return
+		}
+		r.sum.PostDetails++
+	}
+}
+
+// postPage loads a post's page and reads what it holds that the grid does
+// not (PostDetails); with embed, its embedded first comments fill
+// out.Comments when the comments query gave none.
+func (r *runner) postPage(ctx context.Context, id *session.Identity, post *Post, embed bool, out *Profile) (*PostPage, *PostDetails) {
+	pp := &PostPage{URL: post.URL}
 	start := time.Now()
 	r.paceWait(ctx)
-	pl, err := r.o.Loader.Load(ctx, id, url)
+	pl, err := r.o.Loader.Load(ctx, id, post.URL)
 	pp.Ms = time.Since(start).Milliseconds()
 	if err != nil {
 		pp.Class, pp.Reason = detect.Transport.String(), redact(err.Error())
+		if ctx.Err() != nil {
+			pp.Class, pp.Reason = stopped, "stopped by the operator"
+		}
 		r.cost("post_page", pp.Step)
-		return pp
+		return pp, &PostDetails{Class: pp.Class}
 	}
 	pp.Class, pp.Status, pp.WireBytes, pp.Reason = pl.Class.String(), pl.Status, pl.Bytes, pl.Reason
 	r.cost("post_page", pp.Step)
+	d := &PostDetails{Class: pp.Class}
 	if pl.Class != detect.OK {
-		return pp
+		return pp, d
 	}
-	if r.rawDir != "" && r.savePages {
+	if r.rawDir != "" && r.savePages && embed {
 		r.saveRaw("post-page.html", pl.HTML)
 	}
 	blobs := scrapehtml.JSONBlobs(pl.HTML)
+	var media gjson.Result
 	for _, b := range blobs {
-		media := walk.Find(b, "xig_polaris_media")
-		if !media.Exists() {
-			media = b
+		if media = mediaByCode(b, post.Shortcode); media.Exists() {
+			break
 		}
-		if pp.TakenAt.IsZero() {
-			if t := walk.Find(media, "taken_at").Int(); t > 0 {
-				pp.TakenAt = time.Unix(t, 0).UTC()
-			}
-		}
-		if pp.LikeCount == nil {
-			if v := walk.Find(media, "like_count"); v.Exists() {
-				n := v.Int()
-				pp.LikeCount = &n
-			}
-		}
-		if pp.CommentCount == nil {
-			if v := walk.Find(media, "comment_count"); v.Exists() {
-				n := v.Int()
-				pp.CommentCount = &n
-			}
-		}
+	}
+	if media.Exists() {
+		parseDetails(media, d)
+		pp.TakenAt, pp.LikeCount, pp.CommentCount = d.TakenAt, d.Likes, d.Comments
 	}
 	edges, _ := connection(blobs, "comments_connection")
 	pp.CommentsEmbedded = len(edges)
 	pp.Items = len(edges)
-	if len(out.Comments) == 0 {
+	if embed && len(out.Comments) == 0 {
 		for _, e := range edges {
 			n := e.Get("node")
-			out.Comments = append(out.Comments, Comment{PostShortcode: shortcode, PK: n.Get("pk").String(),
+			out.Comments = append(out.Comments, Comment{PostShortcode: post.Shortcode, PK: n.Get("pk").String(),
 				Username: n.Get("user.username").String(), Verified: n.Get("user.is_verified").Bool(), Text: n.Get("text").String(),
 				CreatedAt: time.Unix(n.Get("created_at").Int(), 0).UTC(), Likes: n.Get("comment_like_count").Int()})
 		}
 	}
-	return pp
+	return pp, d
+}
+
+// mediaByCode finds the post's own media object in a page's data: the one
+// with its shortcode and a taken_at (a post page also carries other posts
+// of the profile, without counts).
+func mediaByCode(v gjson.Result, code string) gjson.Result {
+	switch {
+	case v.IsObject():
+		if v.Get("code").String() == code && v.Get("taken_at").Exists() {
+			return v
+		}
+		var hit gjson.Result
+		v.ForEach(func(_, x gjson.Result) bool {
+			if x.IsObject() || x.IsArray() {
+				hit = mediaByCode(x, code)
+			}
+			return !hit.Exists()
+		})
+		return hit
+	case v.IsArray():
+		var hit gjson.Result
+		v.ForEach(func(_, x gjson.Result) bool {
+			hit = mediaByCode(x, code)
+			return !hit.Exists()
+		})
+		return hit
+	}
+	return gjson.Result{}
+}
+
+var dashDuration = regexp.MustCompile(`mediaPresentationDuration="PT(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?"`)
+
+// parseDetails reads a post page's media object (field names from the
+// owner's full run).
+func parseDetails(m gjson.Result, d *PostDetails) {
+	if t := m.Get("taken_at").Int(); t > 0 {
+		d.TakenAt = time.Unix(t, 0).UTC()
+	}
+	if v := m.Get("like_count"); v.Exists() && v.Type == gjson.Number {
+		n := v.Int()
+		d.Likes = &n
+	}
+	if v := m.Get("comment_count"); v.Exists() && v.Type == gjson.Number {
+		n := v.Int()
+		d.Comments = &n
+	}
+	d.LikesHidden = m.Get("like_and_view_counts_disabled").Bool()
+	d.CaptionEdited = m.Get("caption_is_edited").Bool()
+	for _, t := range m.Get("usertags.in").Array() {
+		name := t.Get("user.username").String()
+		if name == "" {
+			name = t.Get("user.full_name").String()
+		}
+		if name != "" {
+			d.Tagged = append(d.Tagged, name)
+		}
+	}
+	for _, c := range m.Get("coauthor_producers").Array() {
+		if u := c.Get("username").String(); u != "" {
+			d.Coauthors = append(d.Coauthors, u)
+		}
+	}
+	d.Location = m.Get("location.name").String()
+	if mi := m.Get("clips_metadata.music_info"); mi.IsObject() {
+		title := firstString(mi, "music_asset_info.title", "music_info.title", "title")
+		artist := firstString(mi, "music_asset_info.display_artist", "music_info.display_artist", "display_artist")
+		d.Music = strings.TrimSpace(strings.Trim(title+" - "+artist, " -"))
+	}
+	if d.Music == "" {
+		if snd := m.Get("clips_metadata.original_sound_info"); snd.IsObject() {
+			d.Music = strings.TrimSpace(snd.Get("original_audio_title").String() + " - " + snd.Get("ig_artist.username").String())
+			d.Music = strings.Trim(d.Music, " -")
+		}
+	}
+	for _, t := range m.Get("related_topic_pills").Array() {
+		if n := t.Get("topic_name").String(); n != "" {
+			d.Topics = append(d.Topics, n)
+		}
+	}
+	if v := m.Get("video_duration"); v.Exists() {
+		d.DurationS = v.Float()
+	} else if g := dashDuration.FindStringSubmatch(m.Get("video_dash_manifest").String()); g != nil {
+		h, _ := strconv.ParseFloat(g[1], 64)
+		mi, _ := strconv.ParseFloat(g[2], 64)
+		sec, _ := strconv.ParseFloat(g[3], 64)
+		d.DurationS = math.Round((h*3600+mi*60+sec)*100) / 100
+	}
+	d.Width, d.Height = int(m.Get("original_width").Int()), int(m.Get("original_height").Int())
+	d.HasAudio = m.Get("has_audio").Bool()
+	d.AILabel = m.Get("ai_label_info.attribution_label_text").String()
+	d.CarouselCount = int(m.Get("carousel_media_count").Int())
+	if d.CarouselCount == 0 {
+		d.CarouselCount = len(m.Get("carousel_media").Array())
+	}
+	d.VideoURL = m.Get("video_versions.0.url").String()
+	d.ImageURL = firstString(m, "display_uri", "image_versions2.candidates.0.url")
+}
+
+func firstString(v gjson.Result, paths ...string) string {
+	for _, p := range paths {
+		if s := v.Get(p).String(); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// markPinned marks posts among the first three that are older than a
+// later post (the grid shows pinned posts first) and returns how many.
+func markPinned(posts []Post) int {
+	n := 0
+	for i := range min(3, len(posts)) {
+		for _, later := range posts[i+1:] {
+			if !posts[i].PostedAt.IsZero() && later.PostedAt.After(posts[i].PostedAt) {
+				posts[i].Pinned = true
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+// newestByDate is the indexes of the n newest posts, by posting time (grid
+// order when a time is missing or equal).
+func newestByDate(posts []Post, n int) []int {
+	idx := make([]int, len(posts))
+	for i := range idx {
+		idx[i] = i
+	}
+	slices.SortStableFunc(idx, func(a, b int) int { return posts[b].PostedAt.Compare(posts[a].PostedAt) })
+	return idx[:min(n, len(idx))]
 }
 
 func (r *runner) do(ctx context.Context, id *session.Identity, query string, vars map[string]any, referer string) (*graphql.Response, Step) {

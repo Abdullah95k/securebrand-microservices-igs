@@ -10,6 +10,7 @@ package fakeig
 import (
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"time"
 )
 
@@ -21,6 +22,9 @@ type Spec struct {
 	MaxComments     int // per post, uniform in [0, MaxComments]
 	Highlights      int // per profile
 	PostSpacing     time.Duration
+	// Pinned older posts per profile, shown first in the grid as on
+	// Instagram (up to 3).
+	Pinned int
 }
 
 // DefaultSpec is a small world: 3 profiles of 40 posts.
@@ -42,6 +46,23 @@ type Profile struct {
 	Verified   bool
 	Posts      []*Post // newest first
 	Highlights []Highlight
+	// Pinned posts come first in the grid, before the rest newest first.
+	Pinned []*Post
+}
+
+// Grid is the profile's posts in grid order: pinned first, then the rest
+// newest first.
+func (p *Profile) Grid() []*Post {
+	if len(p.Pinned) == 0 {
+		return p.Posts
+	}
+	out := append([]*Post{}, p.Pinned...)
+	for _, x := range p.Posts {
+		if !slices.Contains(p.Pinned, x) {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // Post is one grid item.
@@ -55,6 +76,16 @@ type Post struct {
 	Likes       int64
 	Comments    []Comment // newest first
 	Owner       *Profile
+	// What only the post page shows (derived from the post's place, so
+	// the generator's random sequence is unchanged).
+	Tagged        []string // usernames
+	Coauthors     []string // usernames
+	Location      string
+	Topics        []string
+	DurationS     float64 // videos
+	Edited        bool
+	AILabel       string
+	CarouselCount int
 }
 
 // Comment is a top-level comment.
@@ -103,6 +134,26 @@ func NewWorld(s Spec) *World {
 				TakenAt: taken, Likes: r.Int64N(5000), Owner: p}
 			post.Code = shortcode(post.PK)
 			post.ProductType = map[int]string{1: "feed", 2: "clips", 8: "carousel_container"}[post.MediaType]
+			if j%3 == 0 {
+				post.Tagged = []string{fmt.Sprintf("tagged_%02d_%d", i+1, j)}
+			}
+			if j%5 == 0 {
+				post.Coauthors = []string{fmt.Sprintf("collab_%02d", i+1)}
+			}
+			if j%4 == 0 {
+				post.Location = fmt.Sprintf("City %d", j%7)
+			}
+			post.Topics = []string{fmt.Sprintf("topic %d", j%6), "synthetic"}
+			if post.MediaType == 2 {
+				post.DurationS = float64(10+j%50) + 0.25
+			}
+			if post.MediaType == 8 {
+				post.CarouselCount = 2 + j%4
+			}
+			post.Edited = j%7 == 0
+			if j%9 == 0 {
+				post.AILabel = "AI content"
+			}
 			n := 0
 			if s.MaxComments > 0 {
 				n = r.IntN(s.MaxComments + 1)
@@ -114,6 +165,11 @@ func NewWorld(s Spec) *World {
 			}
 			p.Posts = append(p.Posts, post)
 			w.posts[post.PK] = post
+		}
+		for k := range min(s.Pinned, 3) {
+			if at := 4 * (k + 1); at < len(p.Posts) {
+				p.Pinned = append(p.Pinned, p.Posts[at])
+			}
 		}
 		for h := range s.Highlights {
 			p.Highlights = append(p.Highlights, Highlight{ID: 17_900_000_000_000_000 + int64(i*100+h), Title: fmt.Sprintf("Highlight %d", h+1), Items: 1 + r.IntN(5)})

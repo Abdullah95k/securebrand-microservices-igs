@@ -565,3 +565,63 @@ func TestProbeCommentHop(t *testing.T) {
 		t.Fatalf("bound cursors: answers %v, %d comments (unbound %d)", s.CommentAnswers, s.Comments, rep.Summary.Comments)
 	}
 }
+
+// Post details: the newest posts by time (pinned posts, first in the grid,
+// do not crowd them out) get their page read, and every field matches
+// fakeig's ground truth; pinned posts are inferred; posts.csv carries the
+// new columns.
+func TestProbePostDetailsAndPinned(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 12, Profiles: 1, PostsPerProfile: 30, MaxComments: 3, PostSpacing: time.Hour, Pinned: 2}})
+	p := env.World.Profiles()[0]
+	dir := t.TempDir()
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: []string{p.Username}, Tier: "direct",
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, PostDetails: 3})
+	got := rep.Profiles[0]
+	if len(got.Posts) != 30 || !got.Posts[0].Pinned || !got.Posts[1].Pinned || got.Posts[2].Pinned || rep.Summary.PinnedPosts != 2 {
+		t.Fatalf("pinned: %v %v %v, summary %d", got.Posts[0].Pinned, got.Posts[1].Pinned, got.Posts[2].Pinned, rep.Summary.PinnedPosts)
+	}
+	byCode := map[string]*fakeig.Post{}
+	for _, x := range p.Posts {
+		byCode[x.Code] = x
+	}
+	detailed := 0
+	for _, x := range got.Posts {
+		if x.Details == nil {
+			continue
+		}
+		detailed++
+		w := byCode[x.Shortcode]
+		d := x.Details
+		// The two pinned posts (4 and 8 hours old) come first in the grid;
+		// by time the 3 newest are the next three.
+		if x.Pinned || w.TakenAt.Before(p.Posts[2].TakenAt) {
+			t.Fatalf("details for %s, not among the 3 newest", x.Shortcode)
+		}
+		if d.Class != "ok" || d.Likes == nil || *d.Likes != w.Likes || d.Comments == nil || *d.Comments != int64(len(w.Comments)) ||
+			!d.TakenAt.Equal(w.TakenAt) || d.CaptionEdited != w.Edited || strings.Join(d.Tagged, ",") != strings.Join(w.Tagged, ",") ||
+			strings.Join(d.Coauthors, ",") != strings.Join(w.Coauthors, ",") || d.Location != w.Location ||
+			strings.Join(d.Topics, ",") != strings.Join(w.Topics, ",") || d.DurationS != w.DurationS || d.AILabel != w.AILabel ||
+			d.CarouselCount != w.CarouselCount || d.Width != 1080 || d.Height != 1350 || d.ImageURL == "" {
+			t.Fatalf("details of %s: %+v, want %+v", x.Shortcode, d, w)
+		}
+		if w.MediaType == 2 && (d.Music != "Original audio - "+p.Username || d.VideoURL == "" || !d.HasAudio) {
+			t.Fatalf("video details of %s: %+v", x.Shortcode, d)
+		}
+	}
+	if detailed != 3 || rep.Summary.PostDetails != 3 || got.NewestPost == nil || !strings.HasSuffix(got.NewestPost.URL, "/"+p.Posts[0].Code+"/") {
+		t.Fatalf("detailed %d (summary %d), newest page %+v", detailed, rep.Summary.PostDetails, got.NewestPost)
+	}
+	if err := probe.Write(dir, rep); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, filepath.Join(dir, "posts.csv"))
+	head := strings.Join(rows[0], ",")
+	if !strings.Contains(head, "pinned,details,likes,comment_count,taken_at") || !strings.HasSuffix(head, "video_url,image_url") || len(rows) != 31 {
+		t.Fatalf("posts.csv: %d rows, header %s", len(rows), head)
+	}
+	for _, r := range rows[1:] {
+		if len(r) != len(rows[0]) {
+			t.Fatalf("row of %d columns, header %d", len(r), len(rows[0]))
+		}
+	}
+}
