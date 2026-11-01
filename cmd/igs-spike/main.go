@@ -84,6 +84,7 @@ func runProbe(args []string) int {
 	commentPageSize := fs.Int("comment-page-size", 0, "comments to ask for per page (0 = the web app's 10); a speed test: does Instagram serve more?")
 	commentRPS := fs.Float64("comment-rps", 0, "requests per second per identity for comment requests only (0 = --rps); everything else keeps --rps")
 	commentHop := fs.Int("comment-hop", 0, "send comment requests through this many extra identities in turn, each page from another exit (0 = off)")
+	postDetails := fs.Int("post-details", 1, "read the pages of each profile's newest N posts (by time) for likes, comment count, tags, location, music, topics, duration (about 125 KB each)")
 	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
 	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
 	dryRun := fs.Bool("dry-run", false, "rehearse against a built-in fake Instagram (no traffic, no proxies)")
@@ -155,7 +156,7 @@ func runProbe(args []string) int {
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
 		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
 		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel, MaxWait: *maxWait,
-		GridPageSize: *gridPageSize, CommentPageSize: *commentPageSize, RPS: *rps, CommentRPS: *commentRPS, CommentHop: *commentHop,
+		GridPageSize: *gridPageSize, CommentPageSize: *commentPageSize, RPS: *rps, CommentRPS: *commentRPS, CommentHop: *commentHop, PostDetails: *postDetails,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) },
 		OnProfile: func(p probe.Profile) {
 			if err := saver.Add(p); err != nil {
@@ -175,9 +176,9 @@ func runProbe(args []string) int {
 		return 1
 	}
 	s := rep.Summary
-	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  read %d posts and %d comments from %d profiles; %d page loads walled (retried), %d waits for a cooling tier\n  bootstrapped %d/%d; grid: %d ended, %d capped, %d at the age limit, walls %v at %v posts, %d paged past 24 (max %d)\n"+
+	fmt.Fprintf(os.Stderr, "probe: wrote %s and %s\n  read %d posts (%d with details, %d pinned) and %d comments from %d profiles; %d page loads walled (retried), %d waits for a cooling tier\n  bootstrapped %d/%d; grid: %d ended, %d capped, %d at the age limit, walls %v at %v posts, %d paged past 24 (max %d)\n"+
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
-		*outDir, bundle, s.Posts, s.Comments, s.Profiles, s.PageLoadWalls, s.TierWaits, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
+		*outDir, bundle, s.Posts, s.PostDetails, s.PinnedPosts, s.Comments, s.Profiles, s.PageLoadWalls, s.TierWaits, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
 	perSec := 0.0
 	if s.CommentMs > 0 {

@@ -154,7 +154,7 @@ For each tier, `phase0/out-ig/<tier>/` holds:
 | File | Holds |
 |---|---|
 | `profiles.csv` | One row per profile: link, name, counts, bio, highlights, picture file, how far the grid went |
-| `posts.csv` | One row per post read: link, type, caption, thumbnail link |
+| `posts.csv` | One row per post read: link, posting time, type, caption, thumbnail link, `pinned` (inferred from dates). For the newest posts (`--post-details`), also likes, comment count, exact time, edited caption, tagged accounts, co-authors, location, music or original audio, Instagram's topics, video length, size, sound, AI label, carousel size and media links. Logged out, Instagram shows no view, play or share counts |
 | `comments.csv` | The comments read, with the post each belongs to |
 | `images/` | The profile pictures |
 | `raw/` | Instagram's raw answers, to check their shape: per profile the first answer of each query and every failed or empty one, and the page HTML of the first 3 profiles |
@@ -191,6 +191,7 @@ themselves out of git.
 | Comments | the newest post, first page (10) | `IGS_PROBE_ARGS="--comment-posts 10 --comment-pages 3"`: the newest 10 posts, up to 30 comments each (each page is one more request, about 3 seconds) |
 | Start | the first profile | `IGS_PROBE_ARGS="--start-at 81"`, with a new `IGS_PROBE_OUT`: continue a stopped run at profile 81 |
 | Profiles at once | 1 | `IGS_PROBE_ARGS="--parallel 6"`: 6 profiles at a time, each by its own identity and ISP IP, each at the same pace, so about 6 times faster. Keep it below your number of ISP IPs (see below) |
+| Post details | the newest post | `--post-details 20`: read the pages of each profile's 20 newest posts (by time, so pinned posts do not crowd them out); about 125 KB and one request each |
 | Rotation | 500 | `--identity-requests 500`: each identity (and so each IP) retires after 500 to 750 requests and the next IP takes over, so IPs rest in turn. One IP met Instagram's rate limit after 1,100 to 1,300 requests in the full run |
 | Waiting | 20 minutes | `--max-wait 20m`: when every IP is cooling down after blocks, each profile waits this long before it is given up |
 
