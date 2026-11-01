@@ -4,7 +4,11 @@
 # (docs/instagram/har-findings-2026-10-30.md §1). doc_ids were valid on
 # 2026-10-30 and rotate; registry sync (M9) follows them, or set a row by
 # hand. Variables are a JSON template: a string value "{{name}}" is replaced
-# by the caller's value (JSON null when not given).
+# by the caller's value (JSON null when not given); "{{name=default}}"
+# takes the default when not given. The page sizes ("first") default to
+# the web app's (12 posts, 10 comments); a caller may ask for more, which
+# Instagram may cap or refuse (the probe's --grid-page-size and
+# --comment-page-size test it).
 #
 # Four operations go to /api/graphql (the builder's default); highlights
 # goes to /graphql/query with the root field named in a header. The
@@ -42,7 +46,7 @@ queries:
     priority: 10
     variables:
       username: "{{username}}"
-      first: 12
+      first: "{{first=12}}"
       __relay_internal__pv__PolarisSEOIsCrawlerrelayprovider: false
 
   # Later grid pages, by the user's id and a cursor. The id is the user
@@ -58,10 +62,10 @@ queries:
     variables:
       id: "{{user_id}}"
       after: "{{cursor}}"
-      first: 12
+      first: "{{first=12}}"
       __relay_internal__pv__PolarisSEOIsCrawlerrelayprovider: false
 
-  # Top-level comments, 10 per page, newest first. With "after": "" the
+  # Top-level comments, 10 per page by default, newest first. With "after": "" the
   # comments connection fails (field_exception); a first page needs null
   # (an absent cursor renders as null) or the post page's embedded comments.
   - name: comments
@@ -73,7 +77,7 @@ queries:
     variables:
       media_id: "{{media_pk}}"
       after: "{{cursor}}"
-      first: 10
+      first: "{{first=10}}"
 
   - name: highlights
     friendly_name: PolarisStoriesV3HighlightsLoggedOutPageQuery

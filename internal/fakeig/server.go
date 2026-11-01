@@ -40,6 +40,9 @@ type Faults struct {
 	LoginWallAfter int
 	// Challenge redirects every page load to /challenge/.
 	Challenge bool
+	// MaxPageSize caps the page size a query may ask for ("first"), as
+	// Instagram may; 0 serves whatever is asked.
+	MaxPageSize int
 	// PageWallFirst redirects the first N page loads to /accounts/login/,
 	// whoever asks: exits already flagged for page loads, as some of the
 	// owner's ISP exits were (fourth and full probe runs).
@@ -144,7 +147,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		}
 		// The post page embeds the media object and its first comments.
 		m := mediaJSON(post, true)
-		m["comments_connection"] = s.commentPage(post, 0, "")
+		m["comments_connection"] = s.commentPage(post, 0, CommentPageSize, "")
 		data = map[string]any{"xig_polaris_media": m}
 	case len(parts) == 1 && parts[0] != "":
 		p := s.World.Profile(parts[0])
@@ -157,7 +160,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data = map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID, "username": p.Username,
-			"polaris_ordered_timeline_connection": s.gridPage(p, 0, "")}}
+			"polaris_ordered_timeline_connection": s.gridPage(p, 0, GridPageSize, "")}}
 	default:
 		http.NotFound(w, r)
 		return
@@ -274,7 +277,7 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 			write(w, data(map[string]any{"xig_user_by_username": nil}))
 			return
 		}
-		s.writeGrid(w, p, 0, id, func(conn any) any {
+		s.writeGrid(w, p, 0, s.pageSize(vars, GridPageSize), id, func(conn any) any {
 			return map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID, "polaris_ordered_timeline_connection": conn}}
 		})
 	case OpGrid:
@@ -297,7 +300,7 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 			softError(w, "missing cursor")
 			return
 		}
-		s.writeGrid(w, p, offset, id, func(conn any) any {
+		s.writeGrid(w, p, offset, s.pageSize(vars, GridPageSize), id, func(conn any) any {
 			return map[string]any{"node": map[string]any{"__typename": "XDTUserDict", "polaris_ordered_timeline_connection": conn}}
 		})
 	case OpComments:
@@ -324,7 +327,7 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		write(w, data(map[string]any{"xig_polaris_media": map[string]any{"pk": str(pk),
-			"comments_connection": s.commentPage(post, offset, id.lsd)}}))
+			"comments_connection": s.commentPage(post, offset, s.pageSize(vars, CommentPageSize), id.lsd)}}))
 	case OpHighlights:
 		write(w, data(map[string]any{"xdt_api__v1__feed__reels_media__connection": s.highlights(vars["reel_ids"])}))
 	default:
@@ -332,7 +335,7 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) writeGrid(w http.ResponseWriter, p *Profile, offset int, id *ident, wrap func(any) any) {
+func (s *Server) writeGrid(w http.ResponseWriter, p *Profile, offset, size int, id *ident, wrap func(any) any) {
 	if k := s.opts.Faults.GridWallAfter; k > 0 && offset >= k {
 		page(w, http.StatusOK, `<html><form action="/accounts/login/ajax/" method="post"></form></html>`)
 		return
@@ -341,7 +344,7 @@ func (s *Server) writeGrid(w http.ResponseWriter, p *Profile, offset int, id *id
 	if s.opts.Faults.CursorBound {
 		lsd = id.lsd
 	}
-	page := s.gridPage(p, offset, lsd)
+	page := s.gridPage(p, offset, size, lsd)
 	if !s.opts.Faults.StreamGrid {
 		write(w, data(wrap(page)))
 		return
@@ -361,8 +364,23 @@ func (s *Server) writeGrid(w http.ResponseWriter, p *Profile, offset int, id *id
 
 const gridConnKey = "polaris_ordered_timeline_connection"
 
-func (s *Server) gridPage(p *Profile, offset int, lsd string) map[string]any {
-	end := min(offset+GridPageSize, len(p.Posts))
+// pageSize is the page size a query asked for ("first"), def when it did
+// not, capped by the MaxPageSize fault.
+func (s *Server) pageSize(vars map[string]any, def int) int {
+	n := def
+	if v, ok := vars["first"].(json.Number); ok {
+		if i, err := v.Int64(); err == nil && i > 0 {
+			n = int(i)
+		}
+	}
+	if m := s.opts.Faults.MaxPageSize; m > 0 {
+		n = min(n, m)
+	}
+	return n
+}
+
+func (s *Server) gridPage(p *Profile, offset, size int, lsd string) map[string]any {
+	end := min(offset+size, len(p.Posts))
 	edges := []any{}
 	for _, post := range p.Posts[min(offset, end):end] {
 		edges = append(edges, map[string]any{"node": mediaJSON(post, false)})
@@ -374,11 +392,11 @@ func (s *Server) gridPage(p *Profile, offset int, lsd string) map[string]any {
 	return map[string]any{"edges": edges, "page_info": pi}
 }
 
-func (s *Server) commentPage(post *Post, offset int, lsd string) map[string]any {
+func (s *Server) commentPage(post *Post, offset, size int, lsd string) map[string]any {
 	if !s.opts.Faults.CursorBound {
 		lsd = ""
 	}
-	end := min(offset+CommentPageSize, len(post.Comments))
+	end := min(offset+size, len(post.Comments))
 	edges := []any{}
 	for _, c := range post.Comments[min(offset, end):end] {
 		edges = append(edges, map[string]any{"node": map[string]any{"pk": str(c.PK), "id": str(c.PK), "text": c.Text,

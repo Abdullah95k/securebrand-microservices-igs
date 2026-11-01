@@ -218,5 +218,35 @@ make igs-probe IGS_PROBE_PROFILES=phase0/ig-profiles-all.txt IGS_PROBE_OUT=phase
 
 A busy news account posts 30 or more times a day, so it reaches the 1,200-post cap after a few weeks; a quieter one reaches the year first. At one request every 3 seconds, a capped account takes about 6 minutes, so plan on a day or more.
 
+## Speed tests (one switch at a time)
+
+Three switches may make comment collection faster. Each is a guess about
+what Instagram tolerates, so test them one at a time on the 5-profile test
+list, each in its own output folder, and compare each `speed:` summary line
+with the baseline's. About 5 minutes each.
+
+| # | Switch | Works if the `speed:` line shows |
+|---|---|---|
+| 0 | none (baseline) | pages of up to 12 posts and 10 comments; note the comments a second |
+| 1 | `--grid-page-size 50 --comment-page-size 50`: ask for 50 per page | pages of up to more than 12 and 10, answers all `ok` |
+| 2 | `--comment-rps 1`: comment requests at 1 a second (everything else stays at 0.3) | more comments a second than the baseline, no `rate_limited` |
+| 3 | `--comment-hop 4`: each comment page from the next of 4 extra identities | more comments a second, answers all `ok` (an invalid cursor would mean cursors are tied to the identity), `4 hop identities` |
+
+```bash
+make igs-probe IGS_PROBE_OUT=phase0/out-speed-0 IGS_PROBE_ARGS="--max-grid-pages 3 --comment-posts 10 --comment-pages 30"
+```
+
+```bash
+make igs-probe IGS_PROBE_OUT=phase0/out-speed-1 IGS_PROBE_ARGS="--max-grid-pages 3 --comment-posts 10 --comment-pages 30 --grid-page-size 50 --comment-page-size 50"
+```
+
+```bash
+make igs-probe IGS_PROBE_OUT=phase0/out-speed-2 IGS_PROBE_ARGS="--max-grid-pages 3 --comment-posts 10 --comment-pages 30 --comment-rps 1"
+```
+
+```bash
+make igs-probe IGS_PROBE_OUT=phase0/out-speed-3 IGS_PROBE_ARGS="--max-grid-pages 3 --comment-posts 10 --comment-pages 30 --comment-hop 4"
+```
+
 The command behind it, for other options (pacing, grid depth, fingerprint):
 `go run ./cmd/igs-spike probe --help`.

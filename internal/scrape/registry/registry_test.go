@@ -37,6 +37,23 @@ func TestSeedAndRender(t *testing.T) {
 	}
 }
 
+// A placeholder may carry a default, used when the caller gives no value:
+// Instagram's recorded page sizes, which a caller can override.
+func TestRenderDefaults(t *testing.T) {
+	tmpl := json.RawMessage(`{"first":"{{first=12}}","label":"{{label=\"x\"}}","flag":"{{flag=true}}","raw":"{{raw=abc}}","none":"{{none}}","fixed":10}`)
+	out, err := Render(tmpl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"first":12,"fixed":10,"flag":true,"label":"x","none":null,"raw":"abc"}` {
+		t.Fatalf("defaults: %s", out)
+	}
+	out, _ = Render(tmpl, map[string]any{"first": 50, "none": "v"})
+	if string(out) != `{"first":50,"fixed":10,"flag":true,"label":"x","none":"v","raw":"abc"}` {
+		t.Fatalf("overrides: %s", out)
+	}
+}
+
 func TestFallbackOrdering(t *testing.T) {
 	reg := NewStatic(Seed{Queries: []Query{
 		{Name: "q", DocID: "old", Status: StatusFallback, Priority: 50, Variables: json.RawMessage(`{}`)},
