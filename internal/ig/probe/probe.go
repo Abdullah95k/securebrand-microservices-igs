@@ -23,6 +23,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -40,6 +41,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	scrapehtml "github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/htmlx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/walk"
@@ -88,7 +90,15 @@ type Options struct {
 	// identity (and so its own exit IP on a static list), each at the same
 	// pace. 0 or 1 reads one at a time.
 	Parallel int
-	Now      func() time.Time
+	// MaxWait is how long a profile waits for an exit when every exit of
+	// the tier is cooling down, before it is given up (0: no wait). The
+	// full run gave up 274 profiles in a minute without it.
+	MaxWait time.Duration
+	// PageLoadTries is how many identities a profile's page load may try
+	// when it gets the login redirect (some ISP exits are flagged for page
+	// loads); 0 means 3.
+	PageLoadTries int
+	Now           func() time.Time
 }
 
 // Step is one request's outcome.
@@ -222,6 +232,11 @@ type Profile struct {
 	// to exits.
 	Identity string `json:"identity,omitempty"`
 	Exit     string `json:"exit,omitempty"`
+	// PageLoadWalls counts the identities whose page load got the login
+	// redirect before one loaded; WaitedSec how long the profile waited for
+	// a cooling tier.
+	PageLoadWalls int `json:"page_load_walls,omitempty"`
+	WaitedSec     int `json:"waited_s,omitempty"`
 }
 
 // Report is the whole run.
@@ -253,6 +268,11 @@ type Summary struct {
 	StoppedEarly bool           `json:"stopped_early,omitempty"`
 	Bootstrapped int            `json:"bootstrapped"`
 	TokensFound  map[string]int `json:"tokens_found"`
+	// PageLoadWalls counts page loads that got the login redirect (each
+	// retried on another identity); TierWaits the profiles that waited for
+	// a cooling tier.
+	PageLoadWalls int `json:"page_load_walls"`
+	TierWaits     int `json:"tier_waits"`
 	// U1
 	GridEnds       int            `json:"grid_ends"`
 	GridCaps       int            `json:"grid_caps"`
@@ -304,6 +324,9 @@ func Run(ctx context.Context, o Options) Report {
 		o.MaxGridPages = 32
 	}
 	o.CommentPosts, o.CommentPages, o.Parallel = max(o.CommentPosts, 1), max(o.CommentPages, 1), max(o.Parallel, 1)
+	if o.PageLoadTries <= 0 {
+		o.PageLoadTries = 3
+	}
 	rep := Report{Version: o.Version, Tier: o.Tier, Fingerprint: o.Fingerprint, StartedAt: o.Now().UTC()}
 	if o.StartAt > 1 {
 		rep.StartAt = o.StartAt
@@ -402,6 +425,34 @@ func Run(ctx context.Context, o Options) Report {
 	return rep
 }
 
+// waitPoll is how often a profile waiting for a cooling tier asks again.
+var waitPoll = 15 * time.Second
+
+// acquire gets an identity, waiting up to maxWait (asking every poll) while
+// every exit of the tier is cooling down; onWait is called once when the
+// wait starts. It returns how long it waited.
+func acquire(ctx context.Context, maxWait, poll time.Duration, get func() (*session.Identity, error), onWait func()) (*session.Identity, time.Duration, error) {
+	start := time.Now()
+	for waits := 0; ; waits++ {
+		id, err := get()
+		if !errors.Is(err, proxy.ErrTierOpen) || time.Since(start) >= maxWait {
+			var waited time.Duration
+			if waits > 0 {
+				waited = time.Since(start)
+			}
+			return id, waited, err
+		}
+		if waits == 0 {
+			onWait()
+		}
+		select {
+		case <-ctx.Done():
+			return nil, time.Since(start), ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}
+
 // continueAt is the first line from start that was not read completely.
 func continueAt(profiles []Profile, start, n int) int {
 	done := map[int]bool{}
@@ -431,6 +482,8 @@ func (s *Summary) add(o Summary) {
 	}
 	s.Bootstrapped += o.Bootstrapped
 	addMap(s.TokensFound, o.TokensFound)
+	s.PageLoadWalls += o.PageLoadWalls
+	s.TierWaits += o.TierWaits
 	s.GridEnds += o.GridEnds
 	s.GridCaps += o.GridCaps
 	s.GridAgeStops += o.GridAgeStops
@@ -495,16 +548,43 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	if r.o.RawDir != "" {
 		r.rawDir = filepath.Join(r.o.RawDir, fmt.Sprintf("%03d-%s", index, unsafeName.ReplaceAllString(username, "_")))
 	}
-	id, err := r.o.Pool.Acquire(ctx, r.o.Tier)
-	if err != nil {
-		out.Bootstrap = Step{Class: "no_identity", Reason: err.Error()}
-		return out
+	// The page load, retried on another identity when the exit is flagged
+	// for page loads (the login redirect; the walled identity is retired).
+	var (
+		id  *session.Identity
+		pl  *session.PageLoad
+		err error
+	)
+	for try := 1; ; try++ {
+		var waited time.Duration
+		id, waited, err = acquire(ctx, r.o.MaxWait, waitPoll, func() (*session.Identity, error) { return r.o.Pool.Acquire(ctx, r.o.Tier) },
+			func() {
+				r.o.Progress(fmt.Sprintf("  %s: every exit of the tier is cooling down; waiting up to %s", username, r.o.MaxWait))
+			})
+		if waited > 0 {
+			out.WaitedSec += int(waited.Seconds())
+			r.sum.TierWaits++
+		}
+		if err != nil {
+			out.Bootstrap = Step{Class: "no_identity", Reason: err.Error()}
+			if ctx.Err() != nil {
+				out.Bootstrap.Class, out.Bootstrap.Reason = stopped, "stopped by the operator"
+			}
+			return out
+		}
+		out.Identity, out.Exit = id.ID, id.Endpoint.Bucket
+		start := time.Now()
+		pl, err = r.o.Loader.Load(ctx, id, page)
+		out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
+		if err != nil || pl.Class != detect.LoginWall || try >= r.o.PageLoadTries {
+			break
+		}
+		out.PageLoadWalls++
+		r.sum.PageLoadWalls++
+		r.cost("page", Step{Class: pl.Class.String(), Ms: out.Bootstrap.Ms, WireBytes: pl.Bytes})
+		r.o.Pool.Retire(id, "page_login_wall")
 	}
 	defer r.o.Pool.Release(id)
-	out.Identity, out.Exit = id.ID, id.Endpoint.Bucket
-	start := time.Now()
-	pl, err := r.o.Loader.Load(ctx, id, page)
-	out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
 	if err != nil {
 		out.Bootstrap.Class, out.Bootstrap.Reason = detect.Transport.String(), redact(err.Error())
 		if ctx.Err() != nil {
