@@ -92,6 +92,16 @@ From the fourth probe run (2026-10-31, after the fixes in #15 and #16):
   - Costs (means): grid page 10.0 KB and 3.3 s, page load 132 KB, post page 119 KB, profile query 5.6 KB, comments 5.1 KB.
   - Fixed after this run: a static endpoint named by host and port is its own breaker bucket; a profile waits (`--max-wait`, 20 minutes) while the tier cools down instead of being given up; a page load that gets the login redirect is retried on up to 3 identities; and identities retire after about 500 requests (`--identity-requests`), so exits rest in turn instead of each running into the limit. The owner asked to see comment counts mid-run, which that version could not show: the probe now prints comments and running totals per profile, appends the CSVs after every profile, reads more comments on request (`--comment-posts`, `--comment-pages`) and continues a stopped run (`--start-at`). The owner then found the run too slow: `--parallel N` reads N profiles at once, each by its own identity and exit IP at the same pace (the per-IP load is unchanged while N stays below the number of ISP IPs), with each profile's identity and exit group (/24) in the report.
 - **Speed switches (the owner asked for every comment within an hour):** at 10 comments a request and about 1,100 requests an hour per exit, every comment on the newest 10 posts of the remaining 276 profiles is about 300,000 requests, some 30 hours on 10 exits, and one post with 53,000 comments is 5,300 requests in sequence. Three switches, to be tested one at a time before any is used (runbook, "Speed tests"): bigger pages (`--grid-page-size`, `--comment-page-size`; the seed's page sizes became defaults, `"{{first=12}}"`, which the registry now supports), faster comment requests only (`--comment-rps`), and each comment page from another exit (`--comment-hop`). All three are hypotheses until the owner's runs answer them.
+- **Speed tests (2026-11-01, ISP, the 5-profile test list, newest 10 posts, up to 30 comment pages each; one switch at a time):** every answer OK in all four runs, no rate limit.
+
+  | Run | Comment requests | Largest pages | Comments a second per chain |
+  |---|---|---|---|
+  | Baseline (0.3 requests a second) | 417 | 12 posts, 10 comments | 2.8 |
+  | Bigger pages (`first` 50) | 270 | **50 posts, 24 comments** | 6.2 |
+  | Comments at 1 request a second | 410 | 12, 10 | **9.1** |
+  | Comments hopping over 4 identities | 414 | 12, 10 | 6.1 |
+
+  So: the grid serves 50 posts a page when asked (4 times fewer grid requests); the comments query serves at most about 24 a page; comment requests at 1 a second on one exit drew no limit in 410 requests (how long an exit sustains it is still open); and a comment cursor works from another identity and exit (comment cursors are portable, as grid cursors are, U5). A chain of comment pages is bounded by latency at about 1 request a second. The first baseline profile's grid was rate limited after its first page while its comments kept answering: grid and comments seem to be limited apart.
 - **Residential failed every page load** at the transport level (about 3.7 s each), where it had worked in the three runs before. The probe did not record the error text; it does now (credentials redacted). The owner should check the residential proxy (balance, credentials, gateway).
 
 From the M1d-2 to M1d-5a session:
