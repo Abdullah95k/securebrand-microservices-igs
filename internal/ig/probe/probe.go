@@ -121,7 +121,8 @@ type Options struct {
 	PostDetails int
 	// ReelsPages is how many pages of the profile's reels tab to read
 	// (0: none): per reel the view, like and comment counts, about 1 KB a
-	// reel. ReelsPageSize asks that many per page (0: the web app's 4).
+	// reel; MaxAge stops it too. ReelsPageSize asks that many per page (0:
+	// the web app's 4).
 	ReelsPages    int
 	ReelsPageSize int
 	Now           func() time.Time
@@ -1206,6 +1207,12 @@ func (r *runner) reels(ctx context.Context, id *session.Identity, userID string,
 		r.sum.ReelsMaxPage = max(r.sum.ReelsMaxPage, len(edges))
 		for _, e := range edges {
 			out.Reels = append(out.Reels, reelOf(e.Get("node"), r.o.BaseURL))
+		}
+		// The backfill window (MaxAge) stops the reels as it stops the grid
+		// (a pinned reel may be older; the last of the page decides).
+		if last := out.Reels[len(out.Reels)-1].PostedAt; r.o.MaxAge > 0 && !last.IsZero() && last.Before(r.o.Now().Add(-r.o.MaxAge)) {
+			stop = "age"
+			break
 		}
 		if !pi.HasNext || pi.EndCursor == "" || pi.EndCursor == cursor {
 			break

@@ -686,3 +686,27 @@ func TestProbeReels(t *testing.T) {
 		})
 	}
 }
+
+// The backfill window stops the reels tab as it stops the grid.
+func TestProbeReelsAgeLimit(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 14, Profiles: 1, PostsPerProfile: 90, MaxComments: 1, PostSpacing: 24 * time.Hour}})
+	p := env.World.Profiles()[0]
+	now := func() time.Time { return fakeig.Epoch.Add(time.Hour) }
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: []string{p.Username}, Tier: "direct",
+		MaxGridPages: 1, MaxAge: 30 * 24 * time.Hour, Now: now, Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, ReelsPages: 100, ReelsPageSize: 5})
+	got := rep.Profiles[0]
+	all := p.Reels()
+	if got.ReelsStop != "age" || len(got.Reels) == 0 || len(got.Reels) >= len(all) {
+		t.Fatalf("stop %s, %d of %d reels", got.ReelsStop, len(got.Reels), len(all))
+	}
+	// Every page but the last is within the window; the last crosses it.
+	cut := now().Add(-30 * 24 * time.Hour)
+	for _, r := range got.Reels[:len(got.Reels)-5] {
+		if r.PostedAt.Before(cut) {
+			t.Fatalf("read a page past the window: %s", r.PostedAt)
+		}
+	}
+	if !got.Reels[len(got.Reels)-1].PostedAt.Before(cut) {
+		t.Fatalf("stopped before the window: last reel %s", got.Reels[len(got.Reels)-1].PostedAt)
+	}
+}
