@@ -80,6 +80,7 @@ func runProbe(args []string) int {
 	parallel := fs.Int("parallel", 1, "profiles read at once, each by its own identity and exit IP, each at --rps")
 	idRequests := fs.Int("identity-requests", 500, "retire an identity (and so move to another exit) after about this many requests; the full run met Instagram's rate limit after 1,100 to 1,300 on one IP (0 = never)")
 	maxWait := fs.Duration("max-wait", 20*time.Minute, "how long a profile waits when every exit of the tier is cooling down, before it is given up")
+	pageWallRest := fs.Duration("page-wall-rest", 30*time.Minute, "how long an exit rests once it sends fresh visits to the login page (no good page load yet, or two walls in a row); 0 never")
 	gridPageSize := fs.Int("grid-page-size", 0, "posts to ask for per grid page (0 = the web app's 12); a speed test: does Instagram serve more?")
 	commentPageSize := fs.Int("comment-page-size", 0, "comments to ask for per page (0 = the web app's 10); a speed test: does Instagram serve more?")
 	commentRPS := fs.Float64("comment-rps", 0, "requests per second per identity for comment requests only (0 = --rps); everything else keeps --rps")
@@ -157,7 +158,7 @@ func runProbe(args []string) int {
 	fmt.Fprintf(os.Stderr, "probe: %d profiles, tier %s, %d at once, %.2f requests/s per identity; Ctrl-C stops and keeps what was read\n", len(names), *tier, *parallel, *rps)
 	rep := probe.Run(ctx, probe.Options{BaseURL: *base, Profiles: names, Tier: *tier, MaxGridPages: *maxPages,
 		Pool: stack.pool, Loader: stack.loader, GQL: stack.gql, Fingerprint: *fingerprint, MaxAge: time.Duration(*maxAge) * 24 * time.Hour, Version: version, ImageDir: imageDir, RawDir: rawDir, RawPages: 3,
-		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel, MaxWait: *maxWait,
+		StartAt: *startAt, CommentPosts: *commentPosts, CommentPages: *commentPages, Parallel: *parallel, MaxWait: *maxWait, PageWallRest: restOrNever(*pageWallRest),
 		GridPageSize: *gridPageSize, CommentPageSize: *commentPageSize, RPS: *rps, CommentRPS: *commentRPS, CommentHop: *commentHop, PostDetails: *postDetails,
 		ReelsPages: *reelsPages, ReelsPageSize: *reelsPageSize,
 		Progress: func(line string) { fmt.Fprintln(os.Stderr, "probe:", line) },
@@ -183,6 +184,9 @@ func runProbe(args []string) int {
 		"  cursor from another identity: %d worked, %d failed; grid by pk alone: %d worked, %d failed\n  queries without client state: %v; cookies %v\n",
 		*outDir, bundle, s.Posts, s.PostDetails, s.PinnedPosts, s.Comments, s.Profiles, s.PageLoadWalls, s.TierWaits, s.Bootstrapped, s.Profiles, s.GridEnds, s.GridCaps, s.GridAgeStops, s.GridWalls, s.WalledAtPosts, s.PagedPast24, s.MaxPosts,
 		s.CursorPortable, s.CursorNotPortable, s.GridByPKWorks, s.GridByPKFails, s.QueriesWithoutClientState, s.Cookies)
+	if len(s.PageWallExits) > 0 {
+		fmt.Fprintf(os.Stderr, "  login page on page loads, by exit: %v; exits rested %d times\n", s.PageWallExits, s.ExitsRested)
+	}
 	perSec := 0.0
 	if s.CommentMs > 0 {
 		perSec = float64(s.Comments) / (float64(s.CommentMs) / 1000)
@@ -272,4 +276,12 @@ func username(line string) string {
 	line, _, _ = strings.Cut(line, "/")
 	line, _, _ = strings.Cut(line, "?")
 	return line
+}
+
+// restOrNever maps the flag's 0 (never) to the probe's negative.
+func restOrNever(d time.Duration) time.Duration {
+	if d <= 0 {
+		return -1
+	}
+	return d
 }

@@ -123,3 +123,21 @@ func TestNonExitClassesCountAsSuccess(t *testing.T) {
 		t.Fatal("parser and registry problems are not the exit's fault")
 	}
 }
+
+func TestRestSkipsAnExit(t *testing.T) {
+	p := testPool(t)
+	ep, _ := p.Next("isp")
+	p.Rest(ep, 30*time.Minute)
+	if !p.IsOpen(ep) || !p.Available("isp") {
+		t.Fatal("a rested exit is open; the tier still has another")
+	}
+	for i := 0; i < 4; i++ {
+		if next, err := p.Next("isp"); err != nil || next.Bucket == ep.Bucket {
+			t.Fatalf("Next must skip the rested exit: %+v %v", next, err)
+		}
+	}
+	p.Rest(Endpoint{Tier: "direct"}, time.Minute) // no bucket: nothing to rest
+	if !p.Available("direct") {
+		t.Fatal("direct cannot rest")
+	}
+}

@@ -15,6 +15,10 @@ import (
 // AppID is the app id the fake expects in x-ig-app-id.
 const AppID = "936619743392459"
 
+// ExitHeader names the exit a request came through, set by a test
+// transport (igtest's Exits), for Faults.WallExits.
+const ExitHeader = "X-Fakeig-Exit"
+
 // Friendly names of the five operations.
 const (
 	OpProfile    = "PolarisLoggedOutDesktopWWWProfileRootContentQuery"
@@ -54,6 +58,11 @@ type Faults struct {
 	// whoever asks: exits already flagged for page loads, as some of the
 	// owner's ISP exits were (fourth and full probe runs).
 	PageWallFirst int
+	// WallExits redirects every page load that comes through one of these
+	// exits to /accounts/login/: flagged ISP exits (three of the owner's
+	// ten in the details run). The exit is the ExitHeader a test transport
+	// sets.
+	WallExits []string
 	// GridWallAfter walls grid pages that start at or past this many posts
 	// (U1: the browser stopped at 24).
 	GridWallAfter int
@@ -135,7 +144,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	s.pageLoads++
 	early := s.pageLoads <= s.opts.Faults.PageWallFirst
 	s.mu.Unlock()
-	if early {
+	if early || slices.Contains(s.opts.Faults.WallExits, r.Header.Get(ExitHeader)) {
 		http.Redirect(w, r, "/accounts/login/?next="+r.URL.Path, http.StatusFound)
 		return
 	}
