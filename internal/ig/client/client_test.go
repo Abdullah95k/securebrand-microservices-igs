@@ -59,7 +59,7 @@ func testIdentity(t *testing.T, reqs *[]*transport.Request, cookies map[string]s
 	return id
 }
 
-// The seed holds the five recorded operations; only highlights has its own
+// The seed holds the six recorded operations; only highlights has its own
 // endpoint and header.
 func TestSeed(t *testing.T) {
 	s, err := Seed()
@@ -67,7 +67,7 @@ func TestSeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{"profile": "27981003384861049", "grid_first": "29483846714553007", "grid": "28904005159232689",
-		"comments": "27837656105907150", "highlights": "39683663864580775"}
+		"comments": "27837656105907150", "highlights": "39683663864580775", "reels": "27420265870989234"}
 	if len(s.Queries) != len(want) {
 		t.Fatalf("%d queries", len(s.Queries))
 	}

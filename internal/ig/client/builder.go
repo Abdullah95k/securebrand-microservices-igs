@@ -7,7 +7,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
 )
 
-// DefaultEndpoint is where four of the five operations go; highlights names
+// DefaultEndpoint is where five of the six operations go; highlights names
 // /graphql/query in the registry.
 const DefaultEndpoint = "/api/graphql"
 

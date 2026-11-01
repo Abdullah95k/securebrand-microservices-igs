@@ -119,7 +119,13 @@ type Options struct {
 	// likes, comment count and the rest (PostDetails); 0 means 1. A post
 	// page is about 125 KB.
 	PostDetails int
-	Now         func() time.Time
+	// ReelsPages is how many pages of the profile's reels tab to read
+	// (0: none): per reel the view, like and comment counts, about 1 KB a
+	// reel; MaxAge stops it too. ReelsPageSize asks that many per page (0:
+	// the web app's 4).
+	ReelsPages    int
+	ReelsPageSize int
+	Now           func() time.Time
 }
 
 // Step is one request's outcome.
@@ -202,6 +208,26 @@ type Post struct {
 	// Details are what the post's own page adds, for the newest posts
 	// (Options.PostDetails).
 	Details *PostDetails `json:"details,omitempty"`
+	// Plays, Likes and Comments are the post's counts from the best
+	// source read: its page (Details) or, for a reel, the reels tab, which
+	// alone shows views (Plays).
+	Plays    *int64 `json:"plays,omitempty"`
+	Likes    *int64 `json:"likes,omitempty"`
+	Comments *int64 `json:"comments,omitempty"`
+}
+
+// Reel is one item of a profile's reels tab.
+type Reel struct {
+	PK           string    `json:"pk"`
+	Shortcode    string    `json:"shortcode"`
+	URL          string    `json:"url"`
+	PostedAt     time.Time `json:"posted_at,omitzero"` // from the pk
+	Plays        *int64    `json:"plays,omitempty"`
+	Likes        *int64    `json:"likes,omitempty"`
+	Comments     *int64    `json:"comments,omitempty"`
+	CountsHidden bool      `json:"counts_hidden,omitempty"`
+	Pinned       bool      `json:"pinned,omitempty"` // pinned in the reels tab
+	ThumbnailURL string    `json:"thumbnail_url,omitempty"`
 }
 
 // PostDetails is what a post's page shows that the grid does not. Logged
@@ -289,6 +315,11 @@ type Profile struct {
 	// a cooling tier.
 	PageLoadWalls int `json:"page_load_walls,omitempty"`
 	WaitedSec     int `json:"waited_s,omitempty"`
+	// Reels is the reels tab read (Options.ReelsPages); ReelsFirst its
+	// first request, and ReelsStop why the walk ended.
+	Reels      []Reel `json:"reels,omitempty"`
+	ReelsFirst *Step  `json:"reels_first,omitempty"`
+	ReelsStop  string `json:"reels_stop,omitempty"`
 }
 
 // Report is the whole run.
@@ -359,6 +390,13 @@ type Summary struct {
 	// Post pages read for details, and posts inferred pinned.
 	PostDetails int `json:"post_details"`
 	PinnedPosts int `json:"pinned_posts"`
+	// The reels tab: reels read, the largest page served, and whether its
+	// first page came by the user's id without a cursor or, failing that,
+	// from the reels page's HTML.
+	Reels             int `json:"reels"`
+	ReelsMaxPage      int `json:"reels_max_page"`
+	ReelsByIDWorks    int `json:"reels_by_id_works"`
+	ReelsPageFallback int `json:"reels_page_fallback"`
 }
 
 // Cost aggregates one request kind.
@@ -581,6 +619,10 @@ func (s *Summary) add(o Summary) {
 	s.CommentMs += o.CommentMs
 	s.PostDetails += o.PostDetails
 	s.PinnedPosts += o.PinnedPosts
+	s.Reels += o.Reels
+	s.ReelsMaxPage = max(s.ReelsMaxPage, o.ReelsMaxPage)
+	s.ReelsByIDWorks += o.ReelsByIDWorks
+	s.ReelsPageFallback += o.ReelsPageFallback
 }
 
 // shared is what the workers of a run share.
@@ -866,6 +908,11 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 	// the newest one's embedded comments stand in when the comments query
 	// gave none.
 	r.details(ctx, id, &out)
+	// The reels tab: view, like and comment counts per reel.
+	if r.o.ReelsPages > 0 {
+		r.reels(ctx, id, userID, &out)
+	}
+	mergeCounts(&out)
 	if highlight != "" {
 		resp, s = r.do(ctx, id, "highlights", map[string]any{"reel_ids": []string{highlight}, "initial_reel_id": highlight}, page)
 		s.Items = len(findAll(respParts(resp), "items").Array())
@@ -1109,6 +1156,109 @@ func (r *runner) postPage(ctx context.Context, id *session.Identity, post *Post,
 	return pp, d
 }
 
+// reels walks the profile's reels tab by the user's id: the first page
+// without a cursor, or, when that fails, from the reels page's HTML (which
+// embeds it), then by cursor up to ReelsPages pages.
+func (r *runner) reels(ctx context.Context, id *session.Identity, userID string, out *Profile) {
+	const conn = "polaris_clips_connection"
+	cursor, stop := "", "end"
+	for pg := 0; pg < r.o.ReelsPages; pg++ {
+		vars := map[string]any{"user_id": userID}
+		if cursor != "" {
+			vars["cursor"] = cursor
+		}
+		resp, s := r.do(ctx, id, "reels", vars, out.URL+"reels/")
+		if s.Class == stopped {
+			stop = stopped
+			break
+		}
+		var edges []gjson.Result
+		var pi walk.PageInfo
+		if resp != nil && resp.Class == detect.OK {
+			edges, pi = connection(resp.Parts, conn)
+		}
+		s.Items, s.HasNext = len(edges), pi.HasNext
+		r.keepRaw("reels", resp, s.Items)
+		if pg == 0 {
+			out.ReelsFirst = ptr(s)
+			if len(edges) > 0 {
+				r.sum.ReelsByIDWorks++
+			} else {
+				// The reels page embeds the first page and its cursor.
+				r.paceWait(ctx)
+				pl, err := r.o.Loader.Load(ctx, id, out.URL+"reels/")
+				if err != nil || pl.Class != detect.OK {
+					stop = "wall:" + s.Class
+					break
+				}
+				r.cost("reels_page", Step{Class: pl.Class.String(), WireBytes: pl.Bytes})
+				edges, pi = connection(scrapehtml.JSONBlobs(pl.HTML), conn)
+				if len(edges) > 0 {
+					r.sum.ReelsPageFallback++
+				}
+			}
+		} else if resp == nil || resp.Class != detect.OK {
+			stop = "wall:" + s.Class
+			break
+		}
+		if len(edges) == 0 {
+			break
+		}
+		r.sum.ReelsMaxPage = max(r.sum.ReelsMaxPage, len(edges))
+		for _, e := range edges {
+			out.Reels = append(out.Reels, reelOf(e.Get("node"), r.o.BaseURL))
+		}
+		// The backfill window (MaxAge) stops the reels as it stops the grid
+		// (a pinned reel may be older; the last of the page decides).
+		if last := out.Reels[len(out.Reels)-1].PostedAt; r.o.MaxAge > 0 && !last.IsZero() && last.Before(r.o.Now().Add(-r.o.MaxAge)) {
+			stop = "age"
+			break
+		}
+		if !pi.HasNext || pi.EndCursor == "" || pi.EndCursor == cursor {
+			break
+		}
+		cursor = pi.EndCursor
+		if pg == r.o.ReelsPages-1 {
+			stop = "cap"
+		}
+	}
+	out.ReelsStop = stop
+	r.sum.Reels += len(out.Reels)
+}
+
+func reelOf(n gjson.Result, base string) Reel {
+	count := func(path string) *int64 {
+		if v := n.Get(path); v.Exists() && v.Type == gjson.Number {
+			x := v.Int()
+			return &x
+		}
+		return nil
+	}
+	code := n.Get("code").String()
+	return Reel{PK: n.Get("pk").String(), Shortcode: code, URL: strings.TrimRight(base, "/") + "/reel/" + code + "/",
+		PostedAt: PostedAt(n.Get("pk").String()), Plays: count("play_count"), Likes: count("like_count"), Comments: count("comment_count"),
+		CountsHidden: n.Get("like_and_view_counts_disabled").Bool(), Pinned: len(n.Get("clips_tab_pinned_user_ids").Array()) > 0,
+		ThumbnailURL: n.Get("display_uri").String()}
+}
+
+// mergeCounts gives each post its counts from the best source read: its
+// page, else the reels tab (which alone has views).
+func mergeCounts(out *Profile) {
+	reels := map[string]*Reel{}
+	for i := range out.Reels {
+		reels[out.Reels[i].Shortcode] = &out.Reels[i]
+	}
+	for i := range out.Posts {
+		p := &out.Posts[i]
+		if rl := reels[p.Shortcode]; rl != nil {
+			p.Plays, p.Likes, p.Comments = rl.Plays, rl.Likes, rl.Comments
+		}
+		if d := p.Details; d != nil && d.Likes != nil {
+			p.Likes, p.Comments = d.Likes, d.Comments
+		}
+	}
+}
+
 // mediaByCode finds the post's own media object in a page's data: the one
 // with its shortcode and a taken_at (a post page also carries other posts
 // of the profile, without counts).
@@ -1247,6 +1397,8 @@ func (r *runner) do(ctx context.Context, id *session.Identity, query string, var
 		vars["first"] = r.o.GridPageSize
 	case query == "comments" && r.o.CommentPageSize > 0:
 		vars["first"] = r.o.CommentPageSize
+	case query == "reels" && r.o.ReelsPageSize > 0:
+		vars["first"] = r.o.ReelsPageSize
 	}
 	if query != "comments" {
 		r.paceWait(ctx)

@@ -616,12 +616,97 @@ func TestProbePostDetailsAndPinned(t *testing.T) {
 	}
 	rows := readCSV(t, filepath.Join(dir, "posts.csv"))
 	head := strings.Join(rows[0], ",")
-	if !strings.Contains(head, "pinned,details,likes,comment_count,taken_at") || !strings.HasSuffix(head, "video_url,image_url") || len(rows) != 31 {
+	if !strings.Contains(head, "pinned,details,plays,likes,comment_count,taken_at") || !strings.HasSuffix(head, "video_url,image_url") || len(rows) != 31 {
 		t.Fatalf("posts.csv: %d rows, header %s", len(rows), head)
 	}
 	for _, r := range rows[1:] {
 		if len(r) != len(rows[0]) {
 			t.Fatalf("row of %d columns, header %d", len(r), len(rows[0]))
 		}
+	}
+}
+
+// The reels tab: every reel's view, like and comment counts, read by the
+// user's id (or, when the first page needs a cursor, from the reels page's
+// HTML); posts get the views; reels.csv lists every reel.
+func TestProbeReels(t *testing.T) {
+	spec := fakeig.Spec{Seed: 13, Profiles: 2, PostsPerProfile: 60, MaxComments: 5, PostSpacing: time.Hour}
+	for _, tc := range []struct {
+		name     string
+		faults   fakeig.Faults
+		size     int
+		byID, fb int
+	}{{"by id", fakeig.Faults{}, 10, 2, 0}, {"page fallback", fakeig.Faults{NoCursorReels: true}, 0, 0, 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := igtest.New(t, igtest.Options{Spec: spec, Faults: tc.faults})
+			var names []string
+			for _, p := range env.World.Profiles() {
+				names = append(names, p.Username)
+			}
+			dir := t.TempDir()
+			rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 10,
+				Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, ReelsPages: 50, ReelsPageSize: tc.size})
+			s := rep.Summary
+			if s.ReelsByIDWorks != tc.byID || s.ReelsPageFallback != tc.fb {
+				t.Fatalf("first pages: by id %d, from the page %d", s.ReelsByIDWorks, s.ReelsPageFallback)
+			}
+			total := 0
+			for i, got := range rep.Profiles {
+				want := env.World.Profiles()[i].Reels()
+				total += len(want)
+				if len(got.Reels) != len(want) || got.ReelsStop != "end" {
+					t.Fatalf("profile %d: %d reels (stop %s), want %d", got.Index, len(got.Reels), got.ReelsStop, len(want))
+				}
+				for k, r := range got.Reels {
+					w := want[k]
+					if r.Shortcode != w.Code || r.Plays == nil || *r.Plays != w.Plays || *r.Likes != w.Likes || *r.Comments != int64(len(w.Comments)) ||
+						!r.PostedAt.Equal(w.TakenAt) {
+						t.Fatalf("reel %s: %+v, want plays %d likes %d", r.Shortcode, r, w.Plays, w.Likes)
+					}
+				}
+				for _, p := range got.Posts {
+					if p.MediaType == "video" && (p.Plays == nil || p.Likes == nil) {
+						t.Fatalf("post %s has no views from the reels tab", p.Shortcode)
+					}
+				}
+			}
+			if s.Reels != total {
+				t.Fatalf("summary reels %d, want %d", s.Reels, total)
+			}
+			if tc.size > 0 && s.ReelsMaxPage != tc.size {
+				t.Fatalf("largest reels page %d, want %d", s.ReelsMaxPage, tc.size)
+			}
+			if err := probe.Write(dir, rep); err != nil {
+				t.Fatal(err)
+			}
+			rows := readCSV(t, filepath.Join(dir, "reels.csv"))
+			if len(rows) != total+1 || rows[0][4] != "plays" {
+				t.Fatalf("reels.csv: %d rows, header %v", len(rows), rows[0])
+			}
+		})
+	}
+}
+
+// The backfill window stops the reels tab as it stops the grid.
+func TestProbeReelsAgeLimit(t *testing.T) {
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 14, Profiles: 1, PostsPerProfile: 90, MaxComments: 1, PostSpacing: 24 * time.Hour}})
+	p := env.World.Profiles()[0]
+	now := func() time.Time { return fakeig.Epoch.Add(time.Hour) }
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: []string{p.Username}, Tier: "direct",
+		MaxGridPages: 1, MaxAge: 30 * 24 * time.Hour, Now: now, Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, ReelsPages: 100, ReelsPageSize: 5})
+	got := rep.Profiles[0]
+	all := p.Reels()
+	if got.ReelsStop != "age" || len(got.Reels) == 0 || len(got.Reels) >= len(all) {
+		t.Fatalf("stop %s, %d of %d reels", got.ReelsStop, len(got.Reels), len(all))
+	}
+	// Every page but the last is within the window; the last crosses it.
+	cut := now().Add(-30 * 24 * time.Hour)
+	for _, r := range got.Reels[:len(got.Reels)-5] {
+		if r.PostedAt.Before(cut) {
+			t.Fatalf("read a page past the window: %s", r.PostedAt)
+		}
+	}
+	if !got.Reels[len(got.Reels)-1].PostedAt.Before(cut) {
+		t.Fatalf("stopped before the window: last reel %s", got.Reels[len(got.Reels)-1].PostedAt)
 	}
 }
