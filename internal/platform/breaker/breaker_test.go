@@ -139,3 +139,25 @@ func join(xs []string) string {
 	}
 	return out
 }
+
+func TestTripOpensForTheGivenTime(t *testing.T) {
+	s, c := testSet(Config{Cooldown: time.Minute, ProbeSuccesses: 1})
+	s.Trip("a", 30*time.Minute)
+	if s.State("a") != Open || s.Allow("a") || s.State("b") != Closed {
+		t.Fatal("a trip opens its key alone")
+	}
+	c.add(20 * time.Minute)
+	s.Trip("a", 5*time.Minute) // earlier than the open end: kept at 30m
+	c.add(9 * time.Minute)
+	if s.State("a") != Open {
+		t.Fatal("a shorter trip must not shorten an open key")
+	}
+	c.add(2 * time.Minute)
+	if s.State("a") != HalfOpen || !s.Allow("a") {
+		t.Fatalf("after the trip: want half-open, got %v", s.State("a"))
+	}
+	s.Observe("a", false)
+	if s.State("a") != Closed {
+		t.Fatal("a good probe closes it")
+	}
+}

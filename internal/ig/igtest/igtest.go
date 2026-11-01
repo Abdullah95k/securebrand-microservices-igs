@@ -3,7 +3,11 @@
 package igtest
 
 import (
+	"context"
+	"fmt"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -38,6 +42,29 @@ type Options struct {
 	UseTLS bool // the fingerprinted tls-client transport (default std)
 	// RotateDocIDs makes fakeig accept only other doc_ids than the seed's.
 	RotateDocIDs bool
+	// Exits, when set, adds an "isp" tier of that many static exits
+	// (exit1.test:10001, ...). Requests still go straight to fakeig, named
+	// by fakeig.ExitHeader, so Faults.WallExits can wall some exits.
+	Exits int
+	// IdentityRequests, when set, retires each identity after about that
+	// many requests (default: never), so a run goes through new identities
+	// and exits.
+	IdentityRequests int
+}
+
+// ExitName is the name of exit i (from 1) of Options.Exits.
+func ExitName(i int) string { return fmt.Sprintf("exit%d.test:%d", i, 10000+i) }
+
+// exitDoer names its exit on every request.
+type exitDoer struct {
+	transport.Doer
+	exit string
+}
+
+func (d exitDoer) Do(ctx context.Context, req *transport.Request) (*transport.Response, error) {
+	r := *req
+	r.Header = append(slices.Clone(req.Header), [2]string{fakeig.ExitHeader, d.exit})
+	return d.Doer.Do(ctx, &r)
 }
 
 // New starts fakeig and builds the client stack, closed via t.Cleanup.
@@ -68,7 +95,15 @@ func New(t testing.TB, o Options) *Env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxies, err := proxy.New(config.Proxy{})
+	var pc config.Proxy
+	if o.Exits > 0 {
+		isp := config.ProxyTier{Name: "isp", Kind: "static_list"}
+		for i := 1; i <= o.Exits; i++ {
+			isp.Endpoints = append(isp.Endpoints, "http://"+ExitName(i))
+		}
+		pc.Tiers = []config.ProxyTier{isp}
+	}
+	proxies, err := proxy.New(pc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,8 +111,24 @@ func New(t testing.TB, o Options) *Env {
 	if !o.UseTLS {
 		factory = func(transport.Options) (transport.Doer, error) { return transport.NewStd(10 * time.Second), nil }
 	}
+	if o.Exits > 0 {
+		if o.UseTLS {
+			t.Fatal("igtest: Exits needs the std transport")
+		}
+		factory = func(to transport.Options) (transport.Doer, error) {
+			u, err := url.Parse(to.ProxyURL)
+			if err != nil {
+				return nil, err
+			}
+			return exitDoer{Doer: transport.NewStd(10 * time.Second), exit: u.Host}, nil
+		}
+	}
+	maxReq := 100000
+	if o.IdentityRequests > 0 {
+		maxReq = o.IdentityRequests
+	}
 	pool, err := session.NewPool(session.PoolConfig{BaseURL: hs.URL, Profile: "chrome_146", Timeout: 10 * time.Second,
-		IdentityRPS: 1000, IdentityBurst: 10, MaxRequestsMin: 100000, MaxRequestsMax: 100001, MaxPerTier: 64}, proxies, fps, factory)
+		IdentityRPS: 1000, IdentityBurst: 10, MaxRequestsMin: maxReq, MaxRequestsMax: maxReq + 1, MaxPerTier: 64}, proxies, fps, factory)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -141,6 +141,12 @@ func (p *Pool) Release(id *Identity) {
 	p.idle[tier] = append(p.idle[tier], id)
 }
 
+// RestExit takes id's exit out of use for d: no new identity gets it and
+// idle identities on it are retired, until d has passed.
+func (p *Pool) RestExit(id *Identity, d time.Duration) {
+	p.proxies.Rest(id.Endpoint, d)
+}
+
 // Retire marks id as unusable and releases it.
 func (p *Pool) Retire(id *Identity, reason string) {
 	id.mu.Lock()

@@ -150,6 +150,15 @@ func (p *Pool) Available(tier string) bool {
 // IsOpen reports whether ep's bucket is cooling down.
 func (p *Pool) IsOpen(ep Endpoint) bool { return ep.Bucket != "" && p.breakers.IsOpen(ep.Bucket) }
 
+// Rest takes ep's bucket out of use for d (it opens its breaker), as when
+// the exit serves the login page to fresh visitors. Direct egress has no
+// bucket and cannot rest.
+func (p *Pool) Rest(ep Endpoint, d time.Duration) {
+	if ep.Bucket != "" && d > 0 {
+		p.breakers.Trip(ep.Bucket, d)
+	}
+}
+
 // Observe records a response class for ep's bucket. Blocks and transport
 // failures count against it.
 func (p *Pool) Observe(ep Endpoint, c detect.Class) {

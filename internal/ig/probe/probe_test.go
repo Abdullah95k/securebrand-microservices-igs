@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -457,7 +459,7 @@ func TestProbeRetriesWalledPageLoads(t *testing.T) {
 		names = append(names, p.Username)
 	}
 	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "direct", MaxGridPages: 10,
-		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL})
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, PageLoadTries: 3})
 	// Page loads 1-3 are profile 1's three tries (all walled); 4-5 walled
 	// and 6 loads for profile 2; profile 3 loads at once.
 	p1, p2, p3 := rep.Profiles[0], rep.Profiles[1], rep.Profiles[2]
@@ -469,6 +471,47 @@ func TestProbeRetriesWalledPageLoads(t *testing.T) {
 	}
 	if s := rep.Summary; s.PageLoadWalls != 4 || s.Bootstrapped != 2 || s.Requests["page"].N != 7 {
 		t.Fatalf("summary: walls %d, bootstrapped %d, page loads %d", s.PageLoadWalls, s.Bootstrapped, s.Requests["page"].N)
+	}
+}
+
+// Flagged exits rest: three exits in a row that send every page load to
+// the login page (as three of the owner's ten ISP exits did) each cost one
+// wall, then get no identities, so every profile loads; the walls show by
+// exit in the summary.
+func TestProbeRestsWalledExits(t *testing.T) {
+	bad := []string{igtest.ExitName(2), igtest.ExitName(3), igtest.ExitName(4)}
+	env := igtest.New(t, igtest.Options{Spec: fakeig.Spec{Seed: 12, Profiles: 9, PostsPerProfile: 15, MaxComments: 2, PostSpacing: time.Hour},
+		Faults: fakeig.Faults{WallExits: bad}, Exits: 6, IdentityRequests: 4})
+	var names []string
+	for _, p := range env.World.Profiles() {
+		names = append(names, p.Username)
+	}
+	var lines []string
+	var mu sync.Mutex
+	rep := probe.Run(context.Background(), probe.Options{BaseURL: env.HTTP.URL, Profiles: names, Tier: "isp", MaxGridPages: 10, Parallel: 3,
+		Pool: env.Pool, Loader: env.Loader, GQL: env.GQL, Progress: func(s string) { mu.Lock(); lines = append(lines, s); mu.Unlock() }})
+	s := rep.Summary
+	if s.Bootstrapped != 9 {
+		for _, p := range rep.Profiles {
+			t.Logf("%s: %+v walls %d exit %s", p.Username, p.Bootstrap, p.PageLoadWalls, p.Exit)
+		}
+		t.Fatalf("bootstrapped %d of 9", s.Bootstrapped)
+	}
+	if s.ExitsRested != 3 || len(s.PageWallExits) != 3 {
+		t.Fatalf("rested %d, walls by exit %v", s.ExitsRested, s.PageWallExits)
+	}
+	for _, e := range bad {
+		if n := s.PageWallExits["isp|"+e]; n != 1 {
+			t.Fatalf("exit %s walled %d times, want once (then it rests): %v", e, n, s.PageWallExits)
+		}
+	}
+	for _, p := range rep.Profiles {
+		if slices.Contains(bad, strings.TrimPrefix(p.Exit, "isp|")) {
+			t.Fatalf("%s was read through a flagged exit %s", p.Username, p.Exit)
+		}
+	}
+	if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "resting it for 30m0s") }) {
+		t.Fatalf("no rest in the progress lines: %q", lines)
 	}
 }
 

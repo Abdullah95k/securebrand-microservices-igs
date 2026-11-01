@@ -196,6 +196,7 @@ themselves out of git.
 | Post details | the newest post | `--post-details 20`: read the pages of each profile's 20 newest posts (by time, so pinned posts do not crowd them out); about 125 KB and one request each |
 | Rotation | 500 | `--identity-requests 500`: each identity (and so each IP) retires after 500 to 750 requests and the next IP takes over, so IPs rest in turn. One IP met Instagram's rate limit after 1,100 to 1,300 requests in the full run |
 | Waiting | 20 minutes | `--max-wait 20m`: when every IP is cooling down after blocks, each profile waits this long before it is given up |
+| Flagged IPs | rest 30 minutes | `--page-wall-rest 30m`: an IP that sends a fresh visit to Instagram's login page before serving any good page load (or twice in a row) gets no new identities for 30 minutes, and each profile's page load tries up to 5 identities. `0` turns it off. The summary lists the login pages by IP |
 
 **How many at once.** Each worker uses its own ISP IP at the same pace as a
 single run, so the load per IP does not change, as long as there are more
@@ -212,6 +213,13 @@ A block cools down the IP that got it for a while: for endpoints given as
 IP addresses, its whole /24; for endpoints named by host and port, that
 port alone. Watch the progress lines for `wall:`; while every IP is cooling
 down, a profile waits (`--max-wait`) rather than failing.
+
+**Flagged IPs.** Some ISP IPs send every logged-out page load to the login
+page (in the details run, ports 10002, 10003 and 10004 of 10). The probe
+rests such an IP for 30 minutes (a progress line says `resting it`), and the
+summary's `login page on page loads, by exit` line names them. If the same
+IPs show up run after run, ask the proxy provider to replace them: they cost
+the same and read nothing.
 
 **The full list.** The 348 accounts, back one year or 1,200 posts each (whichever comes first), with results kept apart from the test's:
 

@@ -178,6 +178,28 @@ func (s *Set) open(key string, e *entry, now time.Time, ch *[]change) {
 	e.state, e.openUntil, e.ring, e.probeAt, e.successes = Open, now.Add(e.cooldown), [slots]slot{}, time.Time{}, 0
 }
 
+// Trip opens key for d, whatever its recent outcomes: for a signal too rare
+// to reach MinEvents in a window, such as an exit that serves the login
+// page to a fresh visitor. An open key keeps the later end. Afterwards it
+// goes half-open as usual.
+func (s *Set) Trip(key string, d time.Duration) {
+	var ch []change
+	s.mu.Lock()
+	now := s.now()
+	e := s.entry(key)
+	s.advance(key, e, now, &ch)
+	until := now.Add(d)
+	if e.state != Open {
+		ch = append(ch, change{key, e.state, Open})
+		e.state, e.ring, e.probeAt, e.successes = Open, [slots]slot{}, time.Time{}, 0
+		e.openUntil = until
+	} else if until.After(e.openUntil) {
+		e.openUntil = until
+	}
+	s.mu.Unlock()
+	s.notify(ch)
+}
+
 // Allow reports whether work under key may proceed. Closed: always. Open:
 // never. Half-open: one probe at a time; a probe that never reports back is
 // replaced after a cooldown.

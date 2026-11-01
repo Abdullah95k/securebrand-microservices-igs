@@ -98,8 +98,17 @@ type Options struct {
 	MaxWait time.Duration
 	// PageLoadTries is how many identities a profile's page load may try
 	// when it gets the login redirect (some ISP exits are flagged for page
-	// loads); 0 means 3.
+	// loads); 0 means 5. Flagged exits rest (PageWallRest), so each costs
+	// one wall, and 5 tries get past a run of them: in the details run three
+	// flagged exits in a row failed 27 profiles at 3 tries.
 	PageLoadTries int
+	// PageWallRest is how long an exit rests (gets no identities) once it
+	// looks flagged for page loads: it sent a fresh visitor to the login
+	// page and has served no good page load in this run, or did so twice in
+	// a row. 0 means 30 minutes; negative, never. Three of the owner's ten
+	// ISP exits served only the login page in the details run, and a retry
+	// walked from one to the next.
+	PageWallRest time.Duration
 	// GridPageSize and CommentPageSize ask Instagram for that many posts
 	// or comments per page ("first"); 0 keeps the web app's 12 and 10.
 	// Whether Instagram serves more is what a test run shows.
@@ -356,6 +365,10 @@ type Summary struct {
 	// a cooling tier.
 	PageLoadWalls int `json:"page_load_walls"`
 	TierWaits     int `json:"tier_waits"`
+	// PageWallExits counts the login redirects by exit (every try, the last
+	// too); ExitsRested the times an exit was rested for them.
+	PageWallExits map[string]int `json:"page_wall_exits,omitempty"`
+	ExitsRested   int            `json:"exits_rested,omitempty"`
 	// U1
 	GridEnds       int            `json:"grid_ends"`
 	GridCaps       int            `json:"grid_caps"`
@@ -427,7 +440,10 @@ func Run(ctx context.Context, o Options) Report {
 	}
 	o.CommentPosts, o.CommentPages, o.Parallel = max(o.CommentPosts, 1), max(o.CommentPages, 1), max(o.Parallel, 1)
 	if o.PageLoadTries <= 0 {
-		o.PageLoadTries = 3
+		o.PageLoadTries = 5
+	}
+	if o.PageWallRest == 0 {
+		o.PageWallRest = 30 * time.Minute
 	}
 	o.PostDetails = max(o.PostDetails, 1)
 	rep := Report{Version: o.Version, Tier: o.Tier, Fingerprint: o.Fingerprint, StartedAt: o.Now().UTC()}
@@ -577,7 +593,7 @@ func continueAt(profiles []Profile, start, n int) int {
 func newSummary() Summary {
 	return Summary{TokensFound: map[string]int{}, GridWalls: map[string]int{},
 		QueriesWithoutClientState: map[string]int{}, Cookies: map[string]int{}, Requests: map[string]Cost{},
-		CommentAnswers: map[string]int{}}
+		CommentAnswers: map[string]int{}, PageWallExits: map[string]int{}}
 }
 
 // add adds a worker's counts to s. Profiles, Posts, Comments and
@@ -592,6 +608,8 @@ func (s *Summary) add(o Summary) {
 	addMap(s.TokensFound, o.TokensFound)
 	s.PageLoadWalls += o.PageLoadWalls
 	s.TierWaits += o.TierWaits
+	addMap(s.PageWallExits, o.PageWallExits)
+	s.ExitsRested += o.ExitsRested
 	s.GridEnds += o.GridEnds
 	s.GridCaps += o.GridCaps
 	s.GridAgeStops += o.GridAgeStops
@@ -638,6 +656,37 @@ type shared struct {
 	hopNext    int
 	hopCreated int
 	hopRetryAt time.Time // after a failed bootstrap, wait before another
+	// Page loads by exit, for PageWallRest.
+	exits map[string]*exitLoads
+}
+
+type exitLoads struct {
+	ok     int // good page loads in this run
+	streak int // login redirects since the last good one
+}
+
+// pageLoad records a page load on exit and reports whether the exit should
+// rest: it walled and has served no good page load in this run, or walled
+// twice in a row. A profile walled for everyone (not an exit) walls good
+// exits whose other page loads succeed, so it rests none of them.
+func (sh *shared) pageLoad(exit string, walled bool) bool {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if sh.exits == nil {
+		sh.exits = map[string]*exitLoads{}
+	}
+	e := sh.exits[exit]
+	if e == nil {
+		e = &exitLoads{}
+		sh.exits[exit] = e
+	}
+	if !walled {
+		e.ok++
+		e.streak = 0
+		return false
+	}
+	e.streak++
+	return e.ok == 0 || e.streak >= 2
 }
 
 // takePage reports whether this profile may save its page HTML (the first
@@ -754,7 +803,18 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 		start := time.Now()
 		pl, err = r.o.Loader.Load(ctx, id, page)
 		out.Bootstrap = Step{Ms: time.Since(start).Milliseconds()}
-		if err != nil || pl.Class != detect.LoginWall || try >= r.o.PageLoadTries {
+		walled := err == nil && pl.Class == detect.LoginWall
+		if exit := id.Endpoint.Bucket; err == nil && exit != "" {
+			if walled {
+				r.sum.PageWallExits[exit]++
+			}
+			if r.sh.pageLoad(exit, walled) && r.o.PageWallRest > 0 {
+				r.o.Pool.RestExit(id, r.o.PageWallRest)
+				r.sum.ExitsRested++
+				r.o.Progress(fmt.Sprintf("  %s: exit %s sent a fresh visit to the login page; resting it for %s", username, exit, r.o.PageWallRest))
+			}
+		}
+		if !walled || try >= r.o.PageLoadTries {
 			break
 		}
 		out.PageLoadWalls++
