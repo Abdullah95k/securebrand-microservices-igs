@@ -12,7 +12,9 @@ import (
 
 // A job is its client's: another client's GET, cancel and results answer
 // 404 (as if it did not exist), the owner's work, and an admin sees all.
-// Only the list filtered by owner before (brief §5 item 3).
+// Only the list filtered by owner before (brief §5 item 3). Scheduled jobs,
+// which have no client, stay readable by the clients that registered their
+// page (TestAdaptiveScheduleAndPostRefresh reads one).
 func TestJobsAreVisibleToTheirOwnerOnly(t *testing.T) {
 	s := Start(t, Options{Spec: fakefb.Spec{Seed: 21, Pages: 1, PostsPerPage: 2, PostSpacing: 20 * time.Hour, MaxComments: 2}})
 	owner := s.Key(t, api.ScopeJobsWrite, api.ScopeDataRead)

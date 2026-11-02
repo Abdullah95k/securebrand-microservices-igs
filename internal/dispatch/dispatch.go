@@ -272,11 +272,17 @@ func scanJob(row pgx.CollectableRow) (*Job, error) {
 }
 
 // Get loads a job, merging live counters from Redis while it runs.
-// Get returns a job. With owner set, only that client's job is found
-// (pgx.ErrNoRows otherwise, which the API answers with 404); nil is an
-// admin's view of every job.
+// visibleTo is the condition (on jobs, with the client as $2) for a job a
+// client may read: one it created, or a scheduled job (no client) of a page
+// it registered. A NULL client is an admin, who reads every job.
+const visibleTo = `($2::uuid IS NULL OR api_client_id = $2 OR (api_client_id IS NULL AND EXISTS (
+	SELECT 1 FROM page_registrations r WHERE r.page_ref = jobs.page_ref AND r.api_client_id = $2)))`
+
+// Get returns a job. With owner set, only a job that client may read
+// (visibleTo) is found, pgx.ErrNoRows otherwise, which the API answers with
+// 404; nil is an admin's view of every job.
 func (d *Dispatcher) Get(ctx context.Context, id uuid.UUID, owner *uuid.UUID) (*Job, error) {
-	rows, err := d.DB.Query(ctx, selectJob+` WHERE job_id = $1 AND ($2::uuid IS NULL OR api_client_id = $2)`, id, owner)
+	rows, err := d.DB.Query(ctx, selectJob+` WHERE job_id = $1 AND `+visibleTo, id, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -320,8 +326,9 @@ func (d *Dispatcher) List(ctx context.Context, client *uuid.UUID, pageRef, statu
 }
 
 // Cancel flags a running job.
-// Cancel flags a running job for cancellation. With owner set, only that
-// client's job (pgx.ErrNoRows otherwise).
+// Cancel flags a running job for cancellation. With owner set, only a job
+// that client created (pgx.ErrNoRows otherwise): a scheduled job serves
+// every client that registered its page, so only an admin cancels it.
 func (d *Dispatcher) Cancel(ctx context.Context, id uuid.UUID, owner *uuid.UUID) error {
 	tag, err := d.DB.Exec(ctx, `UPDATE jobs SET status = 'cancelling' WHERE job_id = $1 AND status IN ('running','queued')
 		AND ($2::uuid IS NULL OR api_client_id = $2)`, id, owner)
