@@ -112,8 +112,12 @@ const (
 	redisClaimRenew = redisClaimTTL / 3
 )
 
+// claimNamespace prefixes the claim keys; the claims' own test swaps it so
+// as not to compete with the stacks of test binaries running meanwhile.
+var claimNamespace = "testenv:redis-db:"
+
 // redisClaim is the key in DB 0 whose holder owns DB index n.
-func redisClaim(n int) string { return "testenv:redis-db:" + strconv.Itoa(n) }
+func redisClaim(n int) string { return claimNamespace + strconv.Itoa(n) }
 
 var (
 	renewClaim   = redis.NewScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("PEXPIRE", KEYS[1], ARGV[2]) end return 0`)
