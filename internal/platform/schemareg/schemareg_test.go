@@ -2,15 +2,20 @@ package schemareg
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"testing/fstest"
 
@@ -223,6 +228,35 @@ func TestRetriesDroppedConnection(t *testing.T) {
 	subjects, err := c.Subjects(context.Background())
 	if err != nil || len(subjects) != 1 || calls.Load() != 2 {
 		t.Fatalf("%v %v after %d calls", subjects, err, calls.Load())
+	}
+}
+
+// The errors of a connection the registry dropped are retried; others are
+// not. The CI run of 2026-11-02 met the closed-socket one: "write tcp
+// [::1]:59956->[::1]:18081: use of closed network connection".
+func TestRetryable(t *testing.T) {
+	wrap := func(err error) error {
+		return fmt.Errorf("schema registry: POST /x: %w", &url.Error{Op: "Post", URL: "http://localhost:18081/x",
+			Err: &net.OpError{Op: "write", Net: "tcp", Err: err}})
+	}
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{wrap(net.ErrClosed), true},
+		{wrap(syscall.EPIPE), true},
+		{wrap(syscall.ECONNRESET), true},
+		{wrap(io.EOF), true},
+		{wrap(io.ErrUnexpectedEOF), true},
+		{errors.New("http: server closed idle connection"), true},
+		{wrap(syscall.ECONNREFUSED), false},
+		{&Error{Status: 404, Message: "Subject not found"}, false},
+		{context.DeadlineExceeded, false},
+	} {
+		if got := retryable(tc.err); got != tc.want {
+			t.Errorf("retryable(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }
 

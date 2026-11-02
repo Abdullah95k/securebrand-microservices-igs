@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -92,11 +93,21 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		body = b
 	}
 	err := c.send(ctx, method, path, body, out)
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
-		(err != nil && strings.Contains(err.Error(), "server closed idle connection")) {
+	if retryable(err) {
 		err = c.send(ctx, method, path, body, out)
 	}
 	return err
+}
+
+// retryable reports whether err is a connection the registry dropped: an
+// EOF or reset mid-request, a write to a socket the transport had already
+// closed under it (net.ErrClosed, "use of closed network connection", when
+// the registry hangs up between requests), a broken pipe, or the
+// transport's own idle-connection error.
+func retryable(err error) bool {
+	return err != nil && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, net.ErrClosed) ||
+		strings.Contains(err.Error(), "server closed idle connection"))
 }
 
 func (c *Client) send(ctx context.Context, method, path string, body []byte, out any) error {

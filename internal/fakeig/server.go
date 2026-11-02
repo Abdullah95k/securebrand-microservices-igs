@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"slices"
 	"strconv"
@@ -126,6 +127,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		page(w, http.StatusOK, `<html><form action="/accounts/login/ajax/" method="post"></form></html>`)
 	case strings.HasPrefix(r.URL.Path, "/challenge"):
 		page(w, http.StatusOK, `<html><form action="/challenge/action/" method="post"></form></html>`)
+	case strings.HasPrefix(r.URL.Path, "/rsrc.php/"):
+		s.bundle(w)
 	case strings.HasPrefix(r.URL.Path, "/fake-cdn/"):
 		// A stand-in for the image CDN: a few bytes with a JPEG header.
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -217,7 +220,9 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		`"__spin_r":1029000000,"__spin_b":"trunk","__spin_t":1761800000},317],`+
 		`["RelayAPIConfigDefaults",[],{"customHeaders":{"X-IG-App-ID":"%s"}},1],["PolarisSiteData",[],{"rollout_hash":"1029000000"},1],`+
 		`["SprinkleConfig",[],{"jazoest":"22001"},1]]}}]]],"__comet_req":7}</script></head><body>`+
-		`<script type="application/json" data-sjs>%s</script></body></html>`, id.lsd, id.csrf, AppID, blob))
+		`<script type="application/json" data-sjs>%s</script>`+
+		`<script src="//%s/rsrc.php/v4/yI/r/igs-relay.js" crossorigin="anonymous" async></script></body></html>`,
+		id.lsd, id.csrf, AppID, blob, r.Host))
 }
 
 func (s *Server) mint() *ident {
@@ -465,7 +470,7 @@ func (s *Server) reelsPage(p *Profile, offset, size int, lsd string) map[string]
 		edges = append(edges, map[string]any{"node": map[string]any{"__typename": "XIGPolarisVideoMedia", "id": "POLARIS_" + str(x.PK),
 			"pk": str(x.PK), "code": x.Code, "product_type": "clips", "like_and_view_counts_disabled": x.LikesHidden,
 			"like_count": likes(x), "comment_count": x.CommentCount(), "play_count": x.Plays, "clips_tab_pinned_user_ids": []any{},
-			"display_uri": s.cdn() + "/v/" + x.Code + ".jpg", "user": map[string]any{"pk": str(p.PK), "id": p.ID}}})
+			"display_uri": s.cdn() + "/v/" + cdnFile(x.Code) + "_n.jpg", "user": map[string]any{"pk": str(p.PK), "id": p.ID}}})
 	}
 	pi := map[string]any{"has_next_page": end < len(reels), "end_cursor": nil}
 	if end < len(reels) {
@@ -510,6 +515,27 @@ func (s *Server) highlights(ids any) map[string]any {
 		}
 	}
 	return map[string]any{"edges": edges}
+}
+
+// bundle serves a JS bundle holding the operations' doc_ids in Relay's
+// persisted-operation modules. That Instagram's bundles carry them this way,
+// as Facebook's do (with _instagramRelayOperation modules), is a hypothesis
+// (U6) until a recording shows it.
+func (s *Server) bundle(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	names := make([]string, 0, len(s.opts.Docs))
+	for n := range s.opts.Docs {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	var b strings.Builder
+	b.WriteString(";/*FB_PKG_DELIM*/\n")
+	for _, n := range names {
+		if ids := s.opts.Docs[n]; len(ids) > 0 {
+			fmt.Fprintf(&b, `__d("%s_instagramRelayOperation",[],(function(a,b,c,d,e,f){e.exports="%s"}),null);`+"\n", n, ids[0])
+		}
+	}
+	_, _ = w.Write([]byte(b.String()))
 }
 
 // SetCDN points media URLs at base (set before the server is used).
@@ -572,7 +598,7 @@ func profileJSON(p *Profile, host string) map[string]any {
 func mediaJSON(post *Post, detail bool, cdn string) map[string]any {
 	m := map[string]any{"pk": str(post.PK), "id": str(post.PK) + "_" + str(post.Owner.PK), "code": post.Code,
 		"media_type": post.MediaType, "product_type": post.ProductType, "caption": map[string]any{"text": post.Caption},
-		"display_uri": cdn + "/v/" + post.Code + ".jpg",
+		"display_uri": cdn + "/v/" + cdnFile(post.Code) + "_n.jpg",
 		"owner":       map[string]any{"pk": str(post.Owner.PK), "id": post.Owner.ID},
 		"user":        map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}
 	if detail {
@@ -613,7 +639,7 @@ func mediaJSON(post *Post, detail bool, cdn string) map[string]any {
 			m["clips_metadata"] = map[string]any{"music_info": nil, "original_sound_info": map[string]any{"audio_asset_id": "1",
 				"original_audio_title": "Original audio", "ig_artist": map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}}
 			m["video_dash_manifest"] = fmt.Sprintf(`<?xml version="1.0"?><MPD mediaPresentationDuration="PT%gS"></MPD>`, post.DurationS)
-			m["video_versions"] = []any{map[string]any{"type": 101, "url": cdn + "/v/" + post.Code + ".mp4"}}
+			m["video_versions"] = []any{map[string]any{"type": 101, "url": cdn + "/o1/v/t16/" + cdnFile(post.Code) + "_n.mp4?oe=6900AA00"}}
 		}
 		if post.MediaType == 8 {
 			children := []any{}
@@ -639,8 +665,16 @@ func likes(p *Post) int64 {
 }
 
 // candidates are an image's renditions: the full size and a small square.
+// cdnFile is a stand-in CDN file name: like Instagram's, unrelated to the
+// post's shortcode or pk.
+func cdnFile(code string) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(code))
+	return strconv.FormatUint(h.Sum64()%1_000_000_000_000_000, 10)
+}
+
 func candidates(cdn, code string) map[string]any {
-	base := cdn + "/v/t51.29350-15/" + code
+	base := cdn + "/v/t51.29350-15/" + cdnFile(code)
 	return map[string]any{"candidates": []any{
 		map[string]any{"url": base + "_n.jpg?stp=dst-jpg_e35&oe=6900AA00&oh=00_fake", "width": 1080, "height": 1350},
 		map[string]any{"url": base + "_s150.jpg?stp=c0.135.1080.1080a_s150x150&oe=6900AA00&oh=00_fake", "width": 150, "height": 150},
