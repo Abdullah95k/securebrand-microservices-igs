@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
+	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
@@ -195,15 +196,15 @@ func (f *Finalizer) Finalize(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	ev := &igv1.JobEvent{
-		EventId: id + ":" + final, JobId: id, Status: jobStatus(final), Kind: kind, ProfileRef: ref,
-		CreatedAt: timestamppb.New(created), FinishedAt: timestamppb.New(now), Counters: c,
-		Completeness: &igv1.Completeness{Posts: comp.Posts, PostsComplete: comp.PostsComplete, PostsTruncated: comp.PostsTruncated,
-			PostsSkipped: comp.PostsSkipped, PostsGated: comp.PostsGated, CommentsReported: comp.CommentsReported,
+	ev := &commonv1.JobEvent{
+		EventId: id + ":" + final, Platform: commonv1.Platform_PLATFORM_INSTAGRAM, JobId: id, Status: jobStatus(final),
+		Kind: kind, SubjectRef: ref, CreatedAt: timestamppb.New(created), FinishedAt: timestamppb.New(now), Counters: c,
+		Completeness: &commonv1.Completeness{Posts: comp.Posts, PostsComplete: comp.PostsComplete, PostsTruncated: comp.PostsTruncated,
+			MedianRatio: comp.MedianRatio, MinRatio: comp.MinRatio, CommentsReported: comp.CommentsReported,
 			CommentsCollected: comp.CommentsCollected},
 	}
 	if userPK != nil {
-		ev.UserPk = *userPK
+		ev.SubjectId = *userPK
 	}
 	b := f.Producer.NewBatch()
 	if err := b.AddProto(ctx, topics.Job, id, ev); err != nil {
@@ -219,15 +220,19 @@ func (f *Finalizer) Finalize(ctx context.Context, id string) error {
 	return nil
 }
 
-// Completeness is stored on the job.
+// Completeness is stored on the job. On Instagram a post's comment count
+// includes replies, which logged-out readers do not get, so the ratios are
+// information, never a failure (ADR 0005 §5).
 type Completeness struct {
-	Posts             int64 `json:"posts"`
-	PostsComplete     int64 `json:"posts_complete"`
-	PostsTruncated    int64 `json:"posts_truncated"`
-	PostsSkipped      int64 `json:"posts_skipped"`
-	PostsGated        int64 `json:"posts_gated"`
-	CommentsReported  int64 `json:"comments_reported"`
-	CommentsCollected int64 `json:"comments_collected"`
+	Posts             int64   `json:"posts"`
+	PostsComplete     int64   `json:"posts_complete"`
+	PostsTruncated    int64   `json:"posts_truncated"`
+	PostsSkipped      int64   `json:"posts_skipped"`
+	PostsGated        int64   `json:"posts_gated"`
+	MedianRatio       float64 `json:"median_ratio"`
+	MinRatio          float64 `json:"min_ratio"`
+	CommentsReported  int64   `json:"comments_reported"`
+	CommentsCollected int64   `json:"comments_collected"`
 }
 
 func (f *Finalizer) completeness(ctx context.Context, posts []jobs.PostState, c map[string]int64) (Completeness, error) {
@@ -249,23 +254,45 @@ func (f *Finalizer) completeness(ctx context.Context, posts []jobs.PostState, c 
 	if len(pks) == 0 {
 		return comp, nil
 	}
-	err := f.DB.QueryRow(ctx, `SELECT coalesce(sum(p.comment_count), 0),
-			coalesce(sum((SELECT count(*) FROM comments c WHERE c.taken_at = p.taken_at AND c.media_pk = p.media_pk AND c.depth = 0)), 0)
-		FROM posts p JOIN post_index i ON i.media_pk = p.media_pk AND i.taken_at = p.taken_at WHERE i.media_pk = ANY($1)`, pks).
-		Scan(&comp.CommentsReported, &comp.CommentsCollected)
-	return comp, err
+	rows, err := f.DB.Query(ctx, `SELECT coalesce(p.comment_count, 0),
+			(SELECT count(*) FROM comments c WHERE c.taken_at = p.taken_at AND c.media_pk = p.media_pk AND c.depth = 0)
+		FROM posts p JOIN post_index i ON i.media_pk = p.media_pk AND i.taken_at = p.taken_at WHERE i.media_pk = ANY($1)`, pks)
+	if err != nil {
+		return comp, err
+	}
+	defer rows.Close()
+	var ratios []float64
+	for rows.Next() {
+		var reported, collected int64
+		if err := rows.Scan(&reported, &collected); err != nil {
+			return comp, err
+		}
+		comp.CommentsReported += reported
+		comp.CommentsCollected += collected
+		if reported > 0 {
+			ratios = append(ratios, min(float64(collected)/float64(reported), 1))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return comp, err
+	}
+	if len(ratios) > 0 {
+		sort.Float64s(ratios)
+		comp.MinRatio, comp.MedianRatio = ratios[0], ratios[len(ratios)/2]
+	}
+	return comp, nil
 }
 
-func jobStatus(s string) igv1.JobStatus {
+func jobStatus(s string) commonv1.JobStatus {
 	switch s {
 	case "completed":
-		return igv1.JobStatus_JOB_STATUS_COMPLETED
+		return commonv1.JobStatus_JOB_STATUS_COMPLETED
 	case "partial":
-		return igv1.JobStatus_JOB_STATUS_PARTIAL
+		return commonv1.JobStatus_JOB_STATUS_PARTIAL
 	case "failed":
-		return igv1.JobStatus_JOB_STATUS_FAILED
+		return commonv1.JobStatus_JOB_STATUS_FAILED
 	case "cancelled":
-		return igv1.JobStatus_JOB_STATUS_CANCELLED
+		return commonv1.JobStatus_JOB_STATUS_CANCELLED
 	}
-	return igv1.JobStatus_JOB_STATUS_UNSPECIFIED
+	return commonv1.JobStatus_JOB_STATUS_UNSPECIFIED
 }
