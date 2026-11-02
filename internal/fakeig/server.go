@@ -125,8 +125,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write([]byte("\xff\xd8\xff\xe0fake-jpeg" + r.URL.Path))
 	case r.Method == http.MethodPost && (r.URL.Path == "/api/graphql" || r.URL.Path == "/graphql/query"):
+		s.World.mu.RLock()
+		defer s.World.mu.RUnlock()
 		s.graphql(w, r)
 	case r.Method == http.MethodGet:
+		s.World.mu.RLock()
+		defer s.World.mu.RUnlock()
 		s.page(w, r)
 	default:
 		http.NotFound(w, r)
@@ -161,10 +165,15 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		// The post page embeds the media object and its first comments.
-		m := mediaJSON(post, true)
-		m["comments_connection"] = s.commentPage(post, 0, CommentPageSize, "")
-		data = map[string]any{"xig_polaris_media": m}
+		// The post page embeds the media object and its first comments
+		// (the probe's post pages: the media under if_not_gated_logged_out,
+		// null for a gated post, the comments beside it).
+		holder := map[string]any{"id": "POLARIS_" + str(post.PK), "if_not_gated_logged_out": nil}
+		if !post.Gated {
+			holder["if_not_gated_logged_out"] = mediaJSON(post, true)
+			holder["comments_connection"] = s.commentPage(post, 0, CommentPageSize, "")
+		}
+		data = map[string]any{"xig_polaris_media": holder}
 	case len(parts) == 2 && parts[1] == "reels":
 		p := s.World.Profile(parts[0])
 		if p == nil {
@@ -330,7 +339,7 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	case OpComments:
 		pk, _ := strconv.ParseInt(sv(vars["media_id"]), 10, 64)
 		post := s.World.posts[pk]
-		if post == nil {
+		if post == nil || post.Deleted {
 			write(w, data(map[string]any{"xig_polaris_media": nil}))
 			return
 		}
@@ -448,8 +457,8 @@ func (s *Server) reelsPage(p *Profile, offset, size int, lsd string) map[string]
 	edges := []any{}
 	for _, x := range reels[min(offset, end):end] {
 		edges = append(edges, map[string]any{"node": map[string]any{"__typename": "XIGPolarisVideoMedia", "id": "POLARIS_" + str(x.PK),
-			"pk": str(x.PK), "code": x.Code, "product_type": "clips", "like_and_view_counts_disabled": false,
-			"like_count": x.Likes, "comment_count": len(x.Comments), "play_count": x.Plays, "clips_tab_pinned_user_ids": []any{},
+			"pk": str(x.PK), "code": x.Code, "product_type": "clips", "like_and_view_counts_disabled": x.LikesHidden,
+			"like_count": likes(x), "comment_count": x.CommentCount(), "play_count": x.Plays, "clips_tab_pinned_user_ids": []any{},
 			"display_uri": "https://scontent.cdninstagram.example/v/" + x.Code + ".jpg", "user": map[string]any{"pk": str(p.PK), "id": p.ID}}})
 	}
 	pi := map[string]any{"has_next_page": end < len(reels), "end_cursor": nil}
@@ -467,7 +476,7 @@ func (s *Server) commentPage(post *Post, offset, size int, lsd string) map[strin
 	edges := []any{}
 	for _, c := range post.Comments[min(offset, end):end] {
 		edges = append(edges, map[string]any{"node": map[string]any{"pk": str(c.PK), "id": str(c.PK), "text": c.Text,
-			"created_at": c.CreatedAt.Unix(), "comment_like_count": c.Likes, "parent_comment_id": nil, "child_comment_count": nil,
+			"created_at": c.CreatedAt.Unix(), "comment_like_count": c.Likes, "parent_comment_id": nil, "child_comment_count": c.Replies,
 			"user": map[string]any{"pk": str(c.UserPK), "id": str(c.UserPK), "username": c.Username, "is_verified": false}}})
 	}
 	pi := map[string]any{"has_next_page": end < len(post.Comments), "end_cursor": nil}
@@ -499,7 +508,7 @@ func (s *Server) highlights(ids any) map[string]any {
 
 func (s *Server) postByCode(code string) *Post {
 	for _, post := range s.World.posts {
-		if post.Code == code {
+		if post.Code == code && !post.Deleted {
 			return post
 		}
 	}
@@ -554,9 +563,10 @@ func mediaJSON(post *Post, detail bool) map[string]any {
 		// The post page's fields, in the shapes of the owner's recordings
 		// and probe runs.
 		m["taken_at"] = post.TakenAt.Unix()
-		m["like_count"] = post.Likes
-		m["comment_count"] = len(post.Comments)
-		m["like_and_view_counts_disabled"] = false
+		m["like_count"] = likes(post)
+		m["comment_count"] = post.CommentCount()
+		m["like_and_view_counts_disabled"] = post.LikesHidden
+		m["image_versions2"] = candidates(post.Code)
 		m["caption_is_edited"] = post.Edited
 		m["has_audio"] = post.MediaType == 2
 		m["original_width"], m["original_height"] = 1080, 1350
@@ -592,13 +602,33 @@ func mediaJSON(post *Post, detail bool) map[string]any {
 		if post.MediaType == 8 {
 			children := []any{}
 			for k := range post.CarouselCount {
-				children = append(children, map[string]any{"pk": str(post.PK + int64(k) + 1)})
+				code := post.Code + "_" + strconv.Itoa(k)
+				children = append(children, map[string]any{"pk": str(post.PK + int64(k) + 1), "media_type": 1,
+					"accessibility_caption": "synthetic image " + strconv.Itoa(k+1), "image_versions2": candidates(code)})
 			}
 			m["carousel_media"] = children
 			m["carousel_media_count"] = post.CarouselCount
 		}
 	}
 	return m
+}
+
+// likes is the like count the post's pages serve: 3 when hidden, as
+// Instagram serves.
+func likes(p *Post) int64 {
+	if p.LikesHidden {
+		return 3
+	}
+	return p.Likes
+}
+
+// candidates are an image's renditions: the full size and a small square.
+func candidates(code string) map[string]any {
+	base := "https://scontent.cdninstagram.example/v/t51.29350-15/" + code
+	return map[string]any{"candidates": []any{
+		map[string]any{"url": base + "_n.jpg?stp=dst-jpg_e35&oe=6900AA00&oh=00_fake", "width": 1080, "height": 1350},
+		map[string]any{"url": base + "_s150.jpg?stp=c0.135.1080.1080a_s150x150&oe=6900AA00&oh=00_fake", "width": 150, "height": 150},
+	}}
 }
 
 func data(v any) map[string]any {

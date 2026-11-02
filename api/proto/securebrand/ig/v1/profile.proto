@@ -52,4 +52,7 @@ message Profile {
   string requested_ref = 18;
   optional int32 highlight_count = 19;
   string pronouns = 20;
+  // A hash of the highlights list (ids and titles): a scheduled run reads
+  // the highlights' items again only when it changed.
+  bytes highlights_hash = 21;
 }

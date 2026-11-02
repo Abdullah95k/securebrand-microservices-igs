@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"slices"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,15 @@ type Spec struct {
 	// Pinned older posts per profile, shown first in the grid as on
 	// Instagram (up to 3).
 	Pinned int
+	// GatedEvery gates every Nth post (from the 2nd): its page draws a
+	// login wall in place of the post, as for age-restricted posts.
+	GatedEvery int
+	// HiddenLikesEvery hides the like and view counts of every Nth post
+	// (from the 3rd); Instagram then serves a like_count of 3.
+	HiddenLikesEvery int
+	// RepliesEvery gives every Nth comment replies, which logged-out
+	// readers see only as a count (and in the post's comment count).
+	RepliesEvery int
 }
 
 // DefaultSpec is a small world: 3 profiles of 40 posts.
@@ -54,7 +64,7 @@ type Profile struct {
 func (p *Profile) Reels() []*Post {
 	var out []*Post
 	for _, x := range p.Posts {
-		if x.MediaType == 2 {
+		if x.MediaType == 2 && !x.Deleted {
 			out = append(out, x)
 		}
 	}
@@ -64,12 +74,14 @@ func (p *Profile) Reels() []*Post {
 // Grid is the profile's posts in grid order: pinned first, then the rest
 // newest first.
 func (p *Profile) Grid() []*Post {
-	if len(p.Pinned) == 0 {
-		return p.Posts
+	var out []*Post
+	for _, x := range p.Pinned {
+		if !x.Deleted {
+			out = append(out, x)
+		}
 	}
-	out := append([]*Post{}, p.Pinned...)
 	for _, x := range p.Posts {
-		if !slices.Contains(p.Pinned, x) {
+		if !x.Deleted && !slices.Contains(p.Pinned, x) {
 			out = append(out, x)
 		}
 	}
@@ -100,6 +112,22 @@ type Post struct {
 	// Plays is a video's view count, shown logged out only in the
 	// profile's reels tab.
 	Plays int64
+	// Gated posts show a login wall in place of their detail.
+	Gated bool
+	// LikesHidden: the owner hid the like and view counts.
+	LikesHidden bool
+	// Deleted posts leave the grid; their page answers 404.
+	Deleted bool
+}
+
+// CommentCount is the post's comment count as Instagram reports it:
+// top-level comments and their replies.
+func (p *Post) CommentCount() int64 {
+	n := int64(len(p.Comments))
+	for _, c := range p.Comments {
+		n += int64(c.Replies)
+	}
+	return n
 }
 
 // Comment is a top-level comment.
@@ -110,6 +138,9 @@ type Comment struct {
 	Likes     int64
 	UserPK    int64
 	Username  string
+	// Replies is the comment's reply count; logged out, the replies
+	// themselves are not served.
+	Replies int
 }
 
 // Highlight is one highlights reel.
@@ -119,8 +150,13 @@ type Highlight struct {
 	Items int
 }
 
-// World is the generated ground truth.
+// World is the generated ground truth. Its methods are safe while the
+// server serves it.
 type World struct {
+	mu       sync.RWMutex
+	r        *rand.Rand
+	spec     Spec
+	nextPK   int64
 	profiles []*Profile
 	byName   map[string]*Profile
 	byPK     map[int64]*Profile
@@ -134,50 +170,15 @@ var Epoch = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 // NewWorld generates a world from s.
 func NewWorld(s Spec) *World {
 	r := rand.New(rand.NewPCG(s.Seed, 0x1a))
-	w := &World{byName: map[string]*Profile{}, byPK: map[int64]*Profile{}, byID: map[string]*Profile{}, posts: map[int64]*Post{}}
-	nextPK := int64(3_000_000_000_000_000_000)
-	pk := func() int64 { nextPK += 1 + r.Int64N(1000); return nextPK }
+	w := &World{r: r, spec: s, nextPK: 3_000_000_000_000_000_000,
+		byName: map[string]*Profile{}, byPK: map[int64]*Profile{}, byID: map[string]*Profile{}, posts: map[int64]*Post{}}
 	for i := range s.Profiles {
 		p := &Profile{PK: 50_000_000_000 + int64(i)*7919, Username: fmt.Sprintf("profile_%02d", i+1),
 			FullName: fmt.Sprintf("Profile %02d", i+1), Bio: "synthetic biography",
 			Followers: 1000 + r.Int64N(100000), Following: r.Int64N(500), Verified: i%2 == 0}
 		p.ID = fmt.Sprintf("178414%011d", p.PK%100_000_000_000)
 		for j := range s.PostsPerProfile {
-			taken := Epoch.Add(-time.Duration(j) * s.PostSpacing)
-			post := &Post{PK: MediaPK(taken, r.Int64N(1<<23)), MediaType: []int{1, 2, 8}[r.IntN(3)], Caption: fmt.Sprintf("synthetic caption %d", j+1),
-				TakenAt: taken, Likes: r.Int64N(5000), Owner: p}
-			post.Code = shortcode(post.PK)
-			post.ProductType = map[int]string{1: "feed", 2: "clips", 8: "carousel_container"}[post.MediaType]
-			if j%3 == 0 {
-				post.Tagged = []string{fmt.Sprintf("tagged_%02d_%d", i+1, j)}
-			}
-			if j%5 == 0 {
-				post.Coauthors = []string{fmt.Sprintf("collab_%02d", i+1)}
-			}
-			if j%4 == 0 {
-				post.Location = fmt.Sprintf("City %d", j%7)
-			}
-			post.Topics = []string{fmt.Sprintf("topic %d", j%6), "synthetic"}
-			if post.MediaType == 2 {
-				post.DurationS = float64(10+j%50) + 0.25
-				post.Plays = post.Likes*12 + int64(j)*37 + 100
-			}
-			if post.MediaType == 8 {
-				post.CarouselCount = 2 + j%4
-			}
-			post.Edited = j%7 == 0
-			if j%9 == 0 {
-				post.AILabel = "AI content"
-			}
-			n := 0
-			if s.MaxComments > 0 {
-				n = r.IntN(s.MaxComments + 1)
-			}
-			for k := range n {
-				post.Comments = append(post.Comments, Comment{PK: pk(), Text: fmt.Sprintf("synthetic comment %d", n-k),
-					CreatedAt: post.TakenAt.Add(time.Duration(n-k) * time.Minute), Likes: r.Int64N(50),
-					UserPK: 60_000_000_000 + r.Int64N(1_000_000), Username: fmt.Sprintf("commenter_%04d", r.IntN(10000))})
-			}
+			post := w.makePost(p, i, j, Epoch.Add(-time.Duration(j)*s.PostSpacing))
 			p.Posts = append(p.Posts, post)
 			w.posts[post.PK] = post
 		}
@@ -197,11 +198,70 @@ func NewWorld(s Spec) *World {
 	return w
 }
 
+func (w *World) pk() int64 { w.nextPK += 1 + w.r.Int64N(1000); return w.nextPK }
+
+// makePost generates post j of profile i (j picks the derived fields).
+func (w *World) makePost(p *Profile, i, j int, taken time.Time) *Post {
+	r, s := w.r, w.spec
+	post := &Post{PK: MediaPK(taken, r.Int64N(1<<23)), MediaType: []int{1, 2, 8}[r.IntN(3)], Caption: fmt.Sprintf("synthetic caption %d", j+1),
+		TakenAt: taken, Likes: r.Int64N(5000), Owner: p}
+	post.Code = shortcode(post.PK)
+	post.ProductType = map[int]string{1: "feed", 2: "clips", 8: "carousel_container"}[post.MediaType]
+	if j%3 == 0 {
+		post.Tagged = []string{fmt.Sprintf("tagged_%02d_%d", i+1, j)}
+	}
+	if j%5 == 0 {
+		post.Coauthors = []string{fmt.Sprintf("collab_%02d", i+1)}
+	}
+	if j%4 == 0 {
+		post.Location = fmt.Sprintf("City %d", j%7)
+	}
+	post.Topics = []string{fmt.Sprintf("topic %d", j%6), "synthetic"}
+	if post.MediaType == 2 {
+		post.DurationS = float64(10+j%50) + 0.25
+		post.Plays = post.Likes*12 + int64(j)*37 + 100
+	}
+	if post.MediaType == 8 {
+		post.CarouselCount = 2 + j%4
+	}
+	post.Edited = j%7 == 0
+	post.Gated = s.GatedEvery > 0 && j%s.GatedEvery == 1
+	post.LikesHidden = s.HiddenLikesEvery > 0 && j%s.HiddenLikesEvery == 2
+	if j%9 == 0 {
+		post.AILabel = "AI content"
+	}
+	n := 0
+	if s.MaxComments > 0 {
+		n = r.IntN(s.MaxComments + 1)
+	}
+	for k := range n {
+		post.Comments = append(post.Comments, w.makeComment(post.TakenAt.Add(time.Duration(n-k)*time.Minute), n-k, k))
+	}
+	return post
+}
+
+func (w *World) makeComment(at time.Time, nth, k int) Comment {
+	r := w.r
+	cm := Comment{PK: w.pk(), Text: fmt.Sprintf("synthetic comment %d", nth), CreatedAt: at, Likes: r.Int64N(50),
+		UserPK: 60_000_000_000 + r.Int64N(1_000_000), Username: fmt.Sprintf("commenter_%04d", r.IntN(10000))}
+	if w.spec.RepliesEvery > 0 && k%w.spec.RepliesEvery == 0 {
+		cm.Replies = 1 + k%3
+	}
+	return cm
+}
+
 // Profiles returns every profile.
 func (w *World) Profiles() []*Profile { return w.profiles }
 
 // Profile returns the profile with username, or nil.
 func (w *World) Profile(username string) *Profile { return w.byName[username] }
+
+// Post returns the post with pk, or nil.
+func (w *World) Post(pk int64) *Post {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.posts[pk]
+}
 
 // IDEpochMs is the epoch of Instagram's ids: a media pk holds the
 // milliseconds since it in its bits above the 23rd (checked against the

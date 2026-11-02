@@ -77,7 +77,8 @@ func (s *Suppression) Load(ctx context.Context) error {
 		switch typ {
 		case "author":
 			authors[k] = true
-		case "page":
+		case "page", "profile":
+			// fbs's pages and igs's profiles: accounts, keyed by their id.
 			if id, err := strconv.ParseInt(k, 10, 64); err == nil {
 				pages[id] = true
 			}

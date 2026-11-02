@@ -77,6 +77,9 @@ message ProfileScope {
   bool refresh_profile = 9;
   // The highlights list as last stored, to read items only when it changed.
   bytes highlights_hash = 10;
+  // The user object's id (17841...), which the grid's later pages and the
+  // reels tab take; learned from the profile query.
+  string user_id = 11;
 }
 
 message PostScope {
@@ -91,6 +94,8 @@ message PostScope {
   int64 comments_seen = 8;
   // The post's detail is already stored: only comments are read.
   bool detail_known = 9;
+  // Pinned to the grid (shown first though older).
+  bool pinned = 10;
 }
 
 message MediaScope {
