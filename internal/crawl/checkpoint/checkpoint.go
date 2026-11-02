@@ -29,6 +29,8 @@ type State struct {
 	// Counters of the pages this segment already read, so a retried or
 	// redelivered segment that resumes at Cursor reports them too.
 	Counters map[string]int64 `json:"counters,omitempty"`
+	// Extra is a stage's own resume state (igs: the phase, the user's id).
+	Extra map[string]string `json:"extra,omitempty"`
 }
 
 // Resume adds the saved counters to c.
