@@ -1,0 +1,63 @@
+# Staging values: the whole chart against fakeig (a synthetic logged-out
+# Instagram) and small single-instance infrastructure, to rehearse an
+# install end to end.
+#
+#   helm install igs deploy/helm/igs -f deploy/helm/igs/examples/fakeig.yaml
+#
+# Expects, in the release namespace: Services postgres:5432, redpanda:9092,
+# valkey:6379, s3:9000 (any S3; the image's /usr/local/bin/devs3 is an
+# in-memory one) and fakeig:8091 (the image's /usr/local/bin/fakeig), and a
+# Secret igs-env with IGS_POSTGRES__DSN, IGS_S3__ACCESS_KEY,
+# IGS_S3__SECRET_KEY and IGS_IG__PRIVACY__AUTHOR_HMAC_KEY.
+# scripts/chart-smoke.py --chart igs runs exactly these values in Docker.
+config:
+  service: {name: igs, env: staging}
+  kafka:
+    brokers: ["redpanda:9092"]
+  redis:
+    addr: "valkey:6379"
+  s3:
+    endpoint: "s3:9000"
+    use_ssl: false
+    region: "us-east-1"
+    media_bucket: "igs-media"
+    raw_bucket: "igs-raw"
+  media:
+    required_consumers: ["analysis"]
+  ig:
+    base_url: "http://fakeig:8091"
+    identity_rps: 20
+    profile_rps: 20
+    profile_rps_p0: 20
+    global_rps: 200
+    proxy:
+      tiers: [{name: direct, kind: direct}]
+      routing: {default: [direct]}
+    limits:
+      include_media: true
+    registry_sync:
+      canary_pages: [profile_01, profile_02, profile_03]
+
+# No proxies file: the direct tier above reaches fakeig.
+secretFiles:
+  existingSecret: ""
+
+# No KEDA in a rehearsal cluster: fixed replicas.
+keda:
+  enabled: false
+
+hooks:
+  topicReplicas: 1
+  # One small broker: production's partition counts exceed what it holds.
+  topicPartitionsCap: 3
+
+components:
+  api: {replicas: 1, pdb: null, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}}
+  scheduler: {replicas: 1, pdb: null, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 256Mi}}}
+  crawler-profile: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
+  crawler-post: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
+  crawler-retry: {replicas: 1}
+  persister: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
+  media-downloader: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
+  media-janitor: {replicas: 1}
+  registry-sync: {replicas: 1}

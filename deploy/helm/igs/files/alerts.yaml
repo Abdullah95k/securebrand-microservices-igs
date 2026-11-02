@@ -1,0 +1,327 @@
+# Prometheus rules for igs. The chart ships them as a PrometheusRule
+# (alerts.enabled); they are plain Prometheus rule groups and can be loaded
+# as a rule file as well. Thresholds are starting points: tune them against
+# the Phase 0 baseline (C3). internal/platform/metrics/monitoring_test.go
+# checks every metric referenced here exists and that igs emits it, and that
+# every runbook anchor is a heading of docs/runbooks/igs-operations.md.
+#
+# Gauges the leader scheduler publishes (AIMD, schedule lag, consumer lag)
+# are read through igs:leader:* so a former leader's last values do not
+# count. Recording rules are named igs:ig_* so a Prometheus that also loads
+# the copied fbs rules (igs:*) keeps both.
+groups:
+  - name: igs.ig.recording
+    interval: 30s
+    rules:
+      - record: igs:ig_requests_by_class:rate5m
+        expr: sum by (query, class, tier) (rate(igs_ig_requests_total[5m]))
+      - record: igs:ig_block_ratio:rate5m
+        expr: |
+          sum(rate(igs_ig_requests_total{class=~"rate_limited|login_wall|checkpoint"}[5m]))
+            / clamp_min(sum(rate(igs_ig_requests_total{class!="transport"}[5m])), 1e-9)
+      - record: igs:ig_parse_drift_ratio:rate15m
+        expr: |
+          sum by (query) (rate(igs_parse_total{outcome="drift"}[15m]))
+            / clamp_min(sum by (query) (rate(igs_parse_total[15m])), 1e-9)
+      # How often each optional field is missing, per parsed response. The
+      # drift alert compares it with the same series a week earlier.
+      - record: igs:ig_parse_missing_per_response:rate1h
+        expr: |
+          sum by (query, field) (rate(igs_parse_missing_field_total[1h]))
+            / on (query) group_left () clamp_min(sum by (query) (rate(igs_parse_total[1h])), 1e-9)
+      - record: igs:ig_registry_stale_ratio:rate10m
+        expr: |
+          sum by (query) (rate(igs_ig_requests_total{class="registry_stale", query!~"registry_sync:.*"}[10m]))
+            / clamp_min(sum by (query) (rate(igs_ig_requests_total{query!~"registry_sync:.*"}[10m])), 1e-9)
+      - record: igs:ig_leader:aimd_ceiling_rps
+        expr: max(igs_aimd_ceiling_rps * on (instance) (igs_scheduler_leader == 1))
+      - record: igs:ig_leader:fleet_rps
+        expr: max(igs_fleet_rps * on (instance) (igs_scheduler_leader == 1))
+      - record: igs:ig_leader:fleet_block_rate
+        expr: max(igs_fleet_block_rate * on (instance) (igs_scheduler_leader == 1))
+      - record: igs:ig_leader:schedule_lag_seconds
+        expr: max(igs_schedule_lag_seconds{tier="ig"} * on (instance) group_left () (igs_scheduler_leader == 1))
+      - record: igs:ig_leader:kafka_consumer_lag
+        expr: max by (group, topic) (igs_kafka_consumer_lag{group=~"igs-ig-.*"} * on (instance) group_left () (igs_scheduler_leader == 1))
+
+  - name: igs.ig.instagram
+    rules:
+      - alert: IgsIgBlockRateHigh
+        expr: igs:ig_block_ratio:rate5m > 0.10
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of Instagram responses are blocks"
+          description: >-
+            Rate limits, login walls and checkpoints are above 10% fleet-wide.
+            AIMD should be lowering the ceiling, identities retire early and
+            walled exits rest (ig.page_wall_rest); check which ISP buckets
+            are affected.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#block-storm-block-rate--10
+      - alert: IgsIgBlockRateCritical
+        expr: igs:ig_block_ratio:rate5m > 0.25
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of Instagram responses are blocks"
+          description: >-
+            A quarter of responses are blocks even with AIMD backing off.
+            Pin the ceiling low and check the ISP pool's health with the
+            provider.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#block-storm-block-rate--10
+      - alert: IgsIgCrawlersIdleWithBacklog
+        # Tasks, not requests: igs-registry-sync's own requests every 30m
+        # would otherwise keep resetting the for timer.
+        expr: |
+          sum(rate(igs_tasks_total{stage=~"profile|post"}[10m])) == 0
+            and sum(igs:ig_leader:kafka_consumer_lag{group=~"igs-ig-crawler-.*"}) > 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: igs crawlers finish no task while tasks are waiting
+          description: >-
+            No profile or post task handled in 10 minutes with tasks queued.
+            Check the crawler pods, the AIMD ceiling (a pinned 0?) and the
+            proxy breakers.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
+      - alert: IgsIgQueryBreakerOpen
+        expr: max by (name) (igs_breaker_state{name=~"query:.*"}) == 2
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Breaker {{ $labels.name }} is open"
+          description: >-
+            The responses of this (query, doc_id) keep being rejected or
+            failing to parse, so it is not being sent. Expect
+            igs-registry-sync to promote a replacement, or a parser fix.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#registry-stale-doc_id-rotated
+      - alert: IgsIgProxyBucketOpen
+        expr: max by (name) (igs_breaker_state{name=~"proxy:.*"}) == 2
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Exit bucket {{ $labels.name }} has been open for 30 minutes"
+          description: >-
+            The bucket keeps failing its probes after cooldowns. Check the
+            ISP provider; remove the endpoints from the proxies Secret.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#block-storm-block-rate--10
+      - alert: IgsIgIdentitiesRetiringFast
+        # Identities retire after 500 to 750 requests by design; retiring on
+        # blocks instead means the pool is burning out.
+        expr: |
+          sum(rate(igs_identity_retired_total{reason=~"checkpoint|login_wall|blocked|breaker"}[30m]))
+            / clamp_min(sum(rate(igs_identity_retired_total[30m])), 1e-9) > 0.5
+          and sum(increase(igs_identity_retired_total[30m])) > 20
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of identities retire on blocks rather than at their request budget"
+          description: Exits meet Instagram's limits before their budget runs out. Lower ig.identity_rps or add ISP exits.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#block-storm-block-rate--10
+      - alert: IgsIgBrowserFallbackSaturated
+        expr: sum(rate(igs_bootstrap_total{method="browser", outcome=~"capped|busy"}[15m])) > 0.05
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: Pages that need the browser fallback are turned away
+          description: >-
+            More page loads carry no tokens than ig.browser.max_share or
+            max_concurrent allow; those bootstraps fail and their tasks retry.
+            Instagram may now require JavaScript on more pages.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#browser-fallback
+      - alert: IgsIgBrowserFallbackFailing
+        expr: |
+          sum(rate(igs_bootstrap_total{method="browser", outcome=~"error|no_tokens"}[30m]))
+            / clamp_min(sum(rate(igs_bootstrap_total{method="browser", outcome=~"ok|error|no_tokens"}[30m])), 1e-9) > 0.5
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of browser bootstraps fail"
+          description: Chromium fails to start or render, or the rendered pages carry no tokens either.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#browser-fallback
+
+  - name: igs.ig.registry
+    rules:
+      - alert: IgsIgRegistryStale
+        expr: igs:ig_registry_stale_ratio:rate10m > 0.2
+        for: 45m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.query }}: {{ $value | humanizePercentage }} of requests use a rejected doc_id"
+          description: >-
+            Instagram rejects the active doc_id and igs-registry-sync has not
+            promoted a replacement within a run or two.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#registry-stale-doc_id-rotated
+      - alert: IgsIgRegistryQueryFailing
+        expr: min by (query) (igs_registry_query_healthy) == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.query }}: the active doc_id fails on the canary profiles and nothing can replace it"
+          description: >-
+            Stale with no working candidate (Instagram may have renamed the
+            operation: see not_found in the run report), or drift (the parser
+            needs a fix). GET /v1/admin/registry-sync/runs has the details.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#registry-stale-doc_id-rotated
+      - alert: IgsIgRegistrySyncNotRunning
+        # Every binary exports the gauge (0 outside igs-registry-sync); the
+        # runs counter exists only where syncs run.
+        expr: |
+          time() - max(igs_registry_sync_last_success_timestamp_seconds) > 3 * 3600
+            and on () count(igs_registry_sync_runs_total) > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: No igs-registry-sync run in 3 hours checked every query
+          description: >-
+            Rotations will not be followed. Usually no canary profile loads
+            (a private or deleted profile, a walled exit), the probes are
+            blocked (every check inconclusive), the canaries lack posts with
+            comments, or ig.registry_sync.canary_pages is empty.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#registry-stale-doc_id-rotated
+      - alert: IgsIgSchemaDrift
+        expr: igs:ig_parse_drift_ratio:rate15m > 0.05
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.query }}: {{ $value | humanizePercentage }} of responses miss required fields"
+          description: >-
+            Instagram changed the response shape. Raw failing responses are in
+            the raw bucket under raw-failures/<query>/.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#schema-drift
+      - alert: IgsIgOptionalFieldDrift
+        # Instagram renamed or dropped a field the parser treats as
+        # optional: nothing fails, but the data loses it silently.
+        expr: |
+          (
+            igs:ig_parse_missing_per_response:rate1h > 2 * (igs:ig_parse_missing_per_response:rate1h offset 7d) + 0.05
+            or (igs:ig_parse_missing_per_response:rate1h > 0.25
+                  unless on (query, field) sum by (query, field) (rate(igs_parse_missing_field_total[1h] offset 7d)))
+          )
+          and on (query) sum by (query) (rate(igs_parse_total[1h])) > 0.05
+        for: 2h
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.query }}: optional field {{ $labels.field }} missing in {{ $value | humanizePercentage }} of responses"
+          description: >-
+            Compared with a week ago. Look at captured responses
+            (ig.capture_raw: all, or the fixtures) and add the field's new
+            path to the parser.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#schema-drift
+
+  - name: igs.ig.pipeline
+    rules:
+      - alert: IgsIgSchedulerNoLeader
+        expr: (max(igs_scheduler_leader) < 1) or absent(igs_scheduler_leader)
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: No igs-scheduler holds the leader lock
+          description: >-
+            Nothing plans the 3-hourly runs, finalizes jobs, refreshes recent
+            posts or runs AIMD. Check the scheduler pods and their Postgres
+            connection.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#stuck-jobs
+      - alert: IgsIgOnDemandLag
+        expr: max by (group, topic) (igs:ig_leader:kafka_consumer_lag{group=~"igs-ig-crawler-.*-p0"}) > 500
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.group }} is {{ $value }} on-demand tasks behind"
+          description: >-
+            On-demand work waits. KEDA should be scaling the stage; check its
+            max replicas, the lane slots and the AIMD ceiling.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
+      - alert: IgsIgPersisterLag
+        expr: max by (topic) (igs:ig_leader:kafka_consumer_lag{group="igs-ig-persister"}) > 50000
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "The igs persister is {{ $value }} records behind on {{ $labels.topic }}"
+          description: Results reach Postgres late. Check igs_persist_batch_seconds and the database.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
+      - alert: IgsIgPersisterQuarantine
+        expr: sum by (topic, reason) (increase(igs_persist_quarantined_total{topic=~"ig\\..*"}[15m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "The igs persister quarantined {{ $value }} {{ $labels.topic }} records ({{ $labels.reason }})"
+          description: >-
+            Records that did not decode or that Postgres rejected went to
+            igs.persist.dlq instead of stalling the persister. Their data is
+            missing from Postgres until they are fixed and replayed
+            (igsctl dlq replay --persist).
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#persister-quarantine
+      - alert: IgsIgDLQGrowing
+        expr: sum by (stage, reason) (increase(igs_dlq_total{stage=~"profile|post|media"}[1h])) > 100
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} {{ $labels.stage }} tasks dead-lettered in an hour ({{ $labels.reason }})"
+          description: Fix the cause, then replay with igsctl dlq replay --reason <reason>.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#stuck-jobs
+      - alert: IgsIgJobsFailing
+        expr: |
+          sum(rate(igs_jobs_total{status="failed"}[30m]))
+            / clamp_min(sum(rate(igs_jobs_total[30m])), 1e-9) > 0.10
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of jobs fail"
+          description: Look at the failed jobs' error and the request classes of their queries.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#stuck-jobs
+      - alert: IgsIgJobsPartial
+        expr: |
+          sum(rate(igs_jobs_total{status="partial"}[1h]))
+            / clamp_min(sum(rate(igs_jobs_total[1h])), 1e-9) > 0.25
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of jobs end partial"
+          description: >-
+            Posts failed or grids ended early (login walls mid-grid, U1's
+            depth limit). The jobs' completeness says which.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#partial-jobs
+      - alert: IgsIgAPIErrors
+        expr: |
+          sum(rate(igs_api_requests_total{code=~"5.."}[5m]))
+            / clamp_min(sum(rate(igs_api_requests_total[5m])), 1e-9) > 0.05
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of API requests fail with 5xx"
+          description: Check the igs-api logs and the read replica.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#key-signals
+
+  - name: igs.ig.coverage
+    rules:
+      - alert: IgsIgScheduleLag
+        # One full interval (ig.schedule.interval, 3h) overdue.
+        expr: igs:ig_leader:schedule_lag_seconds > 3 * 3600
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Scheduled profiles are {{ $value | humanizeDuration }} overdue"
+          description: >-
+            The crawl capacity does not keep up with the 3-hourly schedule.
+            Add crawler capacity or ISP exits, or lengthen
+            ig.schedule.interval.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#schedule
+      - alert: IgsIgMediaDownloadsFailing
+        expr: |
+          sum(rate(igs_media_download_total{outcome="failed"}[1h]))
+            / clamp_min(sum(rate(igs_media_download_total{outcome=~"ready|failed"}[1h])), 1e-9) > 0.10
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of media downloads fail"
+          description: CDN URLs expire within hours; a backlog in igs.task.media makes them fail. Check the downloader's lag and the CDN responses.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#media-backlog--ttl-expiries
+      - alert: IgsIgMediaTTLExpiries
+        expr: sum(increase(igs_media_deleted_total{reason="ttl_expired"}[1h])) > 0
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: Media is deleted at its TTL before the analysis service acknowledged it
+          description: The analysis service is not keeping up with ig.media.ready.v1, or its acks do not arrive.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#media-backlog--ttl-expiries

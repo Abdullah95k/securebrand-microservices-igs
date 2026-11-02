@@ -12,10 +12,55 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The alert rules and dashboards shipped with the chart must only use
+// The alert rules and dashboards shipped with the charts must only use
 // metrics that exist: a renamed metric otherwise silently disables an alert.
 
-const chartFiles = "../../../deploy/helm/fbs/files"
+// chart is one Helm chart's monitoring files and the runbook its alerts
+// link to.
+type chart struct {
+	name    string
+	files   string
+	runbook string
+	// recordPrefix names the chart's recording rules, so a Prometheus that
+	// loads both charts' rules keeps both sets.
+	recordPrefix string
+	// absent are registered metrics the chart's service never emits:
+	// fbs's comment deletion checks, completeness histogram, page tiers,
+	// post refreshes and daily budget have no igs counterpart, so an igs
+	// rule on them would never fire.
+	absent []string
+}
+
+var charts = []chart{
+	{name: "fbs", files: "../../../deploy/helm/fbs/files", runbook: "../../../docs/runbooks/operations.md", recordPrefix: "igs:"},
+	{name: "igs", files: "../../../deploy/helm/igs/files", runbook: "../../../docs/runbooks/igs-operations.md", recordPrefix: "igs:ig_",
+		absent: []string{"igs_deletion_checks_total", "igs_comment_completeness_ratio", "igs_scheduled_pages", "igs_post_refreshes_total",
+			"igs_comment_changes_total", "igs_timeline_truncated_total", "igs_budget_used", "igs_budget_projected", "igs_budget_limit",
+			"igs_budget_backfill_paused", "igs_budget_stretch"}},
+}
+
+// forCharts runs f once per chart, as a subtest.
+func forCharts(t *testing.T, f func(t *testing.T, c chart)) {
+	for _, c := range charts {
+		t.Run(c.name, func(t *testing.T) { f(t, c) })
+	}
+}
+
+// metricsOf returns the metrics c may use: those registered, less the ones
+// its service never emits.
+func metricsOf(t *testing.T, c chart) map[string]bool {
+	t.Helper()
+	ms := known(t)
+	for _, a := range c.absent {
+		for _, suffix := range []string{"", "_bucket", "_sum", "_count"} {
+			if !ms[a+suffix] && suffix == "" {
+				t.Errorf("%s: absent metric %s is not registered at all; drop it from the list", c.name, a)
+			}
+			delete(ms, a+suffix)
+		}
+	}
+	return ms
+}
 
 var (
 	fqName    = regexp.MustCompile(`fqName: "([^"]+)"`)
@@ -83,9 +128,9 @@ type ruleFile struct {
 	} `yaml:"groups"`
 }
 
-func loadRules(t *testing.T) ruleFile {
+func loadRules(t *testing.T, c chart) ruleFile {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(chartFiles, "alerts.yaml"))
+	b, err := os.ReadFile(filepath.Join(c.files, "alerts.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,17 +177,19 @@ func checkExpr(t *testing.T, where, expr string, metrics, recs map[string]bool) 
 	}
 }
 
-func TestAlertRules(t *testing.T) {
-	ms := known(t)
-	rf := loadRules(t)
+func TestAlertRules(t *testing.T) { forCharts(t, testAlertRules) }
+
+func testAlertRules(t *testing.T, c chart) {
+	ms := metricsOf(t, c)
+	rf := loadRules(t, c)
 	recs := records(rf)
 	alerts := map[string]bool{}
 	for _, g := range rf.Groups {
 		for _, r := range g.Rules {
 			switch {
 			case r.Record != "":
-				if !strings.HasPrefix(r.Record, "igs:") {
-					t.Errorf("recording rule %s must be named igs:...", r.Record)
+				if !strings.HasPrefix(r.Record, c.recordPrefix) {
+					t.Errorf("recording rule %s must be named %s...", r.Record, c.recordPrefix)
 				}
 				checkExpr(t, r.Record, r.Expr, ms, recs)
 			case r.Alert != "":
@@ -178,8 +225,10 @@ func TestAlertRules(t *testing.T) {
 }
 
 // Runbook anchors the alerts link to must exist (GitHub heading slugs).
-func TestAlertRunbookAnchors(t *testing.T) {
-	b, err := os.ReadFile("../../../docs/runbooks/operations.md")
+func TestAlertRunbookAnchors(t *testing.T) { forCharts(t, testAlertRunbookAnchors) }
+
+func testAlertRunbookAnchors(t *testing.T, c chart) {
+	b, err := os.ReadFile(c.runbook)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,9 +239,13 @@ func TestAlertRunbookAnchors(t *testing.T) {
 			slugs[strings.ReplaceAll(drop.ReplaceAllString(strings.ToLower(h), ""), " ", "-")] = true
 		}
 	}
-	for _, g := range loadRules(t).Groups {
+	page := "docs/runbooks/" + filepath.Base(c.runbook)
+	for _, g := range loadRules(t, c).Groups {
 		for _, r := range g.Rules {
 			u := r.Annotations["runbook_url"]
+			if r.Alert != "" && !strings.Contains(u, page) {
+				t.Errorf("%s: runbook_url %s is not %s", r.Alert, u, page)
+			}
 			if i := strings.IndexByte(u, '#'); i >= 0 && !slugs[u[i+1:]] {
 				t.Errorf("%s: no runbook heading for #%s", r.Alert, u[i+1:])
 			}
@@ -213,10 +266,38 @@ type panel struct {
 	Panels []panel `json:"panels"`
 }
 
-func TestDashboards(t *testing.T) {
-	ms := known(t)
-	recs := records(loadRules(t))
-	files, _ := filepath.Glob(filepath.Join(chartFiles, "dashboards", "*.json"))
+func TestDashboards(t *testing.T) { forCharts(t, testDashboards) }
+
+// Dashboard uids must differ across the charts: Grafana keeps one
+// dashboard per uid, so two charts on one Grafana would overwrite each
+// other's.
+func TestDashboardUIDsDiffer(t *testing.T) {
+	seen := map[string]string{}
+	for _, c := range charts {
+		files, _ := filepath.Glob(filepath.Join(c.files, "dashboards", "*.json"))
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var d struct {
+				UID string `json:"uid"`
+			}
+			if err := json.Unmarshal(b, &d); err != nil {
+				t.Fatal(err)
+			}
+			if prev, ok := seen[d.UID]; ok {
+				t.Errorf("dashboard uid %q in both %s and %s", d.UID, prev, f)
+			}
+			seen[d.UID] = f
+		}
+	}
+}
+
+func testDashboards(t *testing.T, c chart) {
+	ms := metricsOf(t, c)
+	recs := records(loadRules(t, c))
+	files, _ := filepath.Glob(filepath.Join(c.files, "dashboards", "*.json"))
 	if len(files) == 0 {
 		t.Fatal("no dashboards")
 	}

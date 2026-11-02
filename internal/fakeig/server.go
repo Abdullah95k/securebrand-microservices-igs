@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // AppID is the app id the fake expects in x-ig-app-id.
@@ -674,7 +675,7 @@ func mediaJSON(post *Post, detail bool, cdn string) map[string]any {
 			m["clips_metadata"] = map[string]any{"music_info": nil, "original_sound_info": map[string]any{"audio_asset_id": "1",
 				"original_audio_title": "Original audio", "ig_artist": map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}}
 			m["video_dash_manifest"] = fmt.Sprintf(`<?xml version="1.0"?><MPD mediaPresentationDuration="PT%gS"></MPD>`, post.DurationS)
-			m["video_versions"] = []any{map[string]any{"type": 101, "url": cdn + "/o1/v/t16/" + cdnFile(post.Code) + "_n.mp4?oe=6900AA00"}}
+			m["video_versions"] = []any{map[string]any{"type": 101, "url": cdn + "/o1/v/t16/" + cdnFile(post.Code) + "_n.mp4?oe=" + cdnExpiry()}}
 		}
 		if post.MediaType == 8 {
 			children := []any{}
@@ -708,11 +709,18 @@ func cdnFile(code string) string {
 	return strconv.FormatUint(h.Sum64()%1_000_000_000_000_000, 10)
 }
 
+// cdnExpiry is a CDN URL's oe parameter: its expiry, in hex Unix seconds,
+// three days after it is served, as Instagram signs its URLs for hours to
+// days. (A fixed past value made every download in a standalone run
+// "expired".)
+func cdnExpiry() string { return strconv.FormatInt(time.Now().Add(72*time.Hour).Unix(), 16) }
+
 func candidates(cdn, code string) map[string]any {
 	base := cdn + "/v/t51.29350-15/" + cdnFile(code)
+	oe := cdnExpiry()
 	return map[string]any{"candidates": []any{
-		map[string]any{"url": base + "_n.jpg?stp=dst-jpg_e35&oe=6900AA00&oh=00_fake", "width": 1080, "height": 1350},
-		map[string]any{"url": base + "_s150.jpg?stp=c0.135.1080.1080a_s150x150&oe=6900AA00&oh=00_fake", "width": 150, "height": 150},
+		map[string]any{"url": base + "_n.jpg?stp=dst-jpg_e35&oe=" + oe + "&oh=00_fake", "width": 1080, "height": 1350},
+		map[string]any{"url": base + "_s150.jpg?stp=c0.135.1080.1080a_s150x150&oe=" + oe + "&oh=00_fake", "width": 150, "height": 150},
 	}}
 }
 
