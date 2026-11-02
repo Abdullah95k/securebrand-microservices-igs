@@ -27,6 +27,8 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	igclient "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/client"
 	igdetect "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/fixtures"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/probe"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
@@ -43,6 +45,8 @@ func main() {
 	switch os.Args[1] {
 	case "probe":
 		os.Exit(runProbe(os.Args[2:]))
+	case "fixtures":
+		os.Exit(runFixtures(os.Args[2:]))
 	case "version", "--version":
 		fmt.Println(version)
 	default:
@@ -53,12 +57,19 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: igs-spike probe --profiles FILE [--config FILE] [--tier NAME] [--out-dir DIR]
        igs-spike probe --dry-run
+       igs-spike fixtures --out testdata/ig --salt S FILE[=CASE]...
 
 probe loads each profile's page and reads it with the logged-out queries,
 pacing like a person (one request every few seconds). It writes report.json,
 profiles.csv, posts.csv, comments.csv and images/ to --out-dir, and the
 same as a .tar.gz beside it. The files hold personal data: keep them off git.
 --dry-run rehearses against a built-in fake Instagram, with no traffic.
+
+fixtures turns raw responses (the probe's raw/ files, or a HAR's bodies)
+into parser fixtures with no personal data: usernames, names, people's ids
+and text are pseudonymised or blanked, and a file is written only when none
+of its personal values survive. Pass the same --salt for files that belong
+together.
 `)
 	os.Exit(2)
 }
@@ -284,4 +295,48 @@ func restOrNever(d time.Duration) time.Duration {
 		return -1
 	}
 	return d
+}
+
+func runFixtures(args []string) int {
+	fs := flag.NewFlagSet("igs-spike fixtures", flag.ExitOnError)
+	out := fs.String("out", "testdata/ig", "fixture root (testdata/ig/<query>/<case>/)")
+	salt := fs.String("salt", "", "pseudonym salt; keep it private (required)")
+	_ = fs.Parse(args)
+	if *salt == "" || fs.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "fixtures: --salt and at least one FILE[=CASE] are required")
+		return 2
+	}
+	s := fixtures.New(*salt)
+	for _, arg := range fs.Args() {
+		file, name, _ := strings.Cut(arg, "=")
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fixtures:", err)
+			return 1
+		}
+		q := fixtures.QueryOf(file)
+		if name == "" {
+			name = strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+		}
+		c := fixtures.Case{Query: q, Name: name, Raw: raw, HTML: strings.HasSuffix(file, ".html")}
+		if c.HTML {
+			c.Wanted = []string{"xig_polaris_media", "polaris_clips_connection", "xig_user_by_username"}
+		}
+		if q == "post_page" {
+			// The page's own post: the first media object with a time.
+			res, _ := parse.PostPage(raw, "", "https://www.instagram.com")
+			if res.Post == nil {
+				fmt.Fprintf(os.Stderr, "fixtures: %s: no post in the page\n", file)
+				return 1
+			}
+			c.Meta = map[string]any{"shortcode": res.Post.Shortcode}
+		}
+		dir, err := s.Write(*out, c)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Println("wrote", dir)
+	}
+	return 0
 }

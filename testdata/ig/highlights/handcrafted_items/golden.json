@@ -1,0 +1,104 @@
+{
+  "highlights": [
+    {
+      "highlight_id": "17900000000000001",
+      "item_count": 2,
+      "items": [
+        {
+          "item_pk": "3400000000000000001",
+          "media_ids": [
+            "8565e604-65cc-52b3-8f66-d06af8be9a97",
+            "24255be9-ea0a-5620-816b-a77b3cc82f1a"
+          ],
+          "media_type": 1,
+          "taken_at": "2024-10-15T13:46:40Z"
+        },
+        {
+          "item_pk": "3400000000000000002",
+          "media_ids": [
+            "36361dcf-a534-5f2d-a17a-9c2b584583cb",
+            "c058eb32-571e-54ff-90fc-2a9a8cdcad21",
+            "57f49506-a64d-5bc8-898f-b8d7416d0002"
+          ],
+          "media_type": 2,
+          "taken_at": "2024-10-15T13:48:20Z"
+        }
+      ],
+      "title": "xxxxx",
+      "user_pk": "9"
+    }
+  ],
+  "media": [
+    {
+      "height": 1920,
+      "kind": "MEDIA_KIND_PHOTO",
+      "media_id": "8565e604-65cc-52b3-8f66-d06af8be9a97",
+      "media_pk": "3400000000000000001",
+      "owner_type": "highlight",
+      "source_expires_at": "2026-11-06T02:59:05Z",
+      "source_media_id": "3400000000000000001",
+      "source_url": "https://scontent.cdninstagram.com/v/a1.jpg?oe=6AED4279",
+      "user_pk": "9",
+      "variant": "original",
+      "width": 1080
+    },
+    {
+      "height": 568,
+      "kind": "MEDIA_KIND_THUMBNAIL",
+      "media_id": "24255be9-ea0a-5620-816b-a77b3cc82f1a",
+      "media_pk": "3400000000000000001",
+      "owner_type": "highlight",
+      "source_expires_at": "2026-11-06T02:59:05Z",
+      "source_media_id": "3400000000000000001",
+      "source_url": "https://scontent.cdninstagram.com/v/a2.jpg?oe=6AED4279",
+      "user_pk": "9",
+      "variant": "thumbnail",
+      "width": 320
+    },
+    {
+      "height": 1280,
+      "kind": "MEDIA_KIND_THUMBNAIL",
+      "media_id": "36361dcf-a534-5f2d-a17a-9c2b584583cb",
+      "media_pk": "3400000000000000002",
+      "owner_type": "highlight",
+      "source_expires_at": "2026-11-06T02:59:05Z",
+      "source_media_id": "3400000000000000002",
+      "source_url": "https://scontent.cdninstagram.com/v/b1.jpg?oe=6AED4279",
+      "user_pk": "9",
+      "variant": "thumbnail",
+      "width": 720
+    },
+    {
+      "duration_ms": "12500",
+      "height": 1280,
+      "kind": "MEDIA_KIND_VIDEO",
+      "media_id": "c058eb32-571e-54ff-90fc-2a9a8cdcad21",
+      "media_pk": "3400000000000000002",
+      "owner_type": "highlight",
+      "source_expires_at": "2026-11-06T02:59:05Z",
+      "source_media_id": "3400000000000000002",
+      "source_url": "https://scontent.cdninstagram.com/v/b1.mp4?oe=6AED4279",
+      "user_pk": "9",
+      "variant": "hd",
+      "width": 720
+    },
+    {
+      "duration_ms": "12500",
+      "height": 854,
+      "kind": "MEDIA_KIND_VIDEO",
+      "media_id": "57f49506-a64d-5bc8-898f-b8d7416d0002",
+      "media_pk": "3400000000000000002",
+      "owner_type": "highlight",
+      "source_expires_at": "2026-11-06T02:59:05Z",
+      "source_media_id": "3400000000000000002",
+      "source_url": "https://scontent.cdninstagram.com/v/b2.mp4?oe=6AED4279",
+      "user_pk": "9",
+      "variant": "sd",
+      "width": 480
+    }
+  ],
+  "report": {
+    "missing": [],
+    "optional": []
+  }
+}

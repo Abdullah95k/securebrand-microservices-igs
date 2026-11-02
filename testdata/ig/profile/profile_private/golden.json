@@ -1,0 +1,42 @@
+{
+  "has_clips": false,
+  "highlights": [],
+  "highlights_hash": false,
+  "media": [
+    {
+      "kind": "MEDIA_KIND_PROFILE_PIC",
+      "media_id": "50f46748-dac8-53fa-9e84-89eddfc24ab7",
+      "owner_type": "profile",
+      "source_expires_at": "2026-11-06T00:47:21Z",
+      "source_media_id": "profile:13869806184",
+      "source_url": "https://scontent.cdninstagram.com/v/d6ba5de745.jpg?oe=6AED2399",
+      "user_pk": "13869806184",
+      "variant": "original"
+    }
+  ],
+  "not_found": false,
+  "profile": {
+    "bio_links": [
+      {
+        "url": "https://example.com/link"
+      }
+    ],
+    "biography": "xxx xxx xxx xxxx\nxxxxxx xxxxxxxx xxxxxx xxx xxx xxxxxx",
+    "follower_count": "15112",
+    "following_count": "445",
+    "full_name": "Name b32934",
+    "highlight_count": 0,
+    "is_private": true,
+    "profile_pic": {
+      "url": "https://scontent.cdninstagram.com/v/d6ba5de745.jpg?oe=6AED2399"
+    },
+    "status": "PROFILE_STATUS_PRIVATE",
+    "user_pk": "13869806184",
+    "username": "user_9b4ce8d2"
+  },
+  "report": {
+    "missing": [],
+    "optional": []
+  },
+  "user_id": "17841452624053749"
+}
