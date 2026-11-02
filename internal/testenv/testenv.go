@@ -51,6 +51,24 @@ func Postgres(t testing.TB) *pgxpool.Pool {
 	return pool
 }
 
+// PostgresIG creates a fresh database for the test with fbs's copied schema
+// (public) and igs's (ig) migrated, and returns a pool pinned to schema ig,
+// as igs's binaries use it. Requires IGS_TEST_PG_DSN.
+func PostgresIG(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	pub := Postgres(t)
+	ctx := context.Background()
+	if err := store.MigrateIGUp(ctx, pub); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pg.OpenSchema(ctx, pub.Config().ConnString(), 10, store.IGSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
 func replaceDB(dsn, name string) string {
 	q := ""
 	if i := strings.IndexByte(dsn, '?'); i >= 0 {

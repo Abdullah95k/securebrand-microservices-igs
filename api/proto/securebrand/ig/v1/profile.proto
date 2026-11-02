@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+// Instagram's public contract (ADR 0005): what logged-out Instagram serves.
+// Fields Instagram may stop serving are optional; new data arrives as new
+// fields, never as a changed one.
+package securebrand.ig.v1;
+
+import "securebrand/common/v1/common.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1;igv1";
+
+enum ProfileStatus {
+  PROFILE_STATUS_UNSPECIFIED = 0;
+  PROFILE_STATUS_ACTIVE = 1;
+  // Private: the profile is read, its posts are not served logged out.
+  PROFILE_STATUS_PRIVATE = 2;
+  // Gone, renamed away, or refused (the profile query answered no user).
+  PROFILE_STATUS_UNAVAILABLE = 3;
+  // Erased; never re-collected.
+  PROFILE_STATUS_SUPPRESSED = 4;
+}
+
+message BioLink {
+  string url = 1;
+  string title = 2;
+}
+
+// Profile is published on ig.profile.v1, keyed by user_pk. Usernames
+// change; user_pk never does.
+message Profile {
+  securebrand.common.v1.Observation obs = 1;
+  int64 user_pk = 2;
+  string username = 3;
+  string full_name = 4;
+  string biography = 5;
+  repeated BioLink bio_links = 6;
+  bool is_verified = 7;
+  bool is_private = 8;
+  optional int64 follower_count = 9;
+  optional int64 following_count = 10;
+  optional int64 media_count = 11;
+  securebrand.common.v1.ImageRef profile_pic = 12;
+  // The linked Facebook page, as the profile shows it.
+  string linked_facebook_page = 13;
+  string category = 14;
+  bool is_business = 15;
+  // HMAC of the user pk (ADR 0005 §1): relates the profile to its owner's
+  // comments elsewhere without names.
+  bytes author_key = 16;
+  ProfileStatus status = 17;
+  // The reference the crawl was asked for (u:<username>, id:<pk>).
+  string requested_ref = 18;
+  optional int32 highlight_count = 19;
+  string pronouns = 20;
+}

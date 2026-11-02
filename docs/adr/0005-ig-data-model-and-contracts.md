@@ -5,7 +5,7 @@ Status: proposed (M0; accepted when the owner merges it)
 ## Context
 igs collects what logged-out Instagram serves: profiles, feed posts,
 carousels, reels, post metrics, top-level comments, media metadata and
-highlights (build brief D1). Replies, current stories, view and play counts,
+highlights (build brief D1). Replies, current stories, share counts,
 and follower and liker lists need login and are out of scope, but the schema
 must leave room for replies and tagged posts. Profiles and commenters are both
 personal data (D8). The analysis service comes later (D10), so igs publishes
@@ -22,8 +22,10 @@ What the data looks like comes from the owner's recordings
 * Grid items carry only `pk`, `code`, type, caption and a thumbnail.
   `taken_at`, like and comment counts, renditions, carousel children,
   usertags, location, collab co-authors and music come from the post page.
-* `like_count` can be hidden (`like_and_view_counts_disabled`). No view or
-  play count is served.
+* `like_count` can be hidden (`like_and_view_counts_disabled`). Post pages
+  serve no view or play count; the profile's reels tab does, for each reel
+  (`play_count`, owner's recording of 2026-11-01, HAR findings §8), so
+  `Post.play_count` and `post_metrics.play_count` exist.
 * Comments are top level only (`parent_comment_id` always null,
   `child_comment_count` null), 10 per page, newest first. A read that ends
   with `has_next_page: false` has every top-level comment; `comment_count`
@@ -77,11 +79,11 @@ without names (D8).
   `attempt`, `stalls`, …), since igs's worker is a copy of fbs's (ADR 0004).
   What is Instagram's own is disjoint from fbs's: kind values start at 100
   (`PROFILE`, `POST`, `MEDIA`; `REPLIES` reserved) and scope fields at
-  number 20. A task that lands on the other service's topic then decodes with
+  number 30. A task that lands on the other service's topic then decodes with
   an unknown kind and no scope, and is dead-lettered instead of running as
-  the wrong task. `PostScope` carries `items_seen` across continuations,
-  which fixes fbs's per-segment `max_comments_per_post` for igs from the
-  start.
+  the wrong task (`TestTasksAreDisjoint`). Both envelopes carry `items_seen`
+  (field 20) across continuations, which fixes the per-segment
+  `max_comments_per_post` (M2a for fbs's copy; igs from the start).
 
 ### 3. Topics
 Public contract (keys keep a post's records in order):
@@ -98,7 +100,8 @@ Public contract (keys keep a post's records in order):
 | `ig.job.v1` | job id | `securebrand.common.v1.JobEvent` |
 | `ig.erasure.v1` | erasure request id | `securebrand.common.v1.ErasureEvent` |
 
-Internal: `igs.task.profile.{p0,p1,p2}`, `igs.task.post.{p0,p1,p2}`,
+Topics are created from `configs/ig/topics.yaml` and named in
+`internal/ig/topics`. Internal: `igs.task.profile.{p0,p1,p2}`, `igs.task.post.{p0,p1,p2}`,
 `igs.task.media`, `igs.task.retry.{30s,5m}`, `igs.task.dlq`, and the
 persister's quarantine topic `igs.persist.dlq` (brief §5 item 2). The wire
 format is fbs's: plain protobuf, the full message name in a
@@ -109,9 +112,13 @@ type header (`igs-type`), `content-type: application/x-protobuf`, subjects
 record has `taken_at`. A grid item alone produces no record.
 
 ### 4. Postgres: schema `ig`
-All igs tables live in a Postgres schema named `ig`. igs's connection pool
-pins `search_path` to `ig` in code, and goose keeps its version table there
-(`ig.goose_db_version`), so the two services migrate independently. This
+All igs tables live in a Postgres schema named `ig` (`migrations/ig`).
+igs's connection pool pins `search_path` to `ig` in code
+(`pg.OpenSchema`, which also refuses to start when the schema is missing),
+and goose keeps its version table there (`ig.goose_db_version`,
+`store.MigrateIGUp`), so the two services migrate independently. The
+partition helpers take a layout per schema (`store.IGLayout`) and look up
+partitions in the pool's current schema only. This
 works whether igs gets its own database or shares fbs's, which D6 leaves open.
 igs uses its own database (`igs`) on fbs's Postgres server in testing and
 staging, so nothing in fbs can see igs's tables (see Consequences).

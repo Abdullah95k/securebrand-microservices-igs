@@ -1,0 +1,30 @@
+# igs's topics (ADR 0005 §3), applied like configs/topics.yaml. Names get
+# kafka.topic_prefix prepended. Partition counts are sized for 300k profiles
+# every 3 hours; local dev can cap them (--partitions-cap 3).
+replicas: 3
+topics:
+  # Internal work queues (securebrand.igs.task.v1.Task envelopes).
+  - {name: igs.task.profile.p0, partitions: 24, retention: 72h}
+  - {name: igs.task.profile.p1, partitions: 48, retention: 72h}
+  - {name: igs.task.profile.p2, partitions: 24, retention: 72h}
+  - {name: igs.task.post.p0,    partitions: 48, retention: 72h}
+  - {name: igs.task.post.p1,    partitions: 48, retention: 72h}
+  - {name: igs.task.post.p2,    partitions: 48, retention: 72h}
+  - {name: igs.task.media,      partitions: 24, retention: 72h}
+  - {name: igs.task.retry.30s,  partitions: 12, retention: 48h}
+  - {name: igs.task.retry.5m,   partitions: 12, retention: 48h}
+  - {name: igs.task.dlq,        partitions: 6,  retention: 336h}
+  - {name: igs.persist.dlq,     partitions: 3,  retention: 336h}
+  # Public contract (securebrand.ig.v1 and securebrand.common.v1). PII
+  # topics use delete retention, never compaction, so erased data ages out.
+  - {name: ig.profile.v1,         partitions: 24, retention: 168h}
+  - {name: ig.post.v1,            partitions: 48, retention: 168h}
+  - {name: ig.post_metrics.v1,    partitions: 48, retention: 168h}
+  - {name: ig.comment.v1,         partitions: 96, retention: 168h}
+  - {name: ig.media.v1,           partitions: 24, retention: 168h}
+  - {name: ig.highlight.v1,       partitions: 12, retention: 168h}
+  - {name: ig.media.ready.v1,     partitions: 24, retention: 168h}
+  - {name: ig.media.processed.v1, partitions: 24, retention: 168h}
+  - {name: ig.media.deleted.v1,   partitions: 12, retention: 168h}
+  - {name: ig.job.v1,             partitions: 12, retention: 168h}
+  - {name: ig.erasure.v1,         partitions: 6,  retention: 720h}

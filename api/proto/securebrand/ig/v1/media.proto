@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package securebrand.ig.v1;
+
+import "google/protobuf/timestamp.proto";
+import "securebrand/common/v1/common.proto";
+import "securebrand/common/v1/media.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1;igv1";
+
+// Media is discovered metadata, published on ig.media.v1 keyed by media_id.
+// Files are downloaded only with ig.limits.include_media (D5).
+message Media {
+  securebrand.common.v1.Observation obs = 1;
+  // UUIDv5 of <pk>|<variant> in igs's namespace: stable across scrapes.
+  string media_id = 2;
+  // Instagram's pk of the media item (a carousel child has its own).
+  string source_media_id = 3;
+  securebrand.common.v1.MediaKind kind = 4;
+  // original | sd | hd | thumbnail
+  string variant = 5;
+  // post | comment | profile | highlight
+  string owner_type = 6;
+  int64 user_pk = 7;
+  int64 media_pk = 8;
+  optional int64 parent_media_pk = 9;
+  int32 position = 10;
+  optional int64 comment_pk = 11;
+  // Signed CDN URL. It expires: see source_expires_at.
+  string source_url = 12;
+  google.protobuf.Timestamp source_expires_at = 13;
+  int32 width = 14;
+  int32 height = 15;
+  int64 duration_ms = 16;
+  string mime = 17;
+  string alt_text = 18;
+  google.protobuf.Timestamp post_taken_at = 19;
+}

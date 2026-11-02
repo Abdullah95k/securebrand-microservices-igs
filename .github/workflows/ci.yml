@@ -79,7 +79,7 @@ jobs:
           IGS_TEST_KAFKA_BROKERS: localhost:19092
           IGS_TEST_SCHEMA_REGISTRY: http://localhost:18081
           IGS_BROWSER_NO_SANDBOX: "1"
-        run: go test -count=1 -timeout 20m ./internal/persist/... ./internal/e2e/... ./internal/spike/... ./internal/registrysync/... ./internal/platform/schemareg/...
+        run: go test -count=1 -timeout 20m ./internal/persist/... ./internal/e2e/... ./internal/spike/... ./internal/registrysync/... ./internal/platform/schemareg/... ./internal/store/... ./internal/ig/...
 
   deploy:
     runs-on: ubuntu-latest

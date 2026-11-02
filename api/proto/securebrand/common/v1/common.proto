@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+// Platform-neutral messages shared by the scrapers' new code (ADR 0005 §2).
+// fbs's securebrand.fb.v1 is not changed: it lives in fbs's repository.
+package securebrand.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1;commonv1";
+
+// Platform names the scraped platform on handoff and job messages.
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_FACEBOOK = 1;
+  PLATFORM_INSTAGRAM = 2;
+}
+
+// CrawlMode says how the entity was observed.
+enum CrawlMode {
+  CRAWL_MODE_UNSPECIFIED = 0;
+  // First scrape or backfill: every post inside the age window, every comment.
+  CRAWL_MODE_FULL = 1;
+  // Scheduled re-scrape: new posts and posts whose counts changed.
+  CRAWL_MODE_INCREMENTAL = 2;
+  // Counts-only refresh of an older post.
+  CRAWL_MODE_REFRESH = 3;
+  // Full comment pass on an aged post to capture edits and deletions.
+  CRAWL_MODE_RECRAWL = 4;
+}
+
+// Observation is attached to every public message. Consumers dedupe on
+// (entity id, content_hash); event_id is derived from both, so a redelivered
+// event is byte-identical.
+message Observation {
+  string event_id = 1;
+  google.protobuf.Timestamp observed_at = 2;
+  repeated string job_ids = 3;
+  // Logical registry query name (profile, grid, comments, post_page, ...).
+  string query_name = 4;
+  string doc_id = 5;
+  uint32 parser_version = 6;
+  bytes content_hash = 7;
+  CrawlMode mode = 8;
+}
+
+message ImageRef {
+  string url = 1;
+  int32 width = 2;
+  int32 height = 3;
+}
+
+message S3Object {
+  string bucket = 1;
+  string key = 2;
+  int64 size = 3;
+  bytes sha256 = 4;
+  string content_type = 5;
+}

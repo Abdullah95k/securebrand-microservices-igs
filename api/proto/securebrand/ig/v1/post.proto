@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package securebrand.ig.v1;
+
+import "google/protobuf/timestamp.proto";
+import "securebrand/common/v1/common.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1;igv1";
+
+// MediaType follows Instagram's media_type numbers.
+enum MediaType {
+  MEDIA_TYPE_UNSPECIFIED = 0;
+  MEDIA_TYPE_PHOTO = 1;
+  MEDIA_TYPE_VIDEO = 2;
+  MEDIA_TYPE_CAROUSEL = 8;
+}
+
+// How the crawl found the post. GRID now; TAGGED and REELS kept for later
+// sources without a breaking change.
+enum DiscoveredVia {
+  DISCOVERED_VIA_UNSPECIFIED = 0;
+  DISCOVERED_VIA_GRID = 1;
+  DISCOVERED_VIA_TAGGED = 2;
+  DISCOVERED_VIA_REELS = 3;
+}
+
+enum PostStatus {
+  POST_STATUS_UNSPECIFIED = 0;
+  POST_STATUS_VISIBLE = 1;
+  POST_STATUS_UNAVAILABLE = 2;
+}
+
+message Location {
+  int64 pk = 1;
+  string name = 2;
+  optional double lat = 3;
+  optional double lng = 4;
+}
+
+// UserTag is an account tagged in the post (personal data: pii:read).
+message UserTag {
+  int64 user_pk = 1;
+  string username = 2;
+  optional double x = 3;
+  optional double y = 4;
+  // The carousel child it is on; 0 for the post itself.
+  int64 child_media_pk = 5;
+}
+
+// Coauthor is a collab post's other owner.
+message Coauthor {
+  int64 user_pk = 1;
+  string username = 2;
+}
+
+message Music {
+  string title = 1;
+  string artist = 2;
+  string audio_id = 3;
+  // Original audio of the owner, rather than a licensed track.
+  bool original_audio = 4;
+}
+
+message CarouselChild {
+  int64 media_pk = 1;
+  int32 position = 2;
+  MediaType media_type = 3;
+  string accessibility_caption = 4;
+  repeated string media_ids = 5;
+}
+
+// Post is published on ig.post.v1, keyed by media_pk, once its detail (the
+// post page) was read, so taken_at is always set. A grid item alone
+// produces no record.
+message Post {
+  securebrand.common.v1.Observation obs = 1;
+  int64 media_pk = 2;
+  string shortcode = 3;
+  int64 owner_pk = 4;
+  google.protobuf.Timestamp taken_at = 5;
+  MediaType media_type = 6;
+  // feed | clips | carousel_container | igtv
+  string product_type = 7;
+  string caption = 8;
+  bool caption_edited = 9;
+  repeated string hashtags = 10;
+  repeated string mentions = 11;
+  string accessibility_caption = 12;
+  Location location = 13;
+  repeated UserTag usertags = 14;
+  repeated Coauthor coauthors = 15;
+  Music music = 16;
+  // NULL when the owner hid likes (like_and_view_counts_disabled).
+  optional int64 like_count = 17;
+  bool counts_hidden = 18;
+  // Instagram's count, which includes the hidden replies.
+  optional int64 comment_count = 19;
+  bool commenting_disabled = 20;
+  // Views of a reel, from the profile's reels tab (logged out, the post
+  // page shows none).
+  optional int64 play_count = 21;
+  // Pinned to the grid, inferred from dates; NULL when unknown.
+  optional bool is_pinned = 22;
+  repeated CarouselChild children = 23;
+  repeated string media_ids = 24;
+  DiscoveredVia discovered_via = 25;
+  // Instagram's related topics.
+  repeated string topics = 26;
+  string ai_label = 27;
+  int64 video_duration_ms = 28;
+  int32 width = 29;
+  int32 height = 30;
+  optional bool has_audio = 31;
+  string permalink = 32;
+  PostStatus status = 33;
+}
+
+// PostMetrics is published on ig.post_metrics.v1 when a post's counts
+// change (also from the reels tab and comment reads).
+message PostMetrics {
+  securebrand.common.v1.Observation obs = 1;
+  int64 media_pk = 2;
+  int64 owner_pk = 3;
+  google.protobuf.Timestamp taken_at = 4;
+  google.protobuf.Timestamp captured_at = 5;
+  optional int64 like_count = 6;
+  optional int64 comment_count = 7;
+  optional int64 play_count = 8;
+  bool counts_hidden = 9;
+}
