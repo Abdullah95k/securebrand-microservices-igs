@@ -150,6 +150,28 @@ Symptom: `igs_parse_total{outcome="drift"}` (alert `IgsSchemaDrift`), or a field
 * Persister lag delays job completion (the finalizer waits up to
   `scheduler.finalize_timeout`). Scale the persister; check Postgres I/O.
 
+## Persister quarantine
+
+`IgsPersisterQuarantine` fires when the persister moved records to
+`fbs.persist.dlq` (`igs_persist_quarantined_total{topic,reason}`). It does so
+for a record that does not decode (`undecodable`), one Postgres rejects on its
+own data (`sqlstate_22…` data exceptions, `sqlstate_23…` integrity
+violations) and one pgx cannot encode for its column, such as an empty or
+malformed UUID (`encode`). It finds them by bisecting the failed batch, writes
+the rest and moves on; before, one such record stalled the persister for good.
+An outage, a timeout or a statement that fails for every record is not
+quarantined: the batch is retried until it succeeds, which shows as
+`IgsPersisterLag`.
+
+1. Read the reason and error in the persister's log (`persist: record
+   quarantined`, with topic, partition and offset) or in the records' `x-reason`
+   and `x-error` headers.
+2. Fix the cause: usually a producer bug (a crawler release) or a schema the
+   migration has not reached.
+3. Replay them to their topics: `fbctl dlq replay --persist`. The records are
+   written again as they were; a record that still fails goes back to the
+   quarantine.
+
 ## Media backlog / TTL expiries
 
 * `igs_media_deleted_total{reason="ttl_expired"}` rising: the analysis service

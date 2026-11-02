@@ -371,8 +371,8 @@ func (w *Writer) Pages(ctx context.Context, ps []*fbv1.Page) error {
 		seen := observed(p.Obs)
 		err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 			if p.Status == fbv1.PageStatus_PAGE_STATUS_UNAVAILABLE {
-				_, err := tx.Exec(ctx, `INSERT INTO pages (page_id, status, last_scraped_at) VALUES ($1, 'unavailable', $2)
-					ON CONFLICT (page_id) DO UPDATE SET status = 'unavailable', last_scraped_at = $2`, p.PageId, seen)
+				_, err := tx.Exec(ctx, `INSERT INTO pages AS t (page_id, status, last_scraped_at) VALUES ($1, 'unavailable', $2)
+					ON CONFLICT (page_id) DO UPDATE SET status = 'unavailable', last_scraped_at = $2 WHERE t.status <> 'suppressed'`, p.PageId, seen)
 				return err
 			}
 			vanity := p.Vanity
@@ -402,10 +402,14 @@ func (w *Writer) Pages(ctx context.Context, ps []*fbv1.Page) error {
 					verified = EXCLUDED.verified, profile_pic_url = EXCLUDED.profile_pic_url, cover_url = EXCLUDED.cover_url,
 					contact = EXCLUDED.contact, extra = EXCLUDED.extra, status = 'active',
 					content_hash = EXCLUDED.content_hash, last_scraped_at = EXCLUDED.last_scraped_at
+				WHERE t.status <> 'suppressed'
 				RETURNING old.page_id IS NULL OR old.followers_count IS DISTINCT FROM new.followers_count
 					OR old.likes_count IS DISTINCT FROM new.likes_count OR old.name IS DISTINCT FROM new.name`,
 				p.PageId, vanity, p.Url, p.Name, p.Categories, p.Intro, p.FollowersCount, p.LikesCount, p.Verified,
 				pic, cover, jsonOf(p.Contact), extraJSON(p.ExtraJson), hash, seen).Scan(&changed)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil // a suppressed page (erased): never written back
+			}
 			if err != nil {
 				return err
 			}
