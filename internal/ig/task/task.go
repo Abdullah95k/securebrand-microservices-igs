@@ -45,11 +45,14 @@ func ScopeKey(t *igstaskv1.Task) string {
 }
 
 // Finalize sets the deterministic task id (and lineage for a new stream).
+// The id depends on the lineage and the segment, not on the scope: a stage
+// learns scope fields as it goes (a profile's pk), and a segment run again
+// after a crash must name its continuation as the first run did.
 func Finalize(t *igstaskv1.Task) *igstaskv1.Task {
 	if t.LineageId == "" {
 		t.LineageId = hashID("lineage", t.JobId, t.Kind.String(), ScopeKey(t), t.Mode.String())
 	}
-	t.TaskId = hashID(t.JobId, t.Kind.String(), ScopeKey(t), t.Mode.String(), t.LineageId, strconv.FormatUint(uint64(t.Seq), 10))
+	t.TaskId = hashID(t.JobId, t.Kind.String(), t.Mode.String(), t.LineageId, strconv.FormatUint(uint64(t.Seq), 10))
 	if t.EnqueuedAt == nil {
 		t.EnqueuedAt = timestamppb.Now()
 	}

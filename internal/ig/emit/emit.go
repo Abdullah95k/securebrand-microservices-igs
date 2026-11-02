@@ -21,9 +21,9 @@ import (
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/suppress"
 )
 
 // AuthorKey is the stable pseudonymous key of an Instagram user:
@@ -51,7 +51,7 @@ type Source struct {
 type Emitter struct {
 	HMACKey      []byte
 	Pseudonymize bool
-	Suppression  *gdpr.Suppression
+	Suppression  *suppress.Suppression
 	Now          func() time.Time
 }
 

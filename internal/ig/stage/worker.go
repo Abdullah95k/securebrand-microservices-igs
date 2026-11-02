@@ -2,6 +2,7 @@ package stage
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -70,6 +71,7 @@ func (w *Worker) Run(ctx context.Context, t *igstaskv1.Task) error {
 	if !ok {
 		return w.deadLetter(ctx, t, "no_stage", "no stage for kind "+t.Kind.String(), nil)
 	}
+	slog.Debug("task", "id", t.TaskId, "stage", name, "seq", t.Seq, "attempt", t.Attempt)
 	if d.Jobs.Cancelled(ctx, t.JobId) {
 		metrics.Tasks.WithLabelValues(name, lane, "cancelled").Inc()
 		return w.finish(ctx, t, map[string]int64{"cancelled": 1})
@@ -89,9 +91,24 @@ func (w *Worker) Run(ctx context.Context, t *igstaskv1.Task) error {
 		return w.toRetry(ctx, t, "30s")
 	}
 	before, _, beforeErr := d.Ckpt.Load(ctx, t.LineageId, t.Seq)
-	start := time.Now()
-	out := st.Run(ctx, t)
-	metrics.TaskSeconds.WithLabelValues(name).Observe(time.Since(start).Seconds())
+	var out Outcome
+	if next, ok := yielded(before); ok && beforeErr == nil {
+		// An earlier run of this segment yielded and registered its
+		// continuation, then failed to hand it over: hand over the same
+		// one rather than read on (which could end the stream without it
+		// and leave the registered continuation pending for good).
+		out = Outcome{Result: Continue, Next: next, Counters: maps.Clone(before.Counters)}
+	} else {
+		start := time.Now()
+		out = st.Run(ctx, t)
+		metrics.TaskSeconds.WithLabelValues(name).Observe(time.Since(start).Seconds())
+	}
+	if out.Result == Continue && out.Next != nil {
+		if err := w.recordYield(ctx, t, out); err != nil {
+			lease.Release(ctx)
+			return err
+		}
+	}
 	lease.Release(ctx)
 
 	switch out.Result {
@@ -288,4 +305,44 @@ func (r *RetryRelay) Handle(ctx context.Context, rec *kgo.Record) error {
 		return fmt.Errorf("retry relay: %w", err)
 	}
 	return nil
+}
+
+// nextKey holds, in a segment's checkpoint, the continuation it yielded.
+const nextKey = "_next"
+
+// recordYield saves the continuation in the segment's checkpoint before
+// it is registered and produced, so that a run of the segment again hands
+// over the same continuation (yielded).
+func (w *Worker) recordYield(ctx context.Context, t *igstaskv1.Task, out Outcome) error {
+	st, _, err := w.D.Ckpt.Load(ctx, t.LineageId, t.Seq)
+	if err != nil {
+		return err
+	}
+	b, err := proto.Marshal(out.Next)
+	if err != nil {
+		return err
+	}
+	if st.Extra == nil {
+		st.Extra = map[string]string{}
+	}
+	st.Extra[nextKey] = base64.StdEncoding.EncodeToString(b)
+	st.Counters = maps.Clone(out.Counters)
+	return w.D.Ckpt.Save(ctx, t.LineageId, t.Seq, st)
+}
+
+// yielded returns the continuation a segment's checkpoint recorded.
+func yielded(st checkpoint.State) (*igstaskv1.Task, bool) {
+	enc := st.Extra[nextKey]
+	if enc == "" {
+		return nil, false
+	}
+	b, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		return nil, false
+	}
+	var next igstaskv1.Task
+	if proto.Unmarshal(b, &next) != nil || next.TaskId == "" {
+		return nil, false
+	}
+	return &next, true
 }

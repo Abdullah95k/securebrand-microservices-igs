@@ -80,6 +80,12 @@ type IGSchedule struct {
 	ProfileRefresh time.Duration `koanf:"profile_refresh"`
 	// Jitter spreads runs by up to this share of the interval.
 	Jitter float64 `koanf:"jitter"`
+	// PostRefreshWindow: posts younger than this get comment and count
+	// refreshes on the scheduled runs (the grid walk reads only new posts),
+	// each refresh waiting twice as long as the last.
+	PostRefreshWindow time.Duration `koanf:"post_refresh_window"`
+	// PostRefreshPerRun caps the refreshes riding on one scheduled run.
+	PostRefreshPerRun int `koanf:"post_refresh_per_run"`
 }
 
 // IGPrivacy keeps igs's person keys apart from fbs's (ADR 0005 §1).
@@ -118,6 +124,9 @@ func (c *Config) validateIG() []error {
 	}
 	if g.Schedule.ProfileRefresh < g.Schedule.Interval {
 		errs = append(errs, errors.New("ig.schedule.profile_refresh must not be shorter than ig.schedule.interval"))
+	}
+	if g.Schedule.PostRefreshWindow < 0 || g.Schedule.PostRefreshPerRun < 0 {
+		errs = append(errs, errors.New("ig.schedule.post_refresh_window and post_refresh_per_run must not be negative"))
 	}
 	if g.Schedule.Jitter < 0 || g.Schedule.Jitter >= 0.5 {
 		errs = append(errs, errors.New("ig.schedule.jitter must be in [0, 0.5)"))

@@ -394,6 +394,8 @@ ig:
     interval: 3h                 # D2: newest posts every 3 hours
     profile_refresh: 24h         # the profile itself daily
     jitter: 0.1
+    post_refresh_window: 168h    # posts of the last 7 days: comments and counts refreshed
+    post_refresh_per_run: 30
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"
