@@ -1,5 +1,6 @@
 // Command igs-spike holds the tools the owner runs against real Instagram
-// from the Phase 0 machine (docs/runbooks/igs-probe.md). Today: probe
+// from the Phase 0 machine: phase0, the Phase 0 kit (checkpoint C3,
+// docs/runbooks/igs-phase0.md), and probe
 // (checkpoint C2), which answers the open questions U1, U3, U5, U8 and U9
 // for a short list of public profiles and writes what it read: the
 // profiles, their posts, the newest post's comments and the profile
@@ -47,6 +48,8 @@ func main() {
 		os.Exit(runProbe(os.Args[2:]))
 	case "fixtures":
 		os.Exit(runFixtures(os.Args[2:]))
+	case "phase0":
+		os.Exit(runPhase0(os.Args[2:]))
 	case "version", "--version":
 		fmt.Println(version)
 	default:
@@ -58,6 +61,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: igs-spike probe --profiles FILE [--config FILE] [--tier NAME] [--out-dir DIR]
        igs-spike probe --dry-run
        igs-spike fixtures --out testdata/ig --salt S FILE[=CASE]...
+       igs-spike phase0 --profiles FILE --config FILE --tiers isp[,residential] [--out-dir DIR] [--from STEP]
 
 probe loads each profile's page and reads it with the logged-out queries,
 pacing like a person (one request every few seconds). It writes report.json,
@@ -70,6 +74,12 @@ into parser fixtures with no personal data: usernames, names, people's ids
 and text are pseudonymised or blanked, and a file is written only when none
 of its personal values survive. Pass the same --salt for files that belong
 together.
+
+phase0 measures each proxy tier on about 150 profiles: preflight, docids,
+capture, smoke, run, report, bundle. It says GO or NO-GO per tier and writes
+igs-phase0-bundle.tar.gz (anonymous results and scrubbed fixtures) to send
+back. Exit codes: 0 GO, 1 error, 2 usage, 3 NO-GO, 4 needs action, 130
+interrupted (resume with --from STEP).
 `)
 	os.Exit(2)
 }

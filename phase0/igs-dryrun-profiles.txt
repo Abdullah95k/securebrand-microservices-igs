@@ -1,0 +1,6 @@
+# fakeig profiles for make igs-phase0-dryrun
+profile_01
+profile_02
+profile_03
+profile_04
+profile_05

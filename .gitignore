@@ -18,6 +18,8 @@ __pycache__/
 !/phase0/pages.example.csv
 !/phase0/proxies.example.yaml
 !/phase0/ig-profiles.example.txt
+!/phase0/igs-dryrun.sh
+!/phase0/igs-dryrun-profiles.txt
 # igs: the owner's HAR recordings, raw Instagram responses and probe output
 # stay local (docs/instagram/build-brief.md §7). Keep them under .local/.
 /.local/

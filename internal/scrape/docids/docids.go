@@ -17,7 +17,7 @@ import (
 var (
 	// Bundle URLs appear in script tags and, JSON-escaped, in inline data.
 	scriptSrc   = regexp.MustCompile(`(?:https?:)?(?:\\/\\/|//)[A-Za-z0-9.\-:]+(?:\\/|/)rsrc\.php(?:\\/|/)[^"'\s<>]+?\.js[^"'\s<>]*`)
-	relayOp     = regexp.MustCompile(`__d\("([A-Za-z0-9_]+)_facebookRelayOperation"[^{]*\{[^}]*?exports\s*=\s*"(\d+)"`)
+	relayOp     = regexp.MustCompile(`__d\("([A-Za-z0-9_]+)_(?:facebook|instagram)RelayOperation"[^{]*\{[^}]*?exports\s*=\s*"(\d+)"`)
 	relayOpLoad = regexp.MustCompile(`"([A-Za-z0-9_]+Query)"\s*,\s*\{?\s*"?(?:queryID|id)"?\s*:\s*"(\d{8,})"`)
 )
 
@@ -31,8 +31,8 @@ func Scan(b []byte, out map[string]string) {
 }
 
 // Bundles returns the JS bundle URLs html references that may be fetched:
-// those on Facebook's CDN or on the page's own host, in page order and
-// without duplicates.
+// those on Facebook's or Instagram's CDN (static.cdninstagram.com) or on
+// the page's own host, in page order and without duplicates.
 func Bundles(html []byte, pageURL *url.URL) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -45,13 +45,22 @@ func Bundles(html []byte, pageURL *url.URL) []string {
 		if err != nil || seen[src] {
 			continue
 		}
-		if h := u.Hostname(); h != "fbcdn.net" && !strings.HasSuffix(h, ".fbcdn.net") && u.Host != pageURL.Host {
+		if h := u.Hostname(); !cdnHost(h) && u.Host != pageURL.Host {
 			continue
 		}
 		seen[src] = true
 		out = append(out, src)
 	}
 	return out
+}
+
+func cdnHost(h string) bool {
+	for _, d := range []string{"fbcdn.net", "cdninstagram.com"} {
+		if h == d || strings.HasSuffix(h, "."+d) {
+			return true
+		}
+	}
+	return false
 }
 
 // Fetcher downloads one bundle.

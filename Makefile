@@ -5,7 +5,7 @@ PG_DSN ?= postgres://fbs:fbs@localhost:5432/fbs?sslmode=disable
 TEST_ENV = IGS_TEST_PG_DSN="$(PG_DSN)" IGS_TEST_REDIS_ADDR=localhost:6379 IGS_TEST_KAFKA_BROKERS=localhost:19092 IGS_TEST_SCHEMA_REGISTRY=http://localhost:18081
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 
-.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin igs-probe igs-probe-dryrun chart-check chart-smoke clean
+.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin igs-probe igs-probe-dryrun igs-phase0 igs-phase0-dryrun chart-check chart-smoke clean
 
 all: generate build test
 
@@ -189,6 +189,21 @@ pilot-clean:
 ## Rehearse Phase 0 against a local fakefb (no proxies, no Facebook, about a minute).
 phase0-dryrun:
 	GO=$(GO) phase0/dryrun.sh
+
+IGS_PHASE0_PROFILES ?= phase0/ig-profiles.txt
+IGS_PHASE0_TIERS ?= isp
+IGS_PHASE0_OUT ?= phase0/out-ig-phase0
+
+## igs's Phase 0 against real Instagram (docs/runbooks/igs-phase0.md): about
+## 150 profiles per tier. Resume with IGS_PHASE0_ARGS="--from run".
+igs-phase0:
+	@test -f $(PHASE0_CONFIG) || { echo "missing $(PHASE0_CONFIG): cp phase0/proxies.example.yaml $(PHASE0_CONFIG), fill it in, chmod 600"; exit 2; }
+	@test -f $(IGS_PHASE0_PROFILES) || { echo "missing $(IGS_PHASE0_PROFILES): one public profile per line"; exit 2; }
+	$(GO) run ./cmd/igs-spike phase0 --config $(PHASE0_CONFIG) --profiles $(IGS_PHASE0_PROFILES) --tiers $(IGS_PHASE0_TIERS) --out-dir $(IGS_PHASE0_OUT) $(IGS_PHASE0_ARGS)
+
+## igs's Phase 0 rehearsed against a local fakeig (rotated doc_ids): must say GO.
+igs-phase0-dryrun:
+	GO=$(GO) phase0/igs-dryrun.sh
 
 IGS_PROBE_PROFILES ?= phase0/ig-profiles.txt
 IGS_PROBE_TIERS ?= isp

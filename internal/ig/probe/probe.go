@@ -79,6 +79,10 @@ type Options struct {
 	// OnProfile, when set, gets each profile as soon as it is read, so the
 	// caller can save it before the run ends (igs-spike appends the CSVs).
 	OnProfile func(Profile)
+	// OnRequest, when set, gets every request (page loads, walled ones
+	// too, and queries) with its kind, as it is made, for latency and size
+	// distributions (Phase 0). It is called from the workers concurrently.
+	OnRequest func(kind string, s Step)
 	// StartAt is the line (1-based, in Profiles) to start at, to continue a
 	// run that was stopped; earlier profiles are skipped. Profiles keep
 	// their line numbers. 0 or 1 starts at the first.
@@ -1500,6 +1504,9 @@ func (r *runner) do(ctx context.Context, id *session.Identity, query string, var
 }
 
 func (r *runner) cost(kind string, s Step) {
+	if r.o.OnRequest != nil {
+		r.o.OnRequest(kind, s)
+	}
 	c := r.sum.Requests[kind]
 	c.N++
 	c.sumMs += s.Ms
