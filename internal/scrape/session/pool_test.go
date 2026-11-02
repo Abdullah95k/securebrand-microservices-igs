@@ -122,3 +122,39 @@ func TestCancelledLoadsDoNotRetireAnIdentity(t *testing.T) {
 		t.Fatalf("dead exit: %q", r)
 	}
 }
+
+// A rate-limited identity cools down for twice as long each time (30 s,
+// 60 s, 2 min, 4 min) and retires at the fifth in a row; it used to retire
+// at the second, so the cooldown never grew past 60 s. A good answer
+// resets the count, and a login wall still retires at once.
+func TestRateLimitCooldownGrows(t *testing.T) {
+	id := &Identity{health: 1}
+	var cooldowns []time.Duration
+	for i := 1; i < MaxRateLimits; i++ {
+		before := time.Now()
+		if retire, reason := id.Record(detect.RateLimited); retire {
+			t.Fatalf("retired at rate limit %d: %s", i, reason)
+		}
+		cooldowns = append(cooldowns, id.cooldown.Sub(before).Round(time.Second))
+	}
+	want := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute}
+	for i := range want {
+		if cooldowns[i] != want[i] {
+			t.Fatalf("cooldowns %v, want %v", cooldowns, want)
+		}
+	}
+	if retire, reason := id.Record(detect.RateLimited); !retire || reason != "blocked" {
+		t.Fatalf("fifth rate limit: %v %s", retire, reason)
+	}
+	ok := &Identity{health: 1}
+	ok.Record(detect.RateLimited)
+	ok.Record(detect.OK)
+	ok.Record(detect.RateLimited)
+	if d := time.Until(ok.cooldown).Round(time.Second); d != 30*time.Second {
+		t.Fatalf("a good answer resets the count: cooldown %s", d)
+	}
+	lw := &Identity{health: 1}
+	if retire, reason := lw.Record(detect.LoginWall); !retire || reason != "login_wall" {
+		t.Fatalf("login wall: %v %s", retire, reason)
+	}
+}

@@ -196,7 +196,12 @@ func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 	reason := fs.String("reason", "", "only replay this x-reason")
 	max := fs.Int("max", 1000, "maximum records")
 	idle := fs.Duration("idle", 10*time.Second, "stop after this long without records")
+	persisted := fs.Bool("persist", false, "replay the persister's quarantine (fbs.persist.dlq) instead of the crawl DLQ")
 	_ = fs.Parse(args)
+	dlqTopic, group := topics.DLQ, "igs-dlq-replay"
+	if *persisted {
+		dlqTopic, group = topics.PersistDLQ, "igs-persist-dlq-replay"
+	}
 	kcfg, err := app.KafkaClient(cfg, "-fbctl")
 	if err != nil {
 		return err
@@ -212,8 +217,8 @@ func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 	}
 	defer func() { _ = rdb.Close() }()
 	tracker := jobs.New(rdb)
-	cl, err := kgo.NewClient(append(kcfg.Opts(), kgo.ConsumerGroup(cfg.Kafka.TopicPrefix+"igs-dlq-replay"),
-		kgo.ConsumeTopics(cfg.Kafka.TopicPrefix+topics.DLQ), kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()), kgo.DisableAutoCommit())...)
+	cl, err := kgo.NewClient(append(kcfg.Opts(), kgo.ConsumerGroup(cfg.Kafka.TopicPrefix+group),
+		kgo.ConsumeTopics(cfg.Kafka.TopicPrefix+dlqTopic), kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()), kgo.DisableAutoCommit())...)
 	if err != nil {
 		return err
 	}
@@ -239,7 +244,14 @@ func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 				continue
 			}
 			rec := &kgo.Record{Topic: p.Topic(strings.TrimPrefix(orig, cfg.Kafka.TopicPrefix)), Key: r.Key, Value: r.Value}
-			if rp, err := dlq.Prepare(ctx, tracker, r.Value, time.Now()); err == nil {
+			if *persisted {
+				// Entity records go back unchanged, with their type headers.
+				for _, h := range r.Headers {
+					if h.Key == kafka.HeaderType || h.Key == kafka.HeaderContentType {
+						rec.Headers = append(rec.Headers, h)
+					}
+				}
+			} else if rp, err := dlq.Prepare(ctx, tracker, r.Value, time.Now()); err == nil {
 				rec.Key, rec.Value = []byte(rp.Key), rp.Value
 				for _, h := range r.Headers {
 					if h.Key == kafka.HeaderType || h.Key == kafka.HeaderContentType {

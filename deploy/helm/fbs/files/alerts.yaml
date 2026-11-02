@@ -245,6 +245,17 @@ groups:
           summary: "The persister is {{ $value }} records behind on {{ $labels.topic }}"
           description: Results reach Postgres late. Check igs_persist_batch_seconds and the database.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/operations.md#kafka-lag
+      - alert: IgsPersisterQuarantine
+        expr: sum by (topic, reason) (increase(igs_persist_quarantined_total[15m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "The persister quarantined {{ $value }} {{ $labels.topic }} records ({{ $labels.reason }})"
+          description: >-
+            Records that did not decode or that Postgres rejected went to
+            fbs.persist.dlq instead of stalling the persister. Their data is
+            missing from Postgres until they are fixed and replayed.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/operations.md#persister-quarantine
       - alert: IgsDLQGrowing
         expr: sum by (stage, reason) (increase(igs_dlq_total[1h])) > 100
         for: 15m

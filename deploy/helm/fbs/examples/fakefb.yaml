@@ -42,6 +42,8 @@ keda:
 
 hooks:
   topicReplicas: 1
+  # One small broker: production's 700-odd partitions exceed what it holds.
+  topicPartitionsCap: 6
 
 components:
   api: {replicas: 1, pdb: null, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}}

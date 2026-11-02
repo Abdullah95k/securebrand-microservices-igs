@@ -119,6 +119,20 @@ func (id *Identity) Wait(ctx context.Context) error {
 // answering, and a fresh identity gets another.
 const MaxTransportFailures = 3
 
+// MaxRateLimits is how many rate limits in a row retire an identity. Before
+// that each one cools it down for twice as long as the last: 30 s, 60 s,
+// 2 min, 4 min. (A second block used to retire it, so the cooldown never
+// grew past 60 s.) A login wall or a checkpoint retires it at once.
+const MaxRateLimits = 5
+
+// rateLimitCooldown is the cooldown after the n-th rate limit in a row.
+func rateLimitCooldown(n int) time.Duration {
+	if n < 1 {
+		n = 1
+	}
+	return min(30*time.Second<<min(n-1, 5), 15*time.Minute)
+}
+
 // Record updates health with one request outcome and returns whether the
 // identity must be retired.
 func (id *Identity) Record(c detect.Class) (retire bool, reason string) {
@@ -146,18 +160,14 @@ func (id *Identity) Record(c detect.Class) (retire bool, reason string) {
 		id.retired = "checkpoint"
 	case c == detect.LoginWall:
 		id.retired = "login_wall"
-	case id.consecBlocks >= 2:
+	case id.consecBlocks >= MaxRateLimits:
 		id.retired = "blocked"
 	case id.consecFails >= MaxTransportFailures:
 		// Health alone never retires a dead exit: transport failures
 		// score 0.5, which health approaches but never falls below.
 		id.retired = "transport"
 	case c == detect.RateLimited:
-		backoff := time.Duration(30<<min(id.consecBlocks, 5)) * time.Second
-		if backoff > 15*time.Minute {
-			backoff = 15 * time.Minute
-		}
-		id.cooldown = time.Now().Add(backoff)
+		id.cooldown = time.Now().Add(rateLimitCooldown(id.consecBlocks))
 	case id.health < 0.5:
 		id.retired = "unhealthy"
 	case id.maxRequests > 0 && id.requests >= id.maxRequests:

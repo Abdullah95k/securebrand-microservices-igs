@@ -262,7 +262,7 @@ func (s *Stack) RestartCrawler(t *testing.T) {
 func (s *Stack) RestartPersister(t *testing.T) {
 	t.Helper()
 	s.stop("persister")
-	pc, err := persist.NewConsumer(s.kcfg, &persist.Writer{DB: s.DB}, 2000, 100*time.Millisecond)
+	pc, err := persist.NewConsumer(s.kcfg, &persist.Writer{DB: s.DB}, s.Producer, 2000, 100*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

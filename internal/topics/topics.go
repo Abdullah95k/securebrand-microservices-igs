@@ -24,6 +24,9 @@ const (
 	Retry5m   = "fbs.task.retry.5m"
 	Retry1h   = "fbs.task.retry.1h"
 	DLQ       = "fbs.task.dlq"
+	// PersistDLQ holds entity records the persister could not write (they
+	// did not decode, or Postgres rejected their data).
+	PersistDLQ = "fbs.persist.dlq"
 )
 
 // Entity lists the public entity topics the persister consumes; the job

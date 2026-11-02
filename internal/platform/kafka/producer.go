@@ -24,11 +24,15 @@ const (
 	HeaderType        = "igs-type"
 	HeaderContentType = "content-type"
 	HeaderOrigTopic   = "x-orig-topic"
-	HeaderNotBefore   = "x-not-before"
-	HeaderReason      = "x-reason"
-	HeaderError       = "x-error"
-	HeaderTraceParent = "traceparent"
-	ContentTypeProto  = "application/x-protobuf"
+	// HeaderOrigPartition and HeaderOrigOffset locate a quarantined record
+	// in its origin topic.
+	HeaderOrigPartition = "x-orig-partition"
+	HeaderOrigOffset    = "x-orig-offset"
+	HeaderNotBefore     = "x-not-before"
+	HeaderReason        = "x-reason"
+	HeaderError         = "x-error"
+	HeaderTraceParent   = "traceparent"
+	ContentTypeProto    = "application/x-protobuf"
 )
 
 // ClientConfig is shared by producers and consumers.

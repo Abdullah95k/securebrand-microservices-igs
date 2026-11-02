@@ -12,6 +12,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
@@ -33,7 +34,13 @@ func main() {
 		slog.Error("kafka", "err", err)
 		os.Exit(1)
 	}
-	c, err := persist.NewConsumer(kcfg, &persist.Writer{DB: db}, 2000, 250*time.Millisecond)
+	dlq, err := kafka.NewProducer(kcfg)
+	if err != nil {
+		slog.Error("kafka", "err", err)
+		os.Exit(1)
+	}
+	defer dlq.Close()
+	c, err := persist.NewConsumer(kcfg, &persist.Writer{DB: db}, dlq, 2000, 250*time.Millisecond)
 	if err != nil {
 		slog.Error("kafka", "err", err)
 		os.Exit(1)
