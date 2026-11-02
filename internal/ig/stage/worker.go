@@ -74,7 +74,7 @@ func (w *Worker) Run(ctx context.Context, t *igstaskv1.Task) error {
 	slog.Debug("task", "id", t.TaskId, "stage", name, "seq", t.Seq, "attempt", t.Attempt)
 	if d.Jobs.Cancelled(ctx, t.JobId) {
 		metrics.Tasks.WithLabelValues(name, lane, "cancelled").Inc()
-		return w.finish(ctx, t, map[string]int64{"cancelled": 1})
+		return w.finishTask(ctx, t, map[string]int64{"cancelled": 1}, false)
 	}
 	if isDone, err := d.Ckpt.IsDone(ctx, t.TaskId); err != nil {
 		return err
@@ -191,8 +191,23 @@ func (w *Worker) exhausted(next *igstaskv1.Task) string {
 	return ""
 }
 
+// DoneTTL is how long a finished task's id is remembered, so a redelivered
+// record of it is skipped: longer than igs's task topics keep a record
+// (72h, configs/ig/topics.yaml), and well short of fbs's 7 days. At 300k
+// profiles every 3 hours, the done markers are most of igs's Valkey keys.
+const DoneTTL = 96 * time.Hour
+
+// finish marks a task that ran to its end (done or yielded) done, drops
+// its segment's checkpoint, and records it in job accounting.
 func (w *Worker) finish(ctx context.Context, t *igstaskv1.Task, c map[string]int64) error {
-	if err := w.D.Ckpt.MarkDone(ctx, t.TaskId); err != nil {
+	return w.finishTask(ctx, t, c, true)
+}
+
+// finishTask marks t done (dropping its checkpoint with drop) and records
+// it in job accounting. A cancelled or dead-lettered task keeps its
+// checkpoint for a DLQ replay of the same segment.
+func (w *Worker) finishTask(ctx context.Context, t *igstaskv1.Task, c map[string]int64, drop bool) error {
+	if err := w.D.Ckpt.Complete(ctx, t.TaskId, t.LineageId, t.Seq, DoneTTL, drop); err != nil {
 		return err
 	}
 	_, err := w.D.Jobs.Done(ctx, t.JobId, t.TaskId, c)
@@ -241,7 +256,7 @@ func (w *Worker) deadLetter(ctx context.Context, t *igstaskv1.Task, reason, deta
 	if t.Kind == igstaskv1.Kind_KIND_POST {
 		_ = w.D.Jobs.UpdatePostState(ctx, t.JobId, t.GetPost().GetMediaPk(), jobs.PostFailed)
 	}
-	return w.finish(ctx, t, c)
+	return w.finishTask(ctx, t, c, false)
 }
 
 func (w *Worker) deadLetterRaw(ctx context.Context, rec *kgo.Record, reason, detail string) error {

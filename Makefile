@@ -5,7 +5,7 @@ PG_DSN ?= postgres://fbs:fbs@localhost:5432/fbs?sslmode=disable
 TEST_ENV = IGS_TEST_PG_DSN="$(PG_DSN)" IGS_TEST_REDIS_ADDR=localhost:6379 IGS_TEST_KAFKA_BROKERS=localhost:19092 IGS_TEST_SCHEMA_REGISTRY=http://localhost:18081
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 
-.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down igs-compose-up igs-compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin igs-probe igs-probe-dryrun igs-phase0 igs-phase0-dryrun chart-check igs-chart-check chart-smoke igs-chart-smoke clean
+.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak igs-loadtest igs-soak docker docker-prebuilt compose-up compose-down igs-compose-up igs-compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin igs-probe igs-probe-dryrun igs-phase0 igs-phase0-dryrun chart-check igs-chart-check chart-smoke igs-chart-smoke clean
 
 all: generate build test
 
@@ -57,6 +57,18 @@ loadtest:
 ## IGS_SOAK_RESTART_EVERY (90s, 0 = none), IGS_SOAK_OUT=file for the report.
 soak:
 	$(TEST_ENV) IGS_SOAK=1 $(GO) test -count=1 -v -timeout 6h -run 'TestSoak' ./internal/e2e/
+
+## igs's load tests against fakeig (opt-in; prints a report). Size with
+## IGS_LOADTEST_PROFILES, _POSTS, _COMMENTS, _ROWS; IGS_LOADTEST_OUT appends
+## the report to a file.
+igs-loadtest:
+	$(TEST_ENV) IGS_LOADTEST=1 $(GO) test -count=1 -v -timeout 45m -run 'TestLoad' ./internal/ig/e2e/
+
+## igs's soak: the scheduled pipeline for IGS_SOAK_DURATION (20m) under a
+## changing fakeig world and component restarts; ends checked against
+## fakeig's ground truth.
+igs-soak:
+	$(TEST_ENV) IGS_SOAK=1 $(GO) test -count=1 -v -timeout 6h -run 'TestSoak' ./internal/ig/e2e/
 
 ## Full pipeline end-to-end test only.
 e2e:
