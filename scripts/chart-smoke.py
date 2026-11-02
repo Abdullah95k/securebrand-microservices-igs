@@ -256,12 +256,21 @@ def main():
         if status != 200:
             failures.append(f"GET /v1/pages: {status} {body[:200]}")
 
+        logs = {}
         for d in deployments + hooks:
             name = d["metadata"]["name"]
             r = sh("docker", "logs", PREFIX + name, check=False)
-            errors = [l for l in (r.stdout + r.stderr).splitlines() if '"level":"ERROR"' in l]
+            logs[name] = (r.stdout + r.stderr).splitlines()
+            errors = [l for l in logs[name] if '"level":"ERROR"' in l]
             if errors:
                 failures.append(f"{name} logged {len(errors)} errors, e.g. {errors[0][:300]}")
+        if failures:
+            # What each component did last, to tell a stalled pipeline's
+            # stage from the summary alone.
+            for name, lines in logs.items():
+                print(f"--- {name}: last {min(len(lines), 25)} of {len(lines)} log lines")
+                for l in lines[-25:]:
+                    print("   ", l[:400])
     finally:
         if not args.keep:
             cleanup()
