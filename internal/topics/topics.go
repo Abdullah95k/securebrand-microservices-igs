@@ -33,13 +33,24 @@ var Entity = []string{Page, Post, Comment, Media}
 // RetryTopics are consumed by the retry relay.
 var RetryTopics = []string{Retry30s, Retry5m, Retry1h}
 
-// Task returns the work topic for a task kind and lane.
+// Task returns the work topic for a task kind and lane. It panics on a kind
+// with no topic, a programming error where a task is produced; code that
+// handles tasks it received uses TaskTopic.
 func Task(kind taskv1.Kind, lane taskv1.Lane) string {
-	if kind == taskv1.Kind_KIND_MEDIA {
-		return TaskMedia
+	t, ok := TaskTopic(kind, lane)
+	if !ok {
+		panic(fmt.Sprintf("topics: unknown kind %v", kind))
 	}
+	return t
+}
+
+// TaskTopic returns the work topic for a task kind and lane, and false for
+// a kind with no topic (such as a task from a newer producer).
+func TaskTopic(kind taskv1.Kind, lane taskv1.Lane) (string, bool) {
 	var stage string
 	switch kind {
+	case taskv1.Kind_KIND_MEDIA:
+		return TaskMedia, true
 	case taskv1.Kind_KIND_PAGE:
 		stage = "page"
 	case taskv1.Kind_KIND_POST:
@@ -47,9 +58,9 @@ func Task(kind taskv1.Kind, lane taskv1.Lane) string {
 	case taskv1.Kind_KIND_THREAD:
 		stage = "thread"
 	default:
-		panic(fmt.Sprintf("topics: unknown kind %v", kind))
+		return "", false
 	}
-	return fmt.Sprintf("fbs.task.%s.%s", stage, LaneName(lane))
+	return fmt.Sprintf("fbs.task.%s.%s", stage, LaneName(lane)), true
 }
 
 // LaneName returns p0/p1/p2.

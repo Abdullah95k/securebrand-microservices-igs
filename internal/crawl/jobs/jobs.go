@@ -360,6 +360,20 @@ func (t *Tracker) Status(ctx context.Context, job string) (Status, error) {
 	return s, nil
 }
 
+// Running reports whether job still has tasks pending, so a task added to
+// it now delays its finalisation. A finished job (pending zero, or its keys
+// expired) is not running.
+func (t *Tracker) Running(ctx context.Context, job string) (bool, error) {
+	if job == "" {
+		return false, nil
+	}
+	n, err := t.r.Get(ctx, key(job, "pending")).Int64()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+	return n > 0, err
+}
+
 // Cancel flags a job; workers check it between pages.
 func (t *Tracker) Cancel(ctx context.Context, job string) error {
 	return t.r.Set(ctx, key(job, "cancel"), "1", ttl).Err()

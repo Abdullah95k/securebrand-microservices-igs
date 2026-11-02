@@ -21,3 +21,9 @@ Fixes made in igs's copy of shared code that fbs still lacks. fbs's own sessions
 
 | Date | igs PR | Defect | fbs location |
 |---|---|---|---|
+| 2026-11-02 | M2a | `fbctl dlq replay` did nothing for 7 days: the dead letter marks the task done, and the replay re-sent the same task id. Now each replayed task gets a new id (`task.Replay`, `internal/crawl/dlq`) with its retry counts reset, keeps its lineage and checkpoint, and rejoins its job while the job still runs | `internal/crawl/stage/worker.go`, `cmd/fbctl/commands.go` (`dlqReplay`) |
+| 2026-11-02 | M2a | A task of unknown kind crashed the crawler (`deadLetter` → `topics.Task` panicked, unrecovered). Now `topics.TaskTopic` reports unknown kinds, and a stage that panics dead-letters its task (reason `panic`) | `internal/topics/topics.go`, `internal/crawl/stage/worker.go` |
+| 2026-11-02 | M2a | The DLQ's origin header was unprefixed for decoded tasks and prefixed for undecodable records; both are unprefixed now (as on the retry topics) | `internal/crawl/stage/worker.go` (`deadLetterRaw`) |
+| 2026-11-02 | M2a | `GET`, `cancel` and `results` of `/v1/jobs/{id}` did not check the caller owns the job; another client's job now answers 404, an admin sees all | `internal/api/jobs.go`, `internal/dispatch/dispatch.go` |
+| 2026-11-02 | M2a | `max_comments_per_post` held per 20-page segment: `Task.items_seen` now carries what earlier segments saw | `internal/crawl/stage/post.go`, `api/proto/securebrand/fbs/task/v1/tasks.proto` |
+| 2026-11-02 | M2a | `TestBlockedIdentitiesRetryAndTruncation` flaked: with every 4th request of an identity limited, five stalls in a row dead-lettered a thread task about once in a thousand; the test now allows 40 | `internal/e2e/e2e_test.go` |

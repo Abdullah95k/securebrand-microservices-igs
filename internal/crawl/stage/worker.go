@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -39,12 +41,20 @@ var stageNames = map[taskv1.Kind]string{
 	taskv1.Kind_KIND_PAGE: "page", taskv1.Kind_KIND_POST: "post", taskv1.Kind_KIND_THREAD: "thread",
 }
 
-// Handle implements kafka.Handler.
-func (w *Worker) Handle(ctx context.Context, rec *kgo.Record) error {
+// Handle implements kafka.Handler. A task whose run panics is
+// dead-lettered, not retried: redelivering it would crash every pod that
+// takes it.
+func (w *Worker) Handle(ctx context.Context, rec *kgo.Record) (err error) {
 	var t taskv1.Task
 	if err := proto.Unmarshal(rec.Value, &t); err != nil {
 		return w.deadLetterRaw(ctx, rec, "undecodable", err.Error())
 	}
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("task panicked", "task", t.TaskId, "kind", t.Kind.String(), "panic", p, "stack", string(debug.Stack()))
+			err = w.deadLetter(ctx, &t, "panic", fmt.Sprint(p), nil)
+		}
+	}()
 	return w.Run(ctx, &t)
 }
 
@@ -210,10 +220,18 @@ func (w *Worker) toRetry(ctx context.Context, t *taskv1.Task, delay string) erro
 	return w.D.Producer.ProduceSync(ctx, rec)
 }
 
+// deadLetter parks t on the DLQ with its origin topic (unprefixed, like the
+// retry topics' header; empty for a kind with no topic, which a replay
+// skips) and finishes it.
 func (w *Worker) deadLetter(ctx context.Context, t *taskv1.Task, reason, detail string, c map[string]int64) error {
-	metrics.DLQ.WithLabelValues(stageNames[t.Kind], reason).Inc()
+	name := stageNames[t.Kind]
+	if name == "" {
+		name = "unknown"
+	}
+	metrics.DLQ.WithLabelValues(name, reason).Inc()
+	orig, _ := topics.TaskTopic(t.Kind, t.Lane)
 	rec, err := w.D.Producer.Record(topics.DLQ, task.ScopeKey(t), t,
-		kgo.RecordHeader{Key: kafka.HeaderOrigTopic, Value: []byte(topics.Task(t.Kind, t.Lane))},
+		kgo.RecordHeader{Key: kafka.HeaderOrigTopic, Value: []byte(orig)},
 		kgo.RecordHeader{Key: kafka.HeaderReason, Value: []byte(reason)},
 		kgo.RecordHeader{Key: kafka.HeaderError, Value: []byte(truncate(detail, 1000))})
 	if err != nil {
@@ -235,7 +253,7 @@ func (w *Worker) deadLetter(ctx context.Context, t *taskv1.Task, reason, detail 
 func (w *Worker) deadLetterRaw(ctx context.Context, rec *kgo.Record, reason, detail string) error {
 	metrics.DLQ.WithLabelValues("unknown", reason).Inc()
 	out := &kgo.Record{Topic: w.D.Producer.Topic(topics.DLQ), Key: rec.Key, Value: rec.Value, Headers: []kgo.RecordHeader{
-		{Key: kafka.HeaderOrigTopic, Value: []byte(rec.Topic)},
+		{Key: kafka.HeaderOrigTopic, Value: []byte(strings.TrimPrefix(rec.Topic, w.D.Producer.Topic("")))},
 		{Key: kafka.HeaderReason, Value: []byte(reason)},
 		{Key: kafka.HeaderError, Value: []byte(truncate(detail, 1000))},
 	}}

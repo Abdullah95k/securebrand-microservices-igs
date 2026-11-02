@@ -124,6 +124,17 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, code, j)
 }
 
+// jobOwner is the client whose jobs the caller may see: itself, or every
+// client (nil) for an admin. Another client's job answers 404, as if it
+// did not exist.
+func jobOwner(r *http.Request) *uuid.UUID {
+	c := clientFrom(r.Context())
+	if c.Has(ScopeAdmin) {
+		return nil
+	}
+	return &c.ID
+}
+
 func (s *Server) jobID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -138,7 +149,7 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	j, err := s.Dispatch.Get(r.Context(), id)
+	j, err := s.Dispatch.Get(r.Context(), id, jobOwner(r))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -159,13 +170,8 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	c := clientFrom(r.Context())
-	var owner *uuid.UUID
-	if !c.Has(ScopeAdmin) {
-		owner = &c.ID
-	}
 	limit := limitParam(r)
-	js, err := s.Dispatch.List(r.Context(), owner, ref, r.URL.Query().Get("status"), before, limit)
+	js, err := s.Dispatch.List(r.Context(), jobOwner(r), ref, r.URL.Query().Get("status"), before, limit)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -182,7 +188,7 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.Dispatch.Cancel(r.Context(), id); err != nil {
+	if err := s.Dispatch.Cancel(r.Context(), id, jobOwner(r)); err != nil {
 		serverError(w, err)
 		return
 	}
@@ -197,7 +203,7 @@ func (s *Server) jobResults(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	j, err := s.Dispatch.Get(r.Context(), id)
+	j, err := s.Dispatch.Get(r.Context(), id, jobOwner(r))
 	if err != nil {
 		serverError(w, err)
 		return
