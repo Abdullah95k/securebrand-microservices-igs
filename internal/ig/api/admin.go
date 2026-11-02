@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
@@ -47,6 +48,36 @@ func (s *Server) putQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, q)
+}
+
+// registrySyncRuns lists the latest igs-registry-sync runs, newest first.
+func (s *Server) registrySyncRuns(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.ReadDB.Query(r.Context(), `SELECT run_id, started_at, finished_at, status, report
+		FROM registry_sync_runs ORDER BY started_at DESC LIMIT $1`, min(httpapi.LimitParam(r), 200))
+	if err != nil {
+		httpapi.ServerError(w, err)
+		return
+	}
+	type run struct {
+		ID         int64           `json:"id"`
+		StartedAt  time.Time       `json:"started_at"`
+		FinishedAt time.Time       `json:"finished_at"`
+		Status     string          `json:"status"`
+		Report     json.RawMessage `json:"report"`
+	}
+	runs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (run, error) {
+		var x run
+		err := row.Scan(&x.ID, &x.StartedAt, &x.FinishedAt, &x.Status, &x.Report)
+		return x, err
+	})
+	if err != nil {
+		httpapi.ServerError(w, err)
+		return
+	}
+	if runs == nil {
+		runs = []run{}
+	}
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
 // Erasure is the API view of an erasure request.

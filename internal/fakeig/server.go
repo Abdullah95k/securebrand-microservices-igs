@@ -74,6 +74,13 @@ type Faults struct {
 	CursorBound bool
 	// NoPKGrid fails the grid query sent without a cursor (U9).
 	NoPKGrid bool
+	// NoBundleDocIDs serves a script bundle that declares no doc_ids (U6
+	// answered no): only a rendered page's own requests show them.
+	NoBundleDocIDs bool
+	// JSOnlyTokens serves pages whose tokens only a browser sees (a script
+	// writes them), and which then make their own GraphQL requests (POST
+	// and GET), for the browser fallback and render capture.
+	JSOnlyTokens bool
 	// StreamGrid answers grid queries the way Relay streams a connection:
 	// the first part holds the connection with no edges and a placeholder
 	// page_info (has_next_page false), each edge follows in its own part
@@ -214,15 +221,40 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, c)
 	}
 	blob, _ := json.Marshal(map[string]any{"result": map[string]any{"data": data}})
-	page(w, http.StatusOK, fmt.Sprintf(`<html><head><script type="application/json" data-sjs>{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"define":[`+
+	head := fmt.Sprintf(`<script type="application/json" data-sjs>{"require":[["ScheduledServerJS","handle",null,[{"__bbox":{"define":[`+
 		`["LSD",[],{"token":"%s"},323],["InstagramSecurityConfig",[],{"csrf_token":"%s"},1],`+
 		`["SiteData",[],{"server_revision":1029000000,"haste_session":"20400.HYP:instagram_web_pkg.2.1...0","hsi":"7560000000000000001",`+
 		`"__spin_r":1029000000,"__spin_b":"trunk","__spin_t":1761800000},317],`+
 		`["RelayAPIConfigDefaults",[],{"customHeaders":{"X-IG-App-ID":"%s"}},1],["PolarisSiteData",[],{"rollout_hash":"1029000000"},1],`+
-		`["SprinkleConfig",[],{"jazoest":"22001"},1]]}}]]],"__comet_req":7}</script></head><body>`+
+		`["SprinkleConfig",[],{"jazoest":"22001"},1]]}}]]],"__comet_req":7}</script>`, id.lsd, id.csrf, AppID)
+	if s.opts.Faults.JSOnlyTokens {
+		// Only a browser sees the tokens: a script writes them into the
+		// page, and the page then asks for its data itself, once by POST
+		// and once by GET (as a browser-only client might).
+		head = `<script>document.head.insertAdjacentHTML("beforeend", atob("` + base64.StdEncoding.EncodeToString([]byte(head)) + `"));</script>` +
+			s.pageQueries()
+	}
+	page(w, http.StatusOK, fmt.Sprintf(`<html><head>%s</head><body>`+
 		`<script type="application/json" data-sjs>%s</script>`+
 		`<script src="//%s/rsrc.php/v4/yI/r/igs-relay.js" crossorigin="anonymous" async></script></body></html>`,
-		id.lsd, id.csrf, AppID, blob, r.Host))
+		head, blob, r.Host))
+}
+
+// pageQueries is the script a JSOnlyTokens page runs: the profile query by
+// POST to /api/graphql/ and the highlights query by GET to /graphql/query,
+// with the doc_ids the server accepts.
+func (s *Server) pageQueries() string {
+	doc := func(friendly string) string {
+		if ids := s.opts.Docs[friendly]; len(ids) > 0 {
+			return ids[0]
+		}
+		return "1"
+	}
+	return fmt.Sprintf(`<script>`+
+		`fetch("/api/graphql/", {method: "POST", headers: {"content-type": "application/x-www-form-urlencoded", "x-fb-friendly-name": "%[1]s"},`+
+		` body: "fb_api_req_friendly_name=%[1]s&doc_id=%[2]s&variables=" + encodeURIComponent(JSON.stringify({username: "x"}))});`+
+		`fetch("/graphql/query?doc_id=%[4]s&variables=" + encodeURIComponent(JSON.stringify({reel_ids: ["highlight:1"]})), {headers: {"x-fb-friendly-name": "%[3]s"}});`+
+		`</script>`, OpProfile, doc(OpProfile), OpHighlights, doc(OpHighlights))
 }
 
 func (s *Server) mint() *ident {
@@ -530,6 +562,9 @@ func (s *Server) bundle(w http.ResponseWriter) {
 	slices.Sort(names)
 	var b strings.Builder
 	b.WriteString(";/*FB_PKG_DELIM*/\n")
+	if s.opts.Faults.NoBundleDocIDs {
+		names = nil
+	}
 	for _, n := range names {
 		if ids := s.opts.Docs[n]; len(ids) > 0 {
 			fmt.Fprintf(&b, `__d("%s_instagramRelayOperation",[],(function(a,b,c,d,e,f){e.exports="%s"}),null);`+"\n", n, ids[0])

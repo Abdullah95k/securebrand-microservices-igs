@@ -68,6 +68,7 @@ func (s *Server) Handler() http.Handler {
 
 		r.Get("/admin/queries", req(httpapi.ScopeAdmin, s.listQueries))
 		r.Put("/admin/queries/{name}", req(httpapi.ScopeAdmin, s.putQuery))
+		r.Get("/admin/registry-sync/runs", req(httpapi.ScopeAdmin, s.registrySyncRuns))
 	})
 	return r
 }

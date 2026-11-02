@@ -145,11 +145,17 @@ type Result struct {
 	Elapsed time.Duration
 }
 
-// IsGraphQL selects Facebook's GraphQL endpoint (registry sync, M9, makes
-// the capture filter a parameter for Instagram's two endpoints).
+// IsGraphQL selects Facebook's GraphQL endpoint.
 func IsGraphQL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	return err == nil && strings.HasPrefix(u.Path, "/api/graphql")
+}
+
+// IsInstagramGraphQL selects Instagram's two GraphQL endpoints: the web
+// app's /api/graphql and /graphql/query (highlights).
+func IsInstagramGraphQL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	return err == nil && (strings.HasPrefix(u.Path, "/api/graphql") || strings.HasPrefix(u.Path, "/graphql/query"))
 }
 
 // Render loads opts.URL in a fresh headless Chromium.
@@ -450,10 +456,11 @@ func (r *renderer) handle(ctx context.Context, ev event) error {
 			RequestID string `json:"requestId"`
 			Type      string `json:"type"`
 			Request   struct {
-				URL         string `json:"url"`
-				Method      string `json:"method"`
-				PostData    string `json:"postData"`
-				HasPostData bool   `json:"hasPostData"`
+				URL         string            `json:"url"`
+				Method      string            `json:"method"`
+				Headers     map[string]string `json:"headers"`
+				PostData    string            `json:"postData"`
+				HasPostData bool              `json:"hasPostData"`
 			} `json:"request"`
 		}
 		_ = json.Unmarshal(ev.Params, &p)
@@ -477,6 +484,25 @@ func (r *renderer) handle(ctx context.Context, ev event) error {
 			x.DocID = form.Get("doc_id")
 			if v := form.Get("variables"); json.Valid([]byte(v)) {
 				x.Variables = json.RawMessage(v)
+			}
+		}
+		// A GET carries the query in its query string, and its friendly name
+		// (when not there) in a header.
+		if u, err := url.Parse(p.Request.URL); err == nil && x.DocID == "" {
+			q := u.Query()
+			x.DocID = q.Get("doc_id")
+			if x.FriendlyName == "" {
+				x.FriendlyName = q.Get("fb_api_req_friendly_name")
+			}
+			if v := q.Get("variables"); x.Variables == nil && json.Valid([]byte(v)) {
+				x.Variables = json.RawMessage(v)
+			}
+		}
+		if x.FriendlyName == "" {
+			for k, v := range p.Request.Headers {
+				if strings.EqualFold(k, "x-fb-friendly-name") {
+					x.FriendlyName = v
+				}
 			}
 		}
 		if _, seen := r.reqs[p.RequestID]; !seen {
