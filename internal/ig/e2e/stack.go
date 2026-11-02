@@ -11,12 +11,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/johannesboyne/gofakes3"
+	"github.com/johannesboyne/gofakes3/backend/s3mem"
+	"github.com/minio/minio-go/v7"
 	"github.com/redis/go-redis/v9"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"gopkg.in/yaml.v3"
@@ -31,6 +35,7 @@ import (
 	igapi "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
+	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
@@ -38,6 +43,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
@@ -56,6 +62,7 @@ type Stack struct {
 	Jobs     *jobs.Tracker
 	Dispatch *dispatch.Dispatcher
 	API      *httptest.Server
+	S3       *minio.Client
 
 	mu     sync.Mutex
 	groups map[string]*group
@@ -130,6 +137,17 @@ func Start(t *testing.T, o Options) *Stack {
 	fhs := httptest.NewServer(fake)
 	t.Cleanup(fhs.Close)
 	cfg.IG.BaseURL = fhs.URL
+	fake.SetCDN(fhs.URL + "/fake-cdn")
+
+	// S3 (in memory)
+	s3srv := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
+	t.Cleanup(s3srv.Close)
+	u, _ := url.Parse(s3srv.URL)
+	cfg.S3.Endpoint, cfg.S3.UseSSL = u.Host, false
+	s3, err := s3x.Open(ctx, cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Region, false, cfg.S3.MediaBucket, cfg.S3.RawBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if err := registry.In(registry.IGTables).ApplySeed(ctx, db, seed); err != nil {
 		t.Fatal(err)
@@ -165,7 +183,7 @@ func Start(t *testing.T, o Options) *Stack {
 		_, _ = kadm.NewClient(producer.Client()).DeleteTopics(cctx, names...)
 	})
 
-	s := &Stack{Cfg: cfg, DB: db, Redis: rdb, Producer: producer, World: world, Fake: fake, Jobs: jobs.New(rdb),
+	s := &Stack{Cfg: cfg, DB: db, Redis: rdb, Producer: producer, World: world, Fake: fake, Jobs: jobs.New(rdb), S3: s3,
 		groups: map[string]*group{},
 		copts: igapp.CrawlerOptions{DrainTimeout: o.CrawlerDrain, RetryScale: 0.02,
 			DoerFactory: func(transport.Options) (transport.Doer, error) { return transport.NewStd(10 * time.Second), nil }}}
@@ -198,6 +216,22 @@ func (s *Stack) StartScheduler() {
 		func(ctx context.Context) error {
 			return scheduler.Every(ctx, "finalizer", 200*time.Millisecond, fin.Tick)
 		})
+}
+
+// StartMedia runs igs-media's downloader and janitor.
+func (s *Stack) StartMedia(t *testing.T) {
+	t.Helper()
+	comps, err := igapp.NewMedia(s.Cfg, s.DB, s.S3, s.Producer, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.start("media", comps...)
+}
+
+// StartEraser runs the erasure loop, as igs-scheduler's leader does.
+func (s *Stack) StartEraser() {
+	e := &iggdpr.Eraser{DB: s.DB, S3: s.S3, Producer: s.Producer, Suppression: s.Crawler.Suppression}
+	s.start("eraser", func(ctx context.Context) error { return scheduler.Every(ctx, "erasure", 100*time.Millisecond, e.Tick) })
 }
 
 // WaitStatus waits until the job is terminal and returns its status.

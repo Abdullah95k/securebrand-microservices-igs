@@ -1,0 +1,65 @@
+// Command igs-media runs igs's temporary media pipeline over schema ig:
+// the downloader (igs.task.media into object storage, ig.media.ready.v1)
+// and the janitor (acks on ig.media.processed.v1, the TTL sweep, orphan
+// objects). Media files are downloaded only for jobs that ask for them
+// (ig.limits.include_media, D5). --roles runs one of them per Deployment.
+package main
+
+import (
+	"context"
+	"flag"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/clients"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
+)
+
+func main() {
+	fs := flag.NewFlagSet("igs-media", flag.ExitOnError)
+	rolesFlag := fs.String("roles", "downloader,janitor", "comma separated roles: downloader, janitor")
+	cfg := config.MustLoadFromFlags(fs, os.Args[1:])
+	plog.Setup("igs-media", cfg.Log.Level, cfg.Log.Format)
+	if err := runMedia(context.Background(), cfg, strings.Split(*rolesFlag, ",")); err != nil {
+		slog.Error("igs-media exited", "err", err)
+		os.Exit(1)
+	}
+}
+
+func runMedia(ctx context.Context, cfg *config.Config, roles []string) error {
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	s3, err := s3x.Open(ctx, cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Region, cfg.S3.UseSSL, cfg.S3.MediaBucket)
+	if err != nil {
+		return err
+	}
+	kcfg, err := clients.Kafka(cfg, "-igs-media")
+	if err != nil {
+		return err
+	}
+	producer, err := kafka.NewProducer(kcfg)
+	if err != nil {
+		return err
+	}
+	defer producer.Close()
+	comps, err := igapp.NewMedia(cfg, db, s3, producer, roles)
+	if err != nil {
+		return err
+	}
+	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
+	ops.AddCheck("postgres", db.Ping)
+	ops.AddCheck("kafka", producer.Ping)
+	return run.Group(ctx, append([]run.Func{ops.Run}, comps...)...)
+}

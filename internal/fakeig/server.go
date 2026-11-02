@@ -86,7 +86,13 @@ type Options struct {
 	// Docs maps each friendly name to its accepted doc_ids; nil accepts any.
 	Docs   map[string][]string
 	Faults Faults
+	// CDNBase prefixes media URLs; empty is an unresolvable stand-in host.
+	// Tests that download media point it at the server's /fake-cdn.
+	CDNBase string
 }
+
+// DefaultCDN is the stand-in CDN of media URLs.
+const DefaultCDN = "https://scontent.cdninstagram.example"
 
 // Server serves a World.
 type Server struct {
@@ -170,7 +176,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		// null for a gated post, the comments beside it).
 		holder := map[string]any{"id": "POLARIS_" + str(post.PK), "if_not_gated_logged_out": nil}
 		if !post.Gated {
-			holder["if_not_gated_logged_out"] = mediaJSON(post, true)
+			holder["if_not_gated_logged_out"] = mediaJSON(post, true, s.cdn())
 			holder["comments_connection"] = s.commentPage(post, 0, CommentPageSize, "")
 		}
 		data = map[string]any{"xig_polaris_media": holder}
@@ -440,7 +446,7 @@ func (s *Server) gridPage(p *Profile, offset, size int, lsd string) map[string]a
 	end := min(offset+size, len(grid))
 	edges := []any{}
 	for _, post := range grid[min(offset, end):end] {
-		edges = append(edges, map[string]any{"node": mediaJSON(post, false)})
+		edges = append(edges, map[string]any{"node": mediaJSON(post, false, s.cdn())})
 	}
 	pi := map[string]any{"has_next_page": end < len(grid), "end_cursor": nil}
 	if end < len(grid) {
@@ -459,7 +465,7 @@ func (s *Server) reelsPage(p *Profile, offset, size int, lsd string) map[string]
 		edges = append(edges, map[string]any{"node": map[string]any{"__typename": "XIGPolarisVideoMedia", "id": "POLARIS_" + str(x.PK),
 			"pk": str(x.PK), "code": x.Code, "product_type": "clips", "like_and_view_counts_disabled": x.LikesHidden,
 			"like_count": likes(x), "comment_count": x.CommentCount(), "play_count": x.Plays, "clips_tab_pinned_user_ids": []any{},
-			"display_uri": "https://scontent.cdninstagram.example/v/" + x.Code + ".jpg", "user": map[string]any{"pk": str(p.PK), "id": p.ID}}})
+			"display_uri": s.cdn() + "/v/" + x.Code + ".jpg", "user": map[string]any{"pk": str(p.PK), "id": p.ID}}})
 	}
 	pi := map[string]any{"has_next_page": end < len(reels), "end_cursor": nil}
 	if end < len(reels) {
@@ -504,6 +510,16 @@ func (s *Server) highlights(ids any) map[string]any {
 		}
 	}
 	return map[string]any{"edges": edges}
+}
+
+// SetCDN points media URLs at base (set before the server is used).
+func (s *Server) SetCDN(base string) { s.opts.CDNBase = base }
+
+func (s *Server) cdn() string {
+	if s.opts.CDNBase != "" {
+		return s.opts.CDNBase
+	}
+	return DefaultCDN
 }
 
 func (s *Server) postByCode(code string) *Post {
@@ -553,10 +569,10 @@ func profileJSON(p *Profile, host string) map[string]any {
 }
 
 // mediaJSON is a grid item, or with detail the post page's media object.
-func mediaJSON(post *Post, detail bool) map[string]any {
+func mediaJSON(post *Post, detail bool, cdn string) map[string]any {
 	m := map[string]any{"pk": str(post.PK), "id": str(post.PK) + "_" + str(post.Owner.PK), "code": post.Code,
 		"media_type": post.MediaType, "product_type": post.ProductType, "caption": map[string]any{"text": post.Caption},
-		"display_uri": "https://scontent.cdninstagram.example/v/" + post.Code + ".jpg",
+		"display_uri": cdn + "/v/" + post.Code + ".jpg",
 		"owner":       map[string]any{"pk": str(post.Owner.PK), "id": post.Owner.ID},
 		"user":        map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}
 	if detail {
@@ -566,7 +582,7 @@ func mediaJSON(post *Post, detail bool) map[string]any {
 		m["like_count"] = likes(post)
 		m["comment_count"] = post.CommentCount()
 		m["like_and_view_counts_disabled"] = post.LikesHidden
-		m["image_versions2"] = candidates(post.Code)
+		m["image_versions2"] = candidates(cdn, post.Code)
 		m["caption_is_edited"] = post.Edited
 		m["has_audio"] = post.MediaType == 2
 		m["original_width"], m["original_height"] = 1080, 1350
@@ -597,14 +613,14 @@ func mediaJSON(post *Post, detail bool) map[string]any {
 			m["clips_metadata"] = map[string]any{"music_info": nil, "original_sound_info": map[string]any{"audio_asset_id": "1",
 				"original_audio_title": "Original audio", "ig_artist": map[string]any{"username": post.Owner.Username, "id": post.Owner.ID}}}
 			m["video_dash_manifest"] = fmt.Sprintf(`<?xml version="1.0"?><MPD mediaPresentationDuration="PT%gS"></MPD>`, post.DurationS)
-			m["video_versions"] = []any{map[string]any{"type": 101, "url": "https://scontent.cdninstagram.example/v/" + post.Code + ".mp4"}}
+			m["video_versions"] = []any{map[string]any{"type": 101, "url": cdn + "/v/" + post.Code + ".mp4"}}
 		}
 		if post.MediaType == 8 {
 			children := []any{}
 			for k := range post.CarouselCount {
 				code := post.Code + "_" + strconv.Itoa(k)
 				children = append(children, map[string]any{"pk": str(post.PK + int64(k) + 1), "media_type": 1,
-					"accessibility_caption": "synthetic image " + strconv.Itoa(k+1), "image_versions2": candidates(code)})
+					"accessibility_caption": "synthetic image " + strconv.Itoa(k+1), "image_versions2": candidates(cdn, code)})
 			}
 			m["carousel_media"] = children
 			m["carousel_media_count"] = post.CarouselCount
@@ -623,8 +639,8 @@ func likes(p *Post) int64 {
 }
 
 // candidates are an image's renditions: the full size and a small square.
-func candidates(code string) map[string]any {
-	base := "https://scontent.cdninstagram.example/v/t51.29350-15/" + code
+func candidates(cdn, code string) map[string]any {
+	base := cdn + "/v/t51.29350-15/" + code
 	return map[string]any{"candidates": []any{
 		map[string]any{"url": base + "_n.jpg?stp=dst-jpg_e35&oe=6900AA00&oh=00_fake", "width": 1080, "height": 1350},
 		map[string]any{"url": base + "_s150.jpg?stp=c0.135.1080.1080a_s150x150&oe=6900AA00&oh=00_fake", "width": 150, "height": 150},
