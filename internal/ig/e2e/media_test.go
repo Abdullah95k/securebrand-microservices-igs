@@ -49,6 +49,15 @@ func TestMediaPipeline(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+	// fakeig signs its CDN URLs for days, as Instagram does: none may be
+	// found expired before its download.
+	var expired int
+	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM media WHERE status = 'expired' AND user_pk = $1`, p.PK).Scan(&expired); err != nil {
+		t.Fatal(err)
+	}
+	if expired > 0 {
+		t.Fatalf("%d media expired before download (ready %d)", expired, ready)
+	}
 	rows, err := s.DB.Query(ctx, `SELECT media_id::text, s3_bucket, s3_key, size_bytes, sha256 FROM media WHERE status = 'ready' AND user_pk = $1`, p.PK)
 	if err != nil {
 		t.Fatal(err)

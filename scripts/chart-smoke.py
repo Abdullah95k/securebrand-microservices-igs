@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""Run the Helm chart's workloads in Docker, as the chart defines them.
+"""Run a Helm chart's workloads in Docker, as the chart defines them.
 
 Without a Kubernetes cluster, this checks what a cluster would run: it
-renders the chart (deploy/helm/fbs/examples/fakefb.yaml by default) and
-starts every hook Job and Deployment container with the rendered command,
-environment, ConfigMap and Secret mounts, user, read-only root filesystem,
-dropped capabilities and memory limit, on the network of `make infra-up`
-(Postgres, Redpanda, Valkey), next to fakefb and an in-memory S3. Then it
-registers fakefb's pages through the API (`fbctl pages import`) and waits
-for their backfills: every job must complete, with comments and media
-stored, and no component may log an error.
+renders the chart (--chart fbs: deploy/helm/fbs with
+examples/fakefb.yaml; --chart igs: deploy/helm/igs with examples/fakeig.yaml)
+and starts every hook Job and Deployment container with the rendered
+command, environment, ConfigMap and Secret mounts, user, read-only root
+filesystem, dropped capabilities and memory limit, on the network of
+`make infra-up` (Postgres, Redpanda, Valkey), next to the fake platform and
+an in-memory S3. Then it registers the fake's pages or profiles through the
+API and waits for their backfills: every job must finish, with comments and
+media stored, and no component may log an error.
 
 It does not exercise what only Kubernetes does: Services, probes, KEDA,
 PodDisruptionBudgets. `kubeconform` checks those objects' schemas.
 
-    python3 scripts/chart-smoke.py --image fbs:dev [--values FILE] [--keep]
+    python3 scripts/chart-smoke.py --image fbs:dev [--chart igs] [--values FILE] [--keep]
 
-It uses its own database (fbs_smoke), Redis DB 15 and topic prefix
-(chartsmoke.), so it can run next to the tests.
+Each chart uses its own database, Redis DB (15 for fbs, 14 for igs; the
+tests' stacks claim 1 to 13) and topic prefix, so it can run next to the
+tests and the other chart's run.
 """
 import argparse
 import json
@@ -31,10 +33,28 @@ import urllib.request
 
 import yaml
 
-PREFIX = "fbs-smoke-"
-TOPIC_PREFIX = "chartsmoke."
-DB = "fbs_smoke"
 PAGES = ["brand0", "brand1", "brand2"]
+PROFILES = ["profile_01", "profile_02", "profile_03"]
+
+# Per chart: release and chart path, default values, container prefix, topic
+# prefix, database, Redis DB, the env var of the privacy HMAC key, and the
+# schema its tables live in.
+CHARTS = {
+    "fbs": dict(release="fbs", path="deploy/helm/fbs", values="deploy/helm/fbs/examples/fakefb.yaml", prefix="fbs-smoke-",
+                topic_prefix="chartsmoke.", db="fbs_smoke", redis_db=15, hmac_env="IGS_PRIVACY__AUTHOR_HMAC_KEY", schema="public"),
+    "igs": dict(release="igs", path="deploy/helm/igs", values="deploy/helm/igs/examples/fakeig.yaml", prefix="igs-smoke-",
+                topic_prefix="igsmoke.", db="igs_smoke", redis_db=14, hmac_env="IGS_IG__PRIVACY__AUTHOR_HMAC_KEY", schema="ig"),
+}
+CHART = CHARTS["fbs"]
+PREFIX = CHART["prefix"]
+TOPIC_PREFIX = CHART["topic_prefix"]
+DB = CHART["db"]
+
+
+def use_chart(name):
+    global CHART, PREFIX, TOPIC_PREFIX, DB
+    CHART = CHARTS[name]
+    PREFIX, TOPIC_PREFIX, DB = CHART["prefix"], CHART["topic_prefix"], CHART["db"]
 
 
 def sh(*args, check=True, capture=True, timeout=600):
@@ -52,12 +72,12 @@ def render(args):
     repo, _, tag = args.image.rpartition(":")
     if not repo or "/" in tag:
         raise SystemExit(f"--image {args.image}: want repository:tag")
-    out = sh(args.helm, "template", "fbs", "deploy/helm/fbs", "-f", args.values,
+    out = sh(args.helm, "template", CHART["release"], CHART["path"], "-f", args.values,
              "--set", f"image.repository={repo}",
              "--set", f"image.tag={tag}",
              "--set", "image.pullPolicy=Never",
              "--set", f"config.kafka.topic_prefix={TOPIC_PREFIX}",
-             "--set", "config.redis.db=15").stdout
+             "--set", f"config.redis.db={CHART['redis_db']}").stdout
     return [d for d in yaml.safe_load_all(out) if d]
 
 
@@ -122,18 +142,114 @@ def cleanup():
         sh("docker", "rm", "-f", *names, check=False)
     sh("docker", "exec", "fbs-postgres-1", "psql", "-U", "fbs", "-d", "postgres", "-c", f"DROP DATABASE IF EXISTS {DB} WITH (FORCE)", check=False)
     sh("docker", "exec", "fbs-redpanda-1", "rpk", "topic", "delete", "-r", "^" + TOPIC_PREFIX.replace(".", r"\.") + ".*", check=False)
-    sh("docker", "exec", "fbs-valkey-1", "valkey-cli", "-n", "15", "flushdb", check=False)
+    sh("docker", "exec", "fbs-valkey-1", "valkey-cli", "-n", str(CHART["redis_db"]), "flushdb", check=False)
+
+
+def fbs_flow(args, work, failures):
+    """Registers fakefb's pages (fbctl pages import) and checks their backfills."""
+    # An API key, as the go-live runbook creates it.
+    out = sh("docker", "exec", PREFIX + "fbs-api", "/usr/local/bin/fbctl", "apikey", "create", "--name", "smoke",
+             "--scopes", "pages:write,jobs:write,data:read").stdout
+    key = json.loads(out[out.index("{"):])["api_key"]
+    pages_file = os.path.join(work, "pages.csv")
+    with open(pages_file, "w") as f:
+        f.write("page\n" + "\n".join(PAGES) + "\n")
+    os.chmod(pages_file, 0o644)
+    out = sh("docker", "run", "--rm", "--network", args.network, "-v", f"{pages_file}:/pages.csv:ro",
+             "--entrypoint", "/usr/local/bin/fbctl", args.image, "pages", "import",
+             "--api", "http://fbs-api:8080", "--key", key, "/pages.csv").stdout
+    imported = json.loads(out[out.index("{"):])
+    print(f"pages import: {imported}")
+    if imported.get("created") != len(PAGES):
+        failures.append(f"pages import created {imported.get('created')}, want {len(PAGES)}")
+    # Importing again changes nothing.
+    out = sh("docker", "run", "--rm", "--network", args.network, "-v", f"{pages_file}:/pages.csv:ro",
+             "--entrypoint", "/usr/local/bin/fbctl", args.image, "pages", "import",
+             "--api", "http://fbs-api:8080", "--key", key, "/pages.csv").stdout
+    again = json.loads(out[out.index("{"):])
+    if again.get("existing") != len(PAGES) or again.get("created"):
+        failures.append(f"second import: {again}")
+
+    deadline = time.time() + args.timeout
+    while time.time() < deadline:
+        done = int(psql("SELECT count(*) FROM jobs WHERE status IN ('completed','partial','failed','cancelled')") or 0)
+        if done >= len(PAGES):
+            break
+        time.sleep(2)
+    statuses = psql("SELECT string_agg(kind || ':' || status, ',') FROM jobs")
+    posts = int(psql("SELECT count(*) FROM posts"))
+    comments = int(psql("SELECT count(*) FROM comments"))
+    media = psql("SELECT coalesce(string_agg(status || '=' || n, ','), '') FROM (SELECT status, count(*) n FROM media GROUP BY status) m")
+    print(f"jobs {statuses}; posts {posts}; comments {comments}; media {media}")
+    if statuses is None or statuses.count(":completed") != len(PAGES):
+        failures.append(f"jobs: {statuses}")
+    if posts == 0 or comments == 0:
+        failures.append("nothing stored")
+    if "ready=" not in media and "deleted=" not in media:
+        failures.append(f"no media downloaded: {media}")
+    api_port = host_port("fbs-api", 8080)
+    status, body = http(f"http://127.0.0.1:{api_port}/v1/pages", key)
+    if status != 200:
+        failures.append(f"GET /v1/pages: {status} {body[:200]}")
+
+
+def igs_flow(args, failures):
+    """Registers fakeig's profiles through igs's API and checks their
+    backfills: jobs finished (completed, or partial for fakeig's gated
+    posts), posts, comments and media stored in schema ig, re-registering
+    changes nothing."""
+    api = CHART["release"] + "-api"
+    # An API key, as docs/runbooks/igs-operations.md creates it.
+    out = sh("docker", "exec", PREFIX + api, "/usr/local/bin/igsctl", "apikey", "create", "--name", "smoke",
+             "--scopes", "profiles:write,jobs:write,data:read").stdout
+    key = json.loads(out[out.index("{"):])["api_key"]
+    api_port = host_port(api, 8080)
+    for p in PROFILES:
+        status, body = http(f"http://127.0.0.1:{api_port}/v1/profiles", key, {"profile": p})
+        if status != 201:
+            failures.append(f"register {p}: {status} {body[:200]}")
+    # Registering again changes nothing.
+    status, body = http(f"http://127.0.0.1:{api_port}/v1/profiles", key, {"profile": PROFILES[0]})
+    if status != 200:
+        failures.append(f"second registration: {status} {body[:200]}")
+
+    deadline = time.time() + args.timeout
+    while time.time() < deadline:
+        done = int(psql("SELECT count(*) FROM ig.jobs WHERE status IN ('completed','partial','failed','cancelled')") or 0)
+        if done >= len(PROFILES):
+            break
+        time.sleep(2)
+    statuses = psql("SELECT string_agg(kind || ':' || status, ',' ORDER BY kind, status) FROM ig.jobs")
+    posts = int(psql("SELECT count(*) FROM ig.posts"))
+    comments = int(psql("SELECT count(*) FROM ig.comments"))
+    profiles = int(psql("SELECT count(*) FROM ig.profiles"))
+    media = psql("SELECT coalesce(string_agg(status || '=' || n, ','), '') FROM (SELECT status, count(*) n FROM ig.media GROUP BY status) m")
+    print(f"jobs {statuses}; profiles {profiles}; posts {posts}; comments {comments}; media {media}")
+    finished = (statuses or "").split(",") if statuses else []
+    if len(finished) != len(PROFILES) or any(not (j.endswith(":completed") or j.endswith(":partial")) for j in finished):
+        failures.append(f"jobs: {statuses}")
+    if profiles != len(PROFILES) or posts == 0 or comments == 0:
+        failures.append("nothing stored")
+    if "ready=" not in media and "deleted=" not in media:
+        failures.append(f"no media downloaded: {media}")
+    for path in ["/v1/profiles", f"/v1/profiles/{PROFILES[0]}/posts"]:
+        status, body = http(f"http://127.0.0.1:{api_port}{path}", key)
+        if status != 200:
+            failures.append(f"GET {path}: {status} {body[:200]}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", default="fbs:dev")
-    ap.add_argument("--values", default="deploy/helm/fbs/examples/fakefb.yaml")
+    ap.add_argument("--chart", choices=sorted(CHARTS), default="fbs")
+    ap.add_argument("--values", default="", help="values file (default: the chart's fake-platform example)")
     ap.add_argument("--network", default="fbs_default")
     ap.add_argument("--helm", default="helm")
     ap.add_argument("--timeout", type=int, default=300, help="seconds for the backfills")
     ap.add_argument("--keep", action="store_true", help="leave the containers running")
     args = ap.parse_args()
+    use_chart(args.chart)
+    args.values = args.values or CHART["values"]
 
     # make infra-up returns once Postgres answers; Redpanda may still be
     # starting. A fresh broker also answers its first producer-ID requests
@@ -167,17 +283,22 @@ def main():
                 f.write(body)
             os.chmod(os.path.join(d, fname), 0o644)
         configmaps[cm] = d
-    # What the cluster's Secret fbs-env (secretEnv.existingSecret) would hold.
-    secret_env = os.path.join(work, "fbs-env")
+    # What the cluster's Secret (secretEnv.existingSecret) would hold.
+    secret_env = os.path.join(work, CHART["release"] + "-env")
     with open(secret_env, "w") as f:
         f.write(f"IGS_POSTGRES__DSN=postgres://fbs:fbs@postgres:5432/{DB}?sslmode=disable\n"
                 "IGS_S3__ACCESS_KEY=smoke\nIGS_S3__SECRET_KEY=smokesmoke\n"
-                f"IGS_PRIVACY__AUTHOR_HMAC_KEY={secrets.token_hex(32)}\n")
+                f"{CHART['hmac_env']}={secrets.token_hex(32)}\n")
     # The Services the values expect besides the infrastructure.
     sh("docker", "run", "-d", "--name", PREFIX + "s3", "--network", args.network, "--network-alias", "s3",
        "--entrypoint", "/usr/local/bin/devs3", args.image, "--addr", ":9000")
-    sh("docker", "run", "-d", "--name", PREFIX + "fakefb", "--network", args.network, "--network-alias", "fakefb",
-       "--entrypoint", "/usr/local/bin/fakefb", args.image, "--addr", ":8090", "--pages", str(len(PAGES)), "--posts", "10")
+    if args.chart == "igs":
+        sh("docker", "run", "-d", "--name", PREFIX + "fakeig", "--network", args.network, "--network-alias", "fakeig",
+           "--entrypoint", "/usr/local/bin/fakeig", args.image, "--addr", ":8091", "--profiles", str(len(PROFILES)), "--posts", "10",
+           "--cdn-base", "http://fakeig:8091/fake-cdn")
+    else:
+        sh("docker", "run", "-d", "--name", PREFIX + "fakefb", "--network", args.network, "--network-alias", "fakefb",
+           "--entrypoint", "/usr/local/bin/fakefb", args.image, "--addr", ":8090", "--pages", str(len(PAGES)), "--posts", "10")
 
     failures = []
     try:
@@ -211,50 +332,10 @@ def main():
             raise SystemExit(f"not ready after 120s: {sorted(pending)}")
         print(f"all {len(deployments)} deployments ready")
 
-        # An API key, as the go-live runbook creates it.
-        out = sh("docker", "exec", PREFIX + "fbs-api", "/usr/local/bin/fbctl", "apikey", "create", "--name", "smoke",
-                 "--scopes", "pages:write,jobs:write,data:read").stdout
-        key = json.loads(out[out.index("{"):])["api_key"]
-        pages_file = os.path.join(work, "pages.csv")
-        with open(pages_file, "w") as f:
-            f.write("page\n" + "\n".join(PAGES) + "\n")
-        os.chmod(pages_file, 0o644)
-        out = sh("docker", "run", "--rm", "--network", args.network, "-v", f"{pages_file}:/pages.csv:ro",
-                 "--entrypoint", "/usr/local/bin/fbctl", args.image, "pages", "import",
-                 "--api", "http://fbs-api:8080", "--key", key, "/pages.csv").stdout
-        imported = json.loads(out[out.index("{"):])
-        print(f"pages import: {imported}")
-        if imported.get("created") != len(PAGES):
-            failures.append(f"pages import created {imported.get('created')}, want {len(PAGES)}")
-        # Importing again changes nothing.
-        out = sh("docker", "run", "--rm", "--network", args.network, "-v", f"{pages_file}:/pages.csv:ro",
-                 "--entrypoint", "/usr/local/bin/fbctl", args.image, "pages", "import",
-                 "--api", "http://fbs-api:8080", "--key", key, "/pages.csv").stdout
-        again = json.loads(out[out.index("{"):])
-        if again.get("existing") != len(PAGES) or again.get("created"):
-            failures.append(f"second import: {again}")
-
-        deadline = time.time() + args.timeout
-        while time.time() < deadline:
-            done = int(psql("SELECT count(*) FROM jobs WHERE status IN ('completed','partial','failed','cancelled')") or 0)
-            if done >= len(PAGES):
-                break
-            time.sleep(2)
-        statuses = psql("SELECT string_agg(kind || ':' || status, ',') FROM jobs")
-        posts = int(psql("SELECT count(*) FROM posts"))
-        comments = int(psql("SELECT count(*) FROM comments"))
-        media = psql("SELECT coalesce(string_agg(status || '=' || n, ','), '') FROM (SELECT status, count(*) n FROM media GROUP BY status) m")
-        print(f"jobs {statuses}; posts {posts}; comments {comments}; media {media}")
-        if statuses is None or statuses.count(":completed") != len(PAGES):
-            failures.append(f"jobs: {statuses}")
-        if posts == 0 or comments == 0:
-            failures.append("nothing stored")
-        if "ready=" not in media and "deleted=" not in media:
-            failures.append(f"no media downloaded: {media}")
-        api_port = host_port("fbs-api", 8080)
-        status, body = http(f"http://127.0.0.1:{api_port}/v1/pages", key)
-        if status != 200:
-            failures.append(f"GET /v1/pages: {status} {body[:200]}")
+        if args.chart == "igs":
+            igs_flow(args, failures)
+        else:
+            fbs_flow(args, work, failures)
 
         logs = {}
         for d in deployments + hooks:

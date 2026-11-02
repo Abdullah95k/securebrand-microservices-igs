@@ -5,7 +5,7 @@ PG_DSN ?= postgres://fbs:fbs@localhost:5432/fbs?sslmode=disable
 TEST_ENV = IGS_TEST_PG_DSN="$(PG_DSN)" IGS_TEST_REDIS_ADDR=localhost:6379 IGS_TEST_KAFKA_BROKERS=localhost:19092 IGS_TEST_SCHEMA_REGISTRY=http://localhost:18081
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 
-.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin igs-probe igs-probe-dryrun igs-phase0 igs-phase0-dryrun chart-check chart-smoke clean
+.PHONY: all build test lint vet generate golden fixtures infra-up infra-down test-integration e2e loadtest soak docker docker-prebuilt compose-up compose-down igs-compose-up igs-compose-down spike-report phase0 phase0-dryrun phase0-trim phase0-rate pilot-up pilot-register pilot-registry pilot-report pilot-down pilot-clean spike-bin igs-spike-bin igs-probe igs-probe-dryrun igs-phase0 igs-phase0-dryrun chart-check igs-chart-check chart-smoke igs-chart-smoke clean
 
 all: generate build test
 
@@ -84,17 +84,41 @@ chart-check:
 	set -o pipefail; $(HELM) template fbs deploy/helm/fbs --set keda.authSecret=fbs-keda-kafka,tlsFiles.existingSecret=fbs-tls,alerts.enabled=true,dashboards.enabled=true,serviceMonitor.enabled=true,api.ingress.enabled=true,networkPolicy.enabled=true,hooks.schemas=true \
 	  | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 	set -o pipefail; $(HELM) template fbs deploy/helm/fbs -f deploy/helm/fbs/examples/fakefb.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	$(MAKE) igs-chart-check
+
+## The same for igs's chart (deploy/helm/igs).
+igs-chart-check:
+	$(HELM) lint deploy/helm/igs
+	$(HELM) lint deploy/helm/igs -f deploy/helm/igs/examples/fakeig.yaml
+	set -o pipefail; $(HELM) template igs deploy/helm/igs | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	set -o pipefail; $(HELM) template igs deploy/helm/igs --set keda.authSecret=igs-keda-kafka,tlsFiles.existingSecret=igs-tls,alerts.enabled=true,dashboards.enabled=true,serviceMonitor.enabled=true,api.ingress.enabled=true,networkPolicy.enabled=true,hooks.schemas=true \
+	  | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/fakeig.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 
 ## Run the chart's hooks and Deployments in Docker exactly as rendered, then
 ## real backfills against fakefb (make infra-up and make docker first).
 chart-smoke:
 	python3 scripts/chart-smoke.py --image $(IMAGE) --helm $(HELM)
 
+## The same for igs's chart, against fakeig: hooks (igsctl), every
+## Deployment, three registered profiles' backfills.
+igs-chart-smoke:
+	python3 scripts/chart-smoke.py --chart igs --image $(IMAGE) --helm $(HELM)
+
 compose-up:
 	$(COMPOSE) up -d
 
 compose-down:
 	$(COMPOSE) down -v
+
+## igs's local stack: infrastructure, fakeig and igs's services
+## (deploy/compose/igs.yml); the API answers on localhost:8081.
+IGS_COMPOSE = $(COMPOSE) -f deploy/compose/igs.yml
+igs-compose-up:
+	$(IGS_COMPOSE) up -d postgres redpanda valkey s3 fakeig igs-api igs-scheduler igs-crawler igs-persister igs-media igs-registry-sync
+
+igs-compose-down:
+	$(IGS_COMPOSE) down -v
 
 spike-report:
 	$(GO) run ./cmd/fbs-spike report --in spike-results.jsonl

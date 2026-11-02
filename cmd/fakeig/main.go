@@ -23,6 +23,7 @@ func main() {
 	docIDs := flag.String("docids", "seed", "accepted doc_ids: seed (the embedded registry seed) or rotated (other ids, discoverable from the page's /rsrc.php bundle)")
 	rateLimitEvery := flag.Int("rate-limit-every", 0, "answer every Nth GraphQL request with HTTP 429 (0 = off)")
 	loginWallAfter := flag.Int("login-wall-after", 0, "GraphQL requests per identity before a login wall (0 = off)")
+	cdnBase := flag.String("cdn-base", "", "base of media URLs, e.g. http://fakeig:8091/fake-cdn to serve them from this server (default: an unresolvable stand-in host)")
 	flag.Parse()
 
 	spec := fakeig.DefaultSpec()
@@ -41,7 +42,7 @@ func main() {
 		}
 		docs[q.FriendlyName] = append(docs[q.FriendlyName], id)
 	}
-	srv := fakeig.NewServer(fakeig.NewWorld(spec), fakeig.Options{Docs: docs,
+	srv := fakeig.NewServer(fakeig.NewWorld(spec), fakeig.Options{Docs: docs, CDNBase: *cdnBase,
 		Faults: fakeig.Faults{RateLimitEvery: *rateLimitEvery, LoginWallAfter: *loginWallAfter}})
 	slog.Info("fakeig listening", "addr", *addr, "profiles", *profiles, "docids", *docIDs)
 	hs := &http.Server{Addr: *addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second}

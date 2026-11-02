@@ -1,0 +1,245 @@
+image:
+  # The one image holds every binary (fbs's and igs's); each Deployment
+  # picks its command.
+  repository: ghcr.io/abdullah95k/fbs
+  # Defaults to the chart's appVersion (the release workflow publishes both).
+  tag: ""
+  # Image built with `--target browser` (Chromium included). When set, the
+  # components marked `browser: true` (crawlers, registry-sync) use it; set
+  # it together with config.ig.browser.enabled.
+  browserTag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Rendered into a ConfigMap and mounted as /etc/igs/config.yaml. Every key of
+# configs/default.yaml can be set here; igs reads the ig: section and the
+# shared postgres (schema ig), redis, kafka and s3 sections. Secrets go in
+# secretEnv / secretFiles.
+config:
+  service: {name: igs, env: prod}
+  log: {level: info, format: json}
+  kafka:
+    brokers: ["kafka-bootstrap.kafka:9092"]
+  redis:
+    addr: "valkey-master.igs:6379"
+  s3:
+    endpoint: "s3.amazonaws.com"
+    use_ssl: true
+    region: "eu-west-1"
+    # igs keeps its media under ig/ in the media bucket.
+    media_bucket: "securebrand-igs-media"
+    raw_bucket: "securebrand-igs-raw"
+  media:
+    ttl: 72h
+    required_consumers: ["analysis"]
+  ig:
+    base_url: "https://www.instagram.com"
+    # The owner's probe pace (C2): 0.3 requests a second per identity,
+    # identities retired after 500 to 750 requests.
+    identity_rps: 0.33
+    profile_rps: 3
+    global_rps: 50      # AIMD's starting ceiling; ig.aimd.max_rps caps how far it grows
+    capture_raw: failures
+    proxy:
+      # Tiers (endpoints and credentials) come from the proxies Secret.
+      # ISP proxies only (the owner's decision); residential is not used.
+      routing:
+        default: [isp]
+    # The browser fallback needs image.browserTag. Pods drop every
+    # capability, which leaves Chromium's sandbox unusable, hence no_sandbox.
+    browser:
+      enabled: false
+      no_sandbox: true
+    # igs-registry-sync follows doc_id rotations on these profiles. Pick at
+    # least three public profiles that post often and get comments.
+    registry_sync:
+      canary_pages: []
+
+# Existing Secret whose keys become environment variables, e.g.
+#   IGS_POSTGRES__DSN, IGS_POSTGRES__READ_DSN, IGS_REDIS__PASSWORD,
+#   IGS_S3__ACCESS_KEY, IGS_S3__SECRET_KEY, IGS_IG__PRIVACY__AUTHOR_HMAC_KEY
+secretEnv:
+  existingSecret: igs-env
+# Existing Secret with a "proxies.yaml" key holding ig.proxy.tiers (proxy
+# endpoints and credentials). Mounted and layered over config.yaml.
+secretFiles:
+  existingSecret: igs-proxies
+  key: proxies.yaml
+# Existing Secret with certificate files (CA, client certificate and key)
+# for config.kafka.tls / config.redis.tls, mounted at mountPath: point
+# ca_file, cert_file and key_file at e.g. /etc/igs-tls/ca.pem.
+tlsFiles:
+  existingSecret: ""
+  mountPath: /etc/igs-tls
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: ["ALL"]}
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+# Alerting and recording rules (files/alerts.yaml) as a PrometheusRule.
+# Requires the Prometheus Operator CRDs. Labels let the Prometheus
+# ruleSelector pick the rule up.
+alerts:
+  enabled: false
+  labels: {}
+
+# Grafana dashboards (files/dashboards/*.json) as ConfigMaps, for the
+# Grafana sidecar that loads ConfigMaps labelled grafana_dashboard.
+dashboards:
+  enabled: false
+  labels:
+    grafana_dashboard: "1"
+  annotations: {}
+
+# KEDA scales Kafka consumers on consumer-group lag. Requires KEDA installed.
+keda:
+  enabled: true
+  kafkaBootstrap: "kafka-bootstrap.kafka:9092"
+  pollingInterval: 15
+  cooldownPeriod: 120
+  # When the brokers need SASL and/or TLS: an existing Secret (in the
+  # release namespace) whose keys are KEDA's Kafka authentication parameters
+  # (sasl: plaintext|scram_sha256|scram_sha512, username, password,
+  # tls: enable, ca, cert, key). authParams must list exactly the keys it
+  # holds: KEDA rejects an empty tls. For TLS brokers add tls and ca.
+  authSecret: ""
+  authParams: [sasl, username, password]
+
+# Hooks run `igsctl migrate up` (schema ig, the query registry seed,
+# partitions), `igsctl kafka apply` (configs/ig/topics.yaml) and, when
+# enabled, `igsctl schemas apply` before installs and upgrades.
+hooks:
+  migrate: true
+  topics: true
+  topicReplicas: 3
+  # Caps each topic's partitions (0: configs/ig/topics.yaml's counts, sized
+  # for 300k profiles every 3 hours). A one-node rehearsal cluster needs it.
+  topicPartitionsCap: 0
+  # `igsctl schemas apply`: registers the ig.v1 schemas with
+  # config.kafka.schema_registry.url (BACKWARD_TRANSITIVE). An incompatible
+  # contract change fails the hook, and with it the upgrade.
+  schemas: false
+
+api:
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: false
+    className: ""
+    host: igs.example.com
+    tls: []
+
+# One Deployment per component. "lag" lists consumer groups/topics KEDA
+# watches (group and topic names get config.kafka.topic_prefix prepended).
+# Crawler groups are igs-ig-crawler-<stage>-<lane>.
+components:
+  api:
+    enabled: true
+    command: ["/usr/local/bin/igs-api"]
+    replicas: 2
+    port: 8080
+    resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {memory: 512Mi}}
+    pdb: {minAvailable: 1}
+  scheduler:
+    enabled: true
+    command: ["/usr/local/bin/igs-scheduler"]
+    replicas: 2 # leader-elected; one active
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
+    pdb: {minAvailable: 1}
+  # A profile task: the profile query when due, the grid pages, reels and
+  # highlights; it spawns a post task per new post.
+  crawler-profile:
+    enabled: true
+    browser: true
+    command: ["/usr/local/bin/igs-crawler", "--stages", "profile"]
+    replicas: 2
+    terminationGracePeriodSeconds: 90
+    resources: {requests: {cpu: 500m, memory: 512Mi}, limits: {memory: 2Gi}}
+    pdb: {maxUnavailable: 1}
+    autoscale:
+      min: 2
+      max: 12
+      lag:
+        - {group: igs-ig-crawler-profile-p0, topic: igs.task.profile.p0, threshold: 20}
+        - {group: igs-ig-crawler-profile-p1, topic: igs.task.profile.p1, threshold: 500}
+        - {group: igs-ig-crawler-profile-p2, topic: igs.task.profile.p2, threshold: 1000}
+  # A post task: the post page, then its comments.
+  crawler-post:
+    enabled: true
+    browser: true
+    command: ["/usr/local/bin/igs-crawler", "--stages", "post"]
+    replicas: 4
+    terminationGracePeriodSeconds: 90
+    resources: {requests: {cpu: 500m, memory: 512Mi}, limits: {memory: 2Gi}}
+    pdb: {maxUnavailable: 1}
+    autoscale:
+      min: 4
+      max: 24
+      lag:
+        - {group: igs-ig-crawler-post-p0, topic: igs.task.post.p0, threshold: 50}
+        - {group: igs-ig-crawler-post-p1, topic: igs.task.post.p1, threshold: 1000}
+        - {group: igs-ig-crawler-post-p2, topic: igs.task.post.p2, threshold: 2000}
+  # Moves tasks from the retry topics back to their stage when due.
+  crawler-retry:
+    enabled: true
+    command: ["/usr/local/bin/igs-crawler", "--stages", "retry"]
+    replicas: 1
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
+  persister:
+    enabled: true
+    command: ["/usr/local/bin/igs-persister"]
+    replicas: 2
+    resources: {requests: {cpu: 500m, memory: 512Mi}, limits: {memory: 1Gi}}
+    pdb: {maxUnavailable: 1}
+    autoscale:
+      min: 2
+      max: 8
+      lag:
+        - {group: igs-ig-persister, topic: ig.comment.v1, threshold: 20000}
+        - {group: igs-ig-persister, topic: ig.post.v1, threshold: 5000}
+        - {group: igs-ig-persister, topic: ig.post_metrics.v1, threshold: 20000}
+  # Downloads media (ig.limits.include_media) and expires it once the
+  # analysis service acknowledged it or its TTL passed.
+  media-downloader:
+    enabled: true
+    command: ["/usr/local/bin/igs-media", "--roles", "downloader"]
+    replicas: 2
+    resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {memory: 1Gi}}
+    pdb: {maxUnavailable: 1}
+    autoscale:
+      min: 2
+      max: 12
+      lag:
+        - {group: igs-ig-media-downloader, topic: igs.task.media, threshold: 1000}
+  media-janitor:
+    enabled: true
+    command: ["/usr/local/bin/igs-media", "--roles", "janitor"]
+    replicas: 1
+    resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
+  # Discovers, checks and promotes rotated doc_ids on the canary profiles.
+  # Needs the crawlers' egress (proxies, and Instagram's CDN for bundles).
+  # One replica; runs are serialised by a Postgres advisory lock anyway.
+  registry-sync:
+    enabled: true
+    browser: true
+    command: ["/usr/local/bin/igs-registry-sync"]
+    replicas: 1
+    # Room for a headless Chromium when ig.browser is enabled.
+    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
+
+networkPolicy:
+  # Restricts ingress to the API port and the metrics port. Egress rules are
+  # environment specific (proxy endpoints for crawlers, CDN for the
+  # downloader) and are left to the cluster operator.
+  enabled: false
+  metricsFromNamespace: monitoring

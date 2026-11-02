@@ -104,9 +104,10 @@ func Redis(t testing.TB) *redis.Client {
 	return c
 }
 
-// Valkey's DB indexes 1..redisDBs are handed out; DB 0 holds the claims.
+// Valkey's DB indexes 1..redisDBs are handed out; DB 0 holds the claims,
+// and scripts/chart-smoke.py uses 14 (igs) and 15 (fbs).
 const (
-	redisDBs        = 15
+	redisDBs        = 13
 	redisClaimTTL   = 30 * time.Second
 	redisClaimWait  = 5 * time.Minute
 	redisClaimRenew = redisClaimTTL / 3

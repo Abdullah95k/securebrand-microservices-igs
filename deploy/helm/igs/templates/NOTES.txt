@@ -1,0 +1,8 @@
+igs {{ .Chart.AppVersion }} installed as {{ .Release.Name }}.
+
+Create an API key:
+  kubectl exec deploy/{{ include "igs.fullname" . }}-api -- /usr/local/bin/igsctl apikey create --name <client> --scopes jobs:write,profiles:write,data:read
+
+Before scraping real Instagram at volume, run Phase 0 (docs/runbooks/igs-phase0.md) and
+import its registry: igsctl registry import --file phase0/out/registry.yaml
+Operations: docs/runbooks/igs-operations.md
