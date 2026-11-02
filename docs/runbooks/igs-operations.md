@@ -178,6 +178,31 @@ Media files are downloaded only with `ig.limits.include_media` (D5: metadata alw
 
 The janitor deletes a file once every `media.required_consumers` acknowledged it (`ig.media.processed.v1`), or at `media.ttl`. `IgsIgMediaTTLExpiries` means the analysis service does not keep up with `ig.media.ready.v1`, or its acks do not arrive.
 
+## Capacity and sizing
+
+**Pipeline ceilings.** `make igs-loadtest` measures the in-process pipeline against fakeig, on one machine, every component in one process. On 4 CPUs (2026-11-02):
+
+| Run | Wall time | Stored | Rates |
+|---|---|---|---|
+| 30 profiles × 40 posts, read in full at once | 4.4 s | 1,050 posts, 31,595 comments (all of fakeig's) | 221 GraphQL requests/s, 7,100 comments/s |
+| 150 profiles × 40 posts | 21.0 s | 5,250 posts, 155,652 comments | 231 requests/s, 7,400 comments/s |
+| Persister alone, 200,000 comments | 13.2 s new, 11.6 s unchanged | | 15,200 rows/s new, 17,200 rows/s no-op upsert |
+
+The persister is the first stage to back up: its backlog peaked at 136,716 records in the 150-profile run, while the crawl stages' stayed near 0. KEDA scales it on `ig.comment.v1`, `ig.post.v1` and `ig.post_metrics.v1` lag.
+
+**What bounds production.** Production's pace is set by Instagram, not by these ceilings:
+- `ig.identity_rps` (0.33 per identity) times the ISP exits sets the fleet's request rate.
+- 300k profiles every 3 hours is about 28 profile runs a second.
+- At 5 to 10 requests a run, that is roughly 150 to 300 requests a second.
+- Phase 0 (C3) measures the requests per profile and the block rate per tier that size the exit pool.
+
+**Valkey.** Most keys are per task:
+- **Done marker:** 88 B, kept `stage.DoneTTL` (96 h, longer than the task topics' 72 h retention).
+- **Checkpoint:** 344 B, deleted when its task finishes, so only in-flight segments hold one.
+- **Job keys:** kept 24 h after the job finishes.
+
+A scheduled run is one profile task plus up to `ig.schedule.post_refresh_per_run` (30) post tasks, typically 5 to 9. At 300k profiles every 3 hours (2.4M runs a day, about 6 tasks each), the done markers alone are about 58M keys, around 5 GB: plan Valkey's memory for that. The soak (`make igs-soak`) prints the key count every 30 s.
+
 ## Erasure requests
 
 `POST /v1/erasure-requests` records a request; the scheduler's eraser carries it out within seconds:

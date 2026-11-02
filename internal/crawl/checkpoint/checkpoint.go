@@ -84,6 +84,21 @@ func (s *Store) MarkDone(ctx context.Context, taskID string) error {
 	return s.r.Set(ctx, redisx.KeyPrefix+"done:"+taskID, "1", 7*24*time.Hour).Err()
 }
 
+// Complete marks taskID done for doneTTL and, with drop, deletes its
+// segment's checkpoint, in one transaction. Once a task is marked done the
+// worker skips it, so a finished segment's checkpoint is never read again
+// and only takes memory until its TTL. A dead-lettered task keeps it: a
+// DLQ replay runs the same segment under a new id.
+func (s *Store) Complete(ctx context.Context, taskID, lineage string, seq uint32, doneTTL time.Duration, drop bool) error {
+	pipe := s.r.TxPipeline()
+	pipe.Set(ctx, redisx.KeyPrefix+"done:"+taskID, "1", doneTTL)
+	if drop {
+		pipe.Del(ctx, ckptKey(lineage, seq))
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
 var extendScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('PEXPIRE', KEYS[1], ARGV[2])
