@@ -272,8 +272,11 @@ func scanJob(row pgx.CollectableRow) (*Job, error) {
 }
 
 // Get loads a job, merging live counters from Redis while it runs.
-func (d *Dispatcher) Get(ctx context.Context, id uuid.UUID) (*Job, error) {
-	rows, err := d.DB.Query(ctx, selectJob+` WHERE job_id = $1`, id)
+// Get returns a job. With owner set, only that client's job is found
+// (pgx.ErrNoRows otherwise, which the API answers with 404); nil is an
+// admin's view of every job.
+func (d *Dispatcher) Get(ctx context.Context, id uuid.UUID, owner *uuid.UUID) (*Job, error) {
+	rows, err := d.DB.Query(ctx, selectJob+` WHERE job_id = $1 AND ($2::uuid IS NULL OR api_client_id = $2)`, id, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -317,8 +320,11 @@ func (d *Dispatcher) List(ctx context.Context, client *uuid.UUID, pageRef, statu
 }
 
 // Cancel flags a running job.
-func (d *Dispatcher) Cancel(ctx context.Context, id uuid.UUID) error {
-	tag, err := d.DB.Exec(ctx, `UPDATE jobs SET status = 'cancelling' WHERE job_id = $1 AND status IN ('running','queued')`, id)
+// Cancel flags a running job for cancellation. With owner set, only that
+// client's job (pgx.ErrNoRows otherwise).
+func (d *Dispatcher) Cancel(ctx context.Context, id uuid.UUID, owner *uuid.UUID) error {
+	tag, err := d.DB.Exec(ctx, `UPDATE jobs SET status = 'cancelling' WHERE job_id = $1 AND status IN ('running','queued')
+		AND ($2::uuid IS NULL OR api_client_id = $2)`, id, owner)
 	if err != nil {
 		return err
 	}

@@ -25,6 +25,7 @@ require (
 	github.com/tidwall/gjson v1.20.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kadm v1.19.0
+	github.com/twmb/franz-go/pkg/kfake v0.0.0-20261022190701-123ec885bc97
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/net v0.62.0

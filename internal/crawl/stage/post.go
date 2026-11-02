@@ -162,7 +162,7 @@ func (s *PostStage) Run(ctx context.Context, t *taskv1.Task) Outcome {
 		switch {
 		case !res.PageInfo.HasNext || res.PageInfo.EndCursor == "":
 			finished, exhausted = true, true
-		case max > 0 && st.ItemsSeen >= max:
+		case max > 0 && t.ItemsSeen+st.ItemsSeen >= max:
 			finished = true
 		case !watermark.IsZero() && olderRun >= incrementalOlderStop:
 			finished = true
@@ -198,7 +198,7 @@ func (s *PostStage) Run(ctx context.Context, t *taskv1.Task) Outcome {
 		out := done(c)
 		if t.Mode == fbv1.CrawlMode_CRAWL_MODE_INCREMENTAL && !truncated {
 			grew := sc.ReportedCommentCount - sc.CommentsSeen
-			if grew > 0 && st.ItemsSeen < grew {
+			if grew > 0 && t.ItemsSeen+st.ItemsSeen < grew {
 				out.FollowUps = append(out.FollowUps, task.NewPost(t, fbv1.CrawlMode_CRAWL_MODE_RECRAWL, cloneScope(sc)))
 				c["recrawls_spawned"]++
 			}
@@ -206,6 +206,7 @@ func (s *PostStage) Run(ctx context.Context, t *taskv1.Task) Outcome {
 		return out
 	}
 	next := task.Continuation(t, st.Cursor)
+	next.ItemsSeen = t.ItemsSeen + st.ItemsSeen
 	metrics.TaskYields.WithLabelValues("post").Inc()
 	return Outcome{Result: Continue, Next: next, Counters: c}
 }

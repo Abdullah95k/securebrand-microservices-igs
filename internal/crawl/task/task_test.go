@@ -2,6 +2,7 @@ package task
 
 import (
 	"testing"
+	"time"
 
 	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
 	taskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fbs/task/v1"
@@ -69,5 +70,22 @@ func TestRefID(t *testing.T) {
 		if got := RefID(ref); got != want {
 			t.Errorf("RefID(%q) = %d, want %d", ref, got, want)
 		}
+	}
+}
+
+// Each replay gets its own id; continuations carry what earlier segments saw.
+func TestReplayAndItemsSeen(t *testing.T) {
+	base := Finalize(&taskv1.Task{JobId: "j", Kind: taskv1.Kind_KIND_POST, Attempt: 4, Stalls: 2,
+		Scope: &taskv1.Task_Post{Post: &taskv1.PostScope{PostId: 1}}})
+	a, b := Replay(base, time.Unix(1, 0)), Replay(base, time.Unix(2, 0))
+	if a.TaskId == base.TaskId || a.TaskId == b.TaskId || a.Attempt != 0 || a.Stalls != 0 || a.LineageId != base.LineageId {
+		t.Fatalf("replays: %s %s from %s", a.TaskId, b.TaskId, base.TaskId)
+	}
+	base.ItemsSeen = 50
+	if c := Continuation(base, "x"); c.ItemsSeen != 50 {
+		t.Fatalf("continuation lost items_seen: %d", c.ItemsSeen)
+	}
+	if r := Retry(base, ""); r.ItemsSeen != 50 {
+		t.Fatalf("retry lost items_seen: %d", r.ItemsSeen)
 	}
 }

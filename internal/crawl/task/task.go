@@ -54,7 +54,8 @@ func Finalize(t *taskv1.Task) *taskv1.Task {
 	return t
 }
 
-// Continuation returns the next segment of the same stream.
+// Continuation returns the next segment of the same stream. Callers add
+// what the segment saw to ItemsSeen.
 func Continuation(t *taskv1.Task, cursor string) *taskv1.Task {
 	c := cloneShallow(t)
 	c.Seq = t.Seq + 1
@@ -62,6 +63,18 @@ func Continuation(t *taskv1.Task, cursor string) *taskv1.Task {
 	c.Attempt, c.Stalls = 0, 0
 	c.EnqueuedAt = nil
 	return Finalize(c)
+}
+
+// Replay returns a dead-lettered task ready to run again: under a new task
+// id, because the dead letter marked the old one done (a 7-day marker the
+// worker would skip it for), with its retry counts reset. It keeps the
+// lineage and sequence, so it resumes from the stream's checkpoint.
+func Replay(t *taskv1.Task, now time.Time) *taskv1.Task {
+	c := cloneShallow(t)
+	c.TaskId = hashID("replay", t.TaskId, strconv.FormatInt(now.UnixNano(), 10))
+	c.Attempt, c.Stalls = 0, 0
+	c.EnqueuedAt = timestamppb.New(now)
+	return c
 }
 
 // Retry returns the same task (same id) with attempt incremented. The worker
@@ -79,6 +92,7 @@ func cloneShallow(t *taskv1.Task) *taskv1.Task {
 	c := &taskv1.Task{
 		TaskId: t.TaskId, LineageId: t.LineageId, Seq: t.Seq, JobId: t.JobId, Lane: t.Lane, Kind: t.Kind,
 		Mode: t.Mode, Cursor: t.Cursor, Limits: t.Limits, Affinity: t.Affinity, Attempt: t.Attempt, Stalls: t.Stalls, Trace: t.Trace,
+		ItemsSeen: t.ItemsSeen,
 	}
 	switch s := t.Scope.(type) {
 	case *taskv1.Task_Page:

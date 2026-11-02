@@ -19,6 +19,8 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/dlq"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fixtures"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
@@ -184,7 +186,11 @@ func registrySet(ctx context.Context, cfg *config.Config, args []string) error {
 	return nil
 }
 
-// dlqReplay re-produces dead-lettered tasks to their original topics.
+// dlqReplay re-produces dead-lettered tasks to their original topics, each
+// under a new task id with its retries reset (dlq.Prepare): the old id is
+// marked done for 7 days, so replaying it as is did nothing. A task whose
+// job is still running rejoins that job. Records that are not tasks (the
+// worker could not decode them) are replayed unchanged.
 func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("dlq replay", flag.ExitOnError)
 	reason := fs.String("reason", "", "only replay this x-reason")
@@ -200,13 +206,19 @@ func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 		return err
 	}
 	defer p.Close()
+	rdb, err := app.OpenRedis(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rdb.Close() }()
+	tracker := jobs.New(rdb)
 	cl, err := kgo.NewClient(append(kcfg.Opts(), kgo.ConsumerGroup(cfg.Kafka.TopicPrefix+"igs-dlq-replay"),
 		kgo.ConsumeTopics(cfg.Kafka.TopicPrefix+topics.DLQ), kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()), kgo.DisableAutoCommit())...)
 	if err != nil {
 		return err
 	}
 	defer cl.Close()
-	n, skipped := 0, 0
+	n, skipped, rejoined, raw := 0, 0, 0, 0
 	for n < *max {
 		pctx, cancel := context.WithTimeout(ctx, *idle)
 		f := cl.PollRecords(pctx, 100)
@@ -226,7 +238,23 @@ func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 				skipped++
 				continue
 			}
-			out = append(out, &kgo.Record{Topic: p.Topic(strings.TrimPrefix(orig, cfg.Kafka.TopicPrefix)), Key: r.Key, Value: r.Value})
+			rec := &kgo.Record{Topic: p.Topic(strings.TrimPrefix(orig, cfg.Kafka.TopicPrefix)), Key: r.Key, Value: r.Value}
+			if rp, err := dlq.Prepare(ctx, tracker, r.Value, time.Now()); err == nil {
+				rec.Key, rec.Value = []byte(rp.Key), rp.Value
+				for _, h := range r.Headers {
+					if h.Key == kafka.HeaderType || h.Key == kafka.HeaderContentType {
+						rec.Headers = append(rec.Headers, h)
+					}
+				}
+				if rp.Rejoined {
+					rejoined++
+				}
+			} else if kafka.HeaderValue(r, kafka.HeaderReason) == "undecodable" {
+				raw++
+			} else {
+				return err
+			}
+			out = append(out, rec)
 		}
 		if err := p.ProduceSync(ctx, out...); err != nil {
 			return err
@@ -236,7 +264,7 @@ func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 		}
 		n += len(out)
 	}
-	fmt.Printf("replayed %d task(s), skipped %d\n", n, skipped)
+	fmt.Printf("replayed %d task(s) under new ids (%d rejoined their running job, %d undecodable as is), skipped %d\n", n, rejoined, raw, skipped)
 	return nil
 }
 

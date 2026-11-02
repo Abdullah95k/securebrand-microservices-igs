@@ -120,4 +120,7 @@ message Task {
   // Retries since the task last advanced its checkpoint. crawler.max_attempts
   // applies to these; attempt (which picks the proxy tier) counts every retry.
   uint32 stalls = 19;
+  // Items (comments) the stream's earlier segments saw, so a per-stream
+  // limit such as max_comments_per_post holds across continuations.
+  int64 items_seen = 20;
 }

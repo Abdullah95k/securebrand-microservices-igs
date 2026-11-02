@@ -17,6 +17,7 @@ import (
 
 	fbv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/fb/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/api"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakefb"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/pilot"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
@@ -313,9 +314,19 @@ func TestEndToEnd(t *testing.T) {
 func TestBlockedIdentitiesRetryAndTruncation(t *testing.T) {
 	// Every 4th GraphQL request of an identity is rate limited; tasks must
 	// retry on other identities and still collect everything.
+	//
+	// The fault limits every 4th request of each identity, so an attempt
+	// whose identity is at 3 is blocked before it saves a page: a stall.
+	// About a quarter of attempts do; five in a row (crawler.max_attempts)
+	// dead-lettered a thread task now and then (about one in a thousand
+	// tasks, and the test runs a few hundred), so the job ended partial.
+	// With 40 allowed stalls that takes 0.25^40, which never happens; what
+	// the test checks, that blocked tasks recover on other identities, is
+	// unchanged.
 	s := Start(t, Options{
 		Spec:   fakefb.Spec{Seed: 7, Pages: 1, PostsPerPage: 6, PostSpacing: 20 * time.Hour, MaxComments: 40, ReplyProbability: 0.3, MaxReplies: 12, Depth2Prob: 0.2},
 		Faults: fakefb.Faults{RateLimitEvery: 4},
+		Config: func(c *config.Config) { c.Crawler.MaxAttempts = 40 },
 	})
 	// Retries go through the 30s retry topic; shorten the wait for the test.
 	key := s.Key(t, api.ScopeJobsWrite, api.ScopeDataRead)
