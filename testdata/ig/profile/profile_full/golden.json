@@ -1,0 +1,97 @@
+{
+  "has_clips": true,
+  "highlights": [
+    {
+      "cover": {
+        "url": "https://scontent.cdninstagram.com/v/438529f860.jpg?oe=6AED1A2B"
+      },
+      "highlight_id": "18042795877469251",
+      "title": "xxxxxx",
+      "user_pk": "76688875580"
+    },
+    {
+      "cover": {
+        "url": "https://scontent.cdninstagram.com/v/b9950ea66a.jpg?oe=6AED220D"
+      },
+      "highlight_id": "18060818994863236",
+      "title": "xxx xxx",
+      "user_pk": "76688875580"
+    },
+    {
+      "cover": {
+        "url": "https://scontent.cdninstagram.com/v/7970f021fa.jpg?oe=6AED31F6"
+      },
+      "highlight_id": "18033587637642077",
+      "title": "xxxxxx",
+      "user_pk": "76688875580"
+    },
+    {
+      "cover": {
+        "url": "https://scontent.cdninstagram.com/v/66ad494480.jpg?oe=6AED338C"
+      },
+      "highlight_id": "17970548803877455",
+      "title": "xxx",
+      "user_pk": "76688875580"
+    },
+    {
+      "cover": {
+        "url": "https://scontent.cdninstagram.com/v/2a6063ab34.jpg?oe=6AED2CFF"
+      },
+      "highlight_id": "18046199659350143",
+      "title": "xxxxxxxx",
+      "user_pk": "76688875580"
+    },
+    {
+      "cover": {
+        "url": "https://scontent.cdninstagram.com/v/f9d74ea51e.jpg?oe=6AED26A4"
+      },
+      "highlight_id": "18079861130502622",
+      "title": "xxx xxx",
+      "user_pk": "76688875580"
+    }
+  ],
+  "highlights_hash": true,
+  "media": [
+    {
+      "kind": "MEDIA_KIND_PROFILE_PIC",
+      "media_id": "d79410c1-75c2-5c98-ba5b-777168e06ee6",
+      "owner_type": "profile",
+      "source_expires_at": "2026-11-06T02:19:11Z",
+      "source_media_id": "profile:76688875580",
+      "source_url": "https://scontent.cdninstagram.com/v/2228ffd416.jpg?oe=6AED391F",
+      "user_pk": "76688875580",
+      "variant": "original"
+    }
+  ],
+  "not_found": false,
+  "profile": {
+    "bio_links": [
+      {
+        "title": "xxx-xxx xxxxxxx",
+        "url": "https://example.com/link"
+      },
+      {
+        "title": "xxx-xxx xx xxxxxxxx!",
+        "url": "https://example.com/link"
+      }
+    ],
+    "biography": "xxx.. xxxxxxxx xx xxxx\nxxxxx xxxxx xxxxx xxxxxx",
+    "follower_count": "196213",
+    "following_count": "2",
+    "full_name": "Name 42e48c",
+    "highlight_count": 6,
+    "is_verified": true,
+    "linked_facebook_page": "Name 9f47cd",
+    "profile_pic": {
+      "url": "https://scontent.cdninstagram.com/v/2228ffd416.jpg?oe=6AED391F"
+    },
+    "status": "PROFILE_STATUS_ACTIVE",
+    "user_pk": "76688875580",
+    "username": "user_4d5f2cb3"
+  },
+  "report": {
+    "missing": [],
+    "optional": []
+  },
+  "user_id": "17841464620362939"
+}

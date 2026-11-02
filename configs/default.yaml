@@ -320,3 +320,81 @@ registry_sync:
   retire_after: 3
   recheck_retired: 24h
   timeout: 10m
+
+# igs, the Instagram scraper (ADR 0005). Its binaries use the shared
+# postgres (schema ig), redis, kafka (ig.* and igs.* topics) and s3 sections.
+ig:
+  base_url: "https://www.instagram.com"
+  registry_seed: "ig/queries.seed.yaml"
+  registry_refresh: 30s
+  fingerprint_profile: chrome_152
+  fingerprint_profiles: [chrome_152, chrome_146]
+  accept_language: "en-US,en;q=0.9"
+  request_timeout: 30s
+  # 0.3 requests a second per identity, as the owner's probe ran; one exit
+  # met Instagram's rate limit after 1,100 to 1,300 requests, so identities
+  # retire after 500 to 750 and exits rest in turn.
+  identity_rps: 0.33
+  identity_burst: 2
+  identity_max_requests_min: 500
+  identity_max_requests_max: 750
+  profile_rps: 3
+  profile_rps_p0: 6
+  global_rps: 50
+  # Rest an exit that sends fresh page loads to the login page.
+  page_wall_rest: 30m
+  capture_raw: failures    # all | failures | none
+  proxy:
+    tiers: []
+    routing:
+      default: [direct]
+    breaker:
+      window: 1m
+      min_events: 20
+      open_rate: 0.15
+      cooldown: 2m
+      max_cooldown: 30m
+      probe_successes: 3
+  query_breaker:
+    window: 5m
+    min_events: 20
+    open_rate: 0.5
+    cooldown: 2m
+  aimd:
+    enabled: true
+    interval: 10s
+    min_rps: 5
+    max_rps: 500
+    increase: 0.02
+    decrease: 0.7
+    low_block_rate: 0.02
+    high_block_rate: 0.06
+    min_samples: 100
+    min_utilization: 0.8
+  browser:
+    enabled: false
+    binary: ""
+    max_concurrent: 2
+    max_share: 0.02
+    timeout: 45s
+    no_sandbox: false
+  detect:
+    replace: false
+  limits:
+    max_age_days: 365
+    max_age_cap_days: 365
+    max_posts: 0                 # 0: every post in the age window
+    max_comments_per_post: 0     # 0: every top-level comment
+    include_comments: true
+    include_media: false         # D5: metadata always, files once the analysis service exists
+    include_reels: true          # the reels tab: each reel's views
+    include_highlights: true
+    video_policy: sd
+  schedule:
+    interval: 3h                 # D2: newest posts every 3 hours
+    profile_refresh: 24h         # the profile itself daily
+    jitter: 0.1
+  privacy:
+    pii_mode: full               # full | pseudonymized
+    author_hmac_key: "dev-only-change-me-ig"
+

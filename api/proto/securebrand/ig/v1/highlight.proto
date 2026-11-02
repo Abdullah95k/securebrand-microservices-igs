@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package securebrand.ig.v1;
+
+import "google/protobuf/timestamp.proto";
+import "securebrand/common/v1/common.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1;igv1";
+
+message HighlightItem {
+  int64 item_pk = 1;
+  google.protobuf.Timestamp taken_at = 2;
+  // Instagram's media_type: 1 photo, 2 video.
+  int32 media_type = 3;
+  repeated string media_ids = 4;
+}
+
+// Highlight is published on ig.highlight.v1, keyed by user_pk. Items are
+// read only when the profile's highlights list changed (ADR 0005 §4).
+message Highlight {
+  securebrand.common.v1.Observation obs = 1;
+  int64 highlight_id = 2;
+  int64 user_pk = 3;
+  string title = 4;
+  securebrand.common.v1.ImageRef cover = 5;
+  int32 item_count = 6;
+  repeated HighlightItem items = 7;
+}

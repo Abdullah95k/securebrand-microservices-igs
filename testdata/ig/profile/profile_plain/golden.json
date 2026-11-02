@@ -1,0 +1,37 @@
+{
+  "has_clips": true,
+  "highlights": [],
+  "highlights_hash": false,
+  "media": [
+    {
+      "kind": "MEDIA_KIND_PROFILE_PIC",
+      "media_id": "b2bbc8df-613c-50f7-8b9e-111cbf94bda8",
+      "owner_type": "profile",
+      "source_expires_at": "2026-11-06T00:43:38Z",
+      "source_media_id": "profile:322483111",
+      "source_url": "https://scontent.cdninstagram.com/v/6c88c30899.jpg?oe=6AED22BA",
+      "user_pk": "322483111",
+      "variant": "original"
+    }
+  ],
+  "not_found": false,
+  "profile": {
+    "biography": "xxxxx xxxxxx xxxxxx xxx xxxx xxxxxx\nxxxxx xxxxxxx: xxxx xxxxx\nxxxxxx xxx xxxx xxxxxxx xxxxxxxxxx\nxxxxxxx: xxxxxxx xxxxxx",
+    "follower_count": "177464",
+    "following_count": "0",
+    "full_name": "Name d75268",
+    "highlight_count": 0,
+    "is_verified": true,
+    "profile_pic": {
+      "url": "https://scontent.cdninstagram.com/v/6c88c30899.jpg?oe=6AED22BA"
+    },
+    "status": "PROFILE_STATUS_ACTIVE",
+    "user_pk": "322483111",
+    "username": "user_acde612c"
+  },
+  "report": {
+    "missing": [],
+    "optional": []
+  },
+  "user_id": "17841400195625586"
+}

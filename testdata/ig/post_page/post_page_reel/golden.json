@@ -1,0 +1,113 @@
+{
+  "comments": [
+    {
+      "author": {
+        "profile_pic_url": "https://scontent.cdninstagram.com/v/46796562a.jpg?oe=6AED0DFD",
+        "user_pk": "17473132752",
+        "username": "user_351e9de2"
+      },
+      "comment_pk": "18341384201264059",
+      "created_at": "2026-11-01T14:27:23Z",
+      "like_count": "0",
+      "media_pk": "4020829625521464435",
+      "owner_pk": "82235808864",
+      "post_taken_at": "2026-11-01T13:38:58Z",
+      "status": "COMMENT_STATUS_VISIBLE",
+      "text": "xxx xx xxxxx xxx xx xxxxx xxxx"
+    },
+    {
+      "author": {
+        "profile_pic_url": "https://scontent.cdninstagram.com/v/d20b9f7a87.jpg?oe=6AED34FD",
+        "user_pk": "71500374853",
+        "username": "user_f20e13a3"
+      },
+      "comment_pk": "17966682066235122",
+      "created_at": "2026-11-01T14:19:21Z",
+      "like_count": "0",
+      "media_pk": "4020829625521464435",
+      "owner_pk": "82235808864",
+      "post_taken_at": "2026-11-01T13:38:58Z",
+      "status": "COMMENT_STATUS_VISIBLE",
+      "text": "xxxx xxx xxxx xxxx xxxx xxxxx xx xxxx xxxx xxxxxx xx xxxxx xx xxxxxx xxxxxxx؟"
+    }
+  ],
+  "comments_page_info": {
+    "HasNext": false,
+    "EndCursor": "",
+    "Found": true
+  },
+  "gated": false,
+  "media": [
+    {
+      "alt_text": "xxxxx xx xxx xxxxxxx xx xxxxxxxx xx, xxxx. xxx xx x xxxx xx xxx xx xxxx xxxxxx xxx xxxx.",
+      "height": 1136,
+      "kind": "MEDIA_KIND_THUMBNAIL",
+      "media_id": "c6a7bb34-565d-52ea-ac44-0f0ae7a578ff",
+      "media_pk": "4020829625521464435",
+      "owner_type": "post",
+      "post_taken_at": "2026-11-01T13:38:58Z",
+      "source_expires_at": "2026-11-06T01:19:45Z",
+      "source_media_id": "4020829625521464435",
+      "source_url": "https://scontent.cdninstagram.com/v/2fa441bd60.jpg?oe=6AED2B31",
+      "user_pk": "82235808864",
+      "variant": "thumbnail",
+      "width": 640
+    },
+    {
+      "alt_text": "xxxxx xx xxx xxxxxxx xx xxxxxxxx xx, xxxx. xxx xx x xxxx xx xxx xx xxxx xxxxxx xxx xxxx.",
+      "duration_ms": "43561",
+      "kind": "MEDIA_KIND_REEL",
+      "media_id": "9ae81d06-73e6-58f6-bb10-7b8d78c73f35",
+      "media_pk": "4020829625521464435",
+      "owner_type": "post",
+      "post_taken_at": "2026-11-01T13:38:58Z",
+      "source_expires_at": "2026-11-02T23:05:01Z",
+      "source_media_id": "4020829625521464435",
+      "source_url": "https://scontent.cdninstagram.com/v/9ffb1c3014.mp4?oe=6AE9171D",
+      "user_pk": "82235808864",
+      "variant": "hd"
+    }
+  ],
+  "post": {
+    "accessibility_caption": "xxxxx xx xxx xxxxxxx xx xxxxxxxx xx, xxxx. xxx xx x xxxx xx xxx xx xxxx xxxxxx xxx xxxx.",
+    "caption": "xxxx xxxx xxx xxxx xxxx xx xxxxx !!\n#xxxxxx",
+    "comment_count": "2",
+    "discovered_via": "DISCOVERED_VIA_GRID",
+    "has_audio": true,
+    "hashtags": [
+      "xxxxxx"
+    ],
+    "height": 1920,
+    "like_count": "44",
+    "media_ids": [
+      "c6a7bb34-565d-52ea-ac44-0f0ae7a578ff",
+      "9ae81d06-73e6-58f6-bb10-7b8d78c73f35"
+    ],
+    "media_pk": "4020829625521464435",
+    "media_type": "MEDIA_TYPE_VIDEO",
+    "music": {
+      "artist": "user_65833cad",
+      "audio_id": "28801469492316626",
+      "original_audio": true,
+      "title": "xxxxxxxx xxxxx"
+    },
+    "owner_pk": "82235808864",
+    "permalink": "https://www.instagram.com/reel/DfM2z27kuRz/",
+    "product_type": "clips",
+    "shortcode": "DfM2z27kuRz",
+    "status": "POST_STATUS_VISIBLE",
+    "taken_at": "2026-11-01T13:38:58Z",
+    "topics": [
+      "hussein fahmy",
+      "egyptian actor",
+      "love for homeland",
+      "emotional interview"
+    ],
+    "video_duration_ms": "43561",
+    "width": 1080
+  },
+  "report": {
+    "missing": [],
+    "optional": []
+  }
+}

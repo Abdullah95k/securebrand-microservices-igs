@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package securebrand.common.v1;
+
+import "google/protobuf/timestamp.proto";
+import "securebrand/common/v1/common.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1;commonv1";
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_QUEUED = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_COMPLETED = 3;
+  // Finished, but some posts were truncated or tasks failed permanently.
+  JOB_STATUS_PARTIAL = 4;
+  JOB_STATUS_FAILED = 5;
+  JOB_STATUS_CANCELLED = 6;
+}
+
+// Completeness compares what the platform reported against what was
+// collected. On Instagram, comments_reported counts hidden replies too, so
+// it is information, never a failure (ADR 0005 §5).
+message Completeness {
+  int64 posts = 1;
+  int64 posts_complete = 2;
+  int64 posts_truncated = 3;
+  double median_ratio = 4;
+  double min_ratio = 5;
+  int64 comments_reported = 6;
+  int64 comments_collected = 7;
+}
+
+// JobEvent is published on <platform>.job.v1 when a job reaches a terminal
+// state. When it says COMPLETED or PARTIAL, all of the job's data is
+// queryable.
+message JobEvent {
+  string event_id = 1;
+  Platform platform = 2;
+  string job_id = 3;
+  JobStatus status = 4;
+  // on_demand | scheduled | backfill
+  string kind = 5;
+  // What the job was asked for (u:<username>, id:<pk>) and what it resolved
+  // to (the account id, an Instagram user pk).
+  string subject_ref = 6;
+  int64 subject_id = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp finished_at = 9;
+  map<string, int64> counters = 10;
+  Completeness completeness = 11;
+  repeated string errors = 12;
+}

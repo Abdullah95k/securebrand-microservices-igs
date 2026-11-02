@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package securebrand.ig.v1;
+
+import "google/protobuf/timestamp.proto";
+import "securebrand/common/v1/common.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1;igv1";
+
+enum CommentStatus {
+  COMMENT_STATUS_UNSPECIFIED = 0;
+  COMMENT_STATUS_VISIBLE = 1;
+  // A complete read no longer returned it.
+  COMMENT_STATUS_DELETED = 2;
+}
+
+// Author is a commenter. In pseudonymized mode only author_key is set.
+message Author {
+  int64 user_pk = 1;
+  string username = 2;
+  bool is_verified = 3;
+  string profile_pic_url = 4;
+  bytes author_key = 5;
+}
+
+// Comment is published on ig.comment.v1, keyed by media_pk. Logged out,
+// only top-level comments are served; parent_comment_pk and depth leave
+// room for replies.
+message Comment {
+  securebrand.common.v1.Observation obs = 1;
+  int64 comment_pk = 2;
+  int64 media_pk = 3;
+  // The post's owner and time, for partitioning and lookups.
+  int64 owner_pk = 4;
+  google.protobuf.Timestamp post_taken_at = 5;
+  optional int64 parent_comment_pk = 6;
+  int32 depth = 7;
+  Author author = 8;
+  string text = 9;
+  google.protobuf.Timestamp created_at = 10;
+  optional int64 like_count = 11;
+  // Written by the post's owner.
+  bool is_op = 12;
+  CommentStatus status = 13;
+  // Its author was erased: text and author fields are blank.
+  bool redacted = 14;
+  optional int64 child_comment_count = 15;
+}

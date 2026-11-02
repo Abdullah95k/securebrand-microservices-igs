@@ -34,6 +34,8 @@ type Config struct {
 	Privacy   Privacy   `koanf:"privacy"`
 	// RegistrySync follows Facebook's doc_id rotations (fbs-registry-sync).
 	RegistrySync RegistrySync `koanf:"registry_sync"`
+	// IG configures igs, the Instagram scraper.
+	IG IG `koanf:"ig"`
 }
 
 // RegistrySync configures the service that discovers rotated doc_ids on
@@ -451,5 +453,6 @@ func (c *Config) Validate() error {
 	if c.RegistrySync.Interval <= 0 || c.RegistrySync.Timeout <= 0 {
 		errs = append(errs, errors.New("registry_sync.interval and registry_sync.timeout must be > 0"))
 	}
+	errs = append(errs, c.validateIG()...)
 	return errors.Join(errs...)
 }

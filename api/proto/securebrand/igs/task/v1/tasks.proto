@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+// igs's internal task envelope (never public). Its generic fields keep
+// fbs's names and numbers, since igs's worker is a copy of fbs's (ADR 0004);
+// what is Instagram's own is disjoint from fbs's: kinds start at 100 and
+// scopes at field 30. A task on the other service's topic then decodes with
+// an unknown kind and no scope, and is dead-lettered instead of running as
+// the wrong task (ADR 0005 §2).
+package securebrand.igs.task.v1;
+
+import "google/protobuf/timestamp.proto";
+import "securebrand/common/v1/common.proto";
+import "securebrand/ig/v1/media.proto";
+
+option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1;igstaskv1";
+
+enum Lane {
+  LANE_UNSPECIFIED = 0;
+  // On-demand API jobs.
+  LANE_P0 = 1;
+  // Scheduled re-scrapes (every 3 hours).
+  LANE_P1 = 2;
+  // Backfill.
+  LANE_P2 = 3;
+}
+
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  // A profile: its details, grid, reels tab and highlights; spawns posts.
+  KIND_PROFILE = 100;
+  // A post: its page (detail), then its comments.
+  KIND_POST = 101;
+  // A media download (only with ig.limits.include_media).
+  KIND_MEDIA = 102;
+  // Replies need login today (D1).
+  reserved 103;
+  reserved "KIND_REPLIES";
+}
+
+enum VideoPolicy {
+  VIDEO_POLICY_UNSPECIFIED = 0;
+  VIDEO_POLICY_NONE = 1;
+  VIDEO_POLICY_THUMBNAIL = 2;
+  VIDEO_POLICY_SD = 3;
+  VIDEO_POLICY_HD = 4;
+}
+
+message Limits {
+  int64 max_age_seconds = 1;
+  int64 max_posts = 2;
+  int64 max_comments_per_post = 3;
+  bool include_comments = 5;
+  bool include_media = 7;
+  VideoPolicy video_policy = 8;
+  // Read the profile's reels tab, for each reel's views.
+  bool include_reels = 20;
+  bool include_highlights = 21;
+  // fbs's max_depth, include_replies and include_comment_media: no replies
+  // logged out.
+  reserved 4, 6, 9;
+}
+
+message ProfileScope {
+  // u:<username> or id:<pk>.
+  string profile_ref = 1;
+  int64 user_pk = 2;
+  string username = 3;
+  string url = 4;
+  // INCREMENTAL: stop the grid once posts are older than this (the newest
+  // stored post).
+  google.protobuf.Timestamp watermark = 5;
+  int64 posts_seen = 6;
+  int32 consecutive_old = 7;
+  google.protobuf.Timestamp newest_seen_at = 8;
+  // Re-read the profile itself (counts, bio, highlights list): daily, not
+  // every 3 hours (ADR 0005 §4).
+  bool refresh_profile = 9;
+  // The highlights list as last stored, to read items only when it changed.
+  bytes highlights_hash = 10;
+}
+
+message PostScope {
+  int64 media_pk = 1;
+  string shortcode = 2;
+  int64 owner_pk = 3;
+  google.protobuf.Timestamp taken_at = 4;
+  int64 reported_comment_count = 5;
+  string permalink = 6;
+  // INCREMENTAL: newest comment time already stored.
+  google.protobuf.Timestamp comments_watermark = 7;
+  int64 comments_seen = 8;
+  // The post's detail is already stored: only comments are read.
+  bool detail_known = 9;
+}
+
+message MediaScope {
+  securebrand.ig.v1.Media media = 1;
+}
+
+// Task is the envelope on every igs.task.* topic.
+message Task {
+  // Deterministic: sha256(job|kind|scope|mode|lineage|seq).
+  string task_id = 1;
+  // Shared by every continuation of one pagination stream.
+  string lineage_id = 2;
+  uint32 seq = 3;
+  string job_id = 4;
+  Lane lane = 5;
+  Kind kind = 6;
+  securebrand.common.v1.CrawlMode mode = 7;
+  // Resume point; empty means start of stream.
+  string cursor = 8;
+  Limits limits = 9;
+  oneof scope {
+    ProfileScope profile = 30;
+    PostScope post = 31;
+    MediaScope media = 32;
+  }
+  uint32 attempt = 15;
+  google.protobuf.Timestamp enqueued_at = 17;
+  map<string, string> trace = 18;
+  // Retries since the task last advanced its checkpoint.
+  uint32 stalls = 19;
+  // Items (comments) the stream's earlier segments saw, so a per-stream
+  // limit such as max_comments_per_post holds across continuations.
+  int64 items_seen = 20;
+  // fbs's page, post, thread and media scopes, affinity and not_before.
+  reserved 10 to 14, 16;
+}
