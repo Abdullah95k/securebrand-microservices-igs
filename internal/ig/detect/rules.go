@@ -17,8 +17,12 @@ func Rules() scrapedetect.Rules {
 	r := scrapedetect.DefaultRules()
 	r.CheckpointPaths = []string{"/challenge"}
 	r.LoginPaths = []string{"/accounts/login"}
-	r.LoginMarkers = append(r.LoginMarkers, []byte(`/accounts/login/`))
+	r.LoginMarkers = append(r.LoginMarkers, []byte(`/accounts/login/`), []byte(`"require_login":true`))
 	r.CheckpointPageMarkers = nil
 	r.LoginPageMarkers = nil
+	// Hypothesis (U4, not yet seen by the probe or Phase 0): logged-out
+	// refusals are reported as 401 or 403 with "Please wait a few minutes"
+	// (a rate limit) or "require_login" (a login wall).
+	r.BlockMarkers = append(r.BlockMarkers, []byte(`Please wait a few minutes`))
 	return r
 }

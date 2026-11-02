@@ -4,7 +4,9 @@ package detect
 
 import (
 	"bytes"
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -78,6 +80,91 @@ type Rules struct {
 	// no login page markers: its logged-out pages carry a login form anyway.
 	CheckpointPageMarkers [][]byte
 	LoginPageMarkers      [][]byte
+	// CheckpointMarkers mark a challenge in the body of an HTTP 400, 401 or
+	// 403 (Instagram's {"message":"checkpoint_required"}). On those statuses
+	// BlockMarkers mean a rate limit, LoginMarkers a login wall, and anything
+	// else a soft error: never OK.
+	CheckpointMarkers [][]byte
+}
+
+// Config extends (or, with Replace, replaces) a platform's built-in rules
+// from configuration, so a newly observed error code or marker needs no
+// release. Empty lists change nothing.
+type Config struct {
+	Replace               bool     `koanf:"replace"`
+	RateLimitCodes        []int64  `koanf:"rate_limit_codes"`
+	SoftCodes             []int64  `koanf:"soft_codes"`
+	LoginCodes            []int64  `koanf:"login_codes"`
+	StaleMessages         []string `koanf:"stale_messages"` // regular expressions
+	LoginMarkers          []string `koanf:"login_markers"`
+	BlockMarkers          []string `koanf:"block_markers"`
+	CheckpointMarkers     []string `koanf:"checkpoint_markers"`
+	CheckpointPaths       []string `koanf:"checkpoint_paths"`
+	LoginPaths            []string `koanf:"login_paths"`
+	CheckpointPageMarkers []string `koanf:"checkpoint_page_markers"`
+	LoginPageMarkers      []string `koanf:"login_page_markers"`
+}
+
+// Apply returns r with c's lists appended, or, with c.Replace, each list
+// c sets in place of r's. A stale message that is not a valid regular
+// expression is an error.
+func (r Rules) Apply(c Config) (Rules, error) {
+	codes := func(dst *[]int64, src []int64) {
+		if len(src) == 0 {
+			return
+		}
+		if c.Replace {
+			*dst = nil
+		}
+		*dst = append(slices.Clone(*dst), src...)
+	}
+	markers := func(dst *[][]byte, src []string) {
+		if len(src) == 0 {
+			return
+		}
+		if c.Replace {
+			*dst = nil
+		}
+		out := slices.Clone(*dst)
+		for _, m := range src {
+			out = append(out, []byte(m))
+		}
+		*dst = out
+	}
+	paths := func(dst *[]string, src []string) {
+		if len(src) == 0 {
+			return
+		}
+		if c.Replace {
+			*dst = nil
+		}
+		*dst = append(slices.Clone(*dst), src...)
+	}
+	codes(&r.RateLimitCodes, c.RateLimitCodes)
+	codes(&r.SoftCodes, c.SoftCodes)
+	codes(&r.LoginCodes, c.LoginCodes)
+	if len(c.StaleMessages) > 0 {
+		if c.Replace {
+			r.StaleMessages = nil
+		}
+		stale := slices.Clone(r.StaleMessages)
+		for _, m := range c.StaleMessages {
+			re, err := regexp.Compile(m)
+			if err != nil {
+				return r, fmt.Errorf("detect: stale message %q: %w", m, err)
+			}
+			stale = append(stale, re)
+		}
+		r.StaleMessages = stale
+	}
+	markers(&r.LoginMarkers, c.LoginMarkers)
+	markers(&r.BlockMarkers, c.BlockMarkers)
+	markers(&r.CheckpointMarkers, c.CheckpointMarkers)
+	paths(&r.CheckpointPaths, c.CheckpointPaths)
+	paths(&r.LoginPaths, c.LoginPaths)
+	markers(&r.CheckpointPageMarkers, c.CheckpointPageMarkers)
+	markers(&r.LoginPageMarkers, c.LoginPageMarkers)
+	return r, nil
 }
 
 // DefaultRules returns the built-in rules.
@@ -97,6 +184,7 @@ func DefaultRules() Rules {
 		CheckpointPaths:       []string{"/checkpoint"},
 		LoginPaths:            []string{"/login"},
 		CheckpointPageMarkers: [][]byte{[]byte(`action="/checkpoint`)},
+		CheckpointMarkers:     [][]byte{[]byte(`checkpoint_required`)},
 	}
 }
 
@@ -198,10 +286,42 @@ func (r Rules) Classify(in Input) (Class, string) {
 			}
 		}
 	}
+	if in.Status == 400 || in.Status == 401 || in.Status == 403 {
+		return r.refused(in)
+	}
 	if len(in.Errors) > 0 && (!in.HasData || critical(in.Errors)) {
 		return SoftError, "fb error " + i64toa(in.Errors[0].Code) + " " + truncate(in.Errors[0].Message, 60)
 	}
 	return OK, ""
+}
+
+// refused classifies an HTTP 400, 401 or 403 that no error code or wall
+// path explained, by its body: a block marker is a rate limit (Instagram
+// answers "Please wait a few minutes" with 401 or 403), a checkpoint marker
+// a checkpoint, a login marker a login wall. Anything else is a soft error:
+// these used to classify as OK.
+func (r Rules) refused(in Input) (Class, string) {
+	head := in.Body
+	if len(head) > 64<<10 {
+		head = head[:64<<10]
+	}
+	reason := "http " + itoa(in.Status)
+	for _, m := range r.BlockMarkers {
+		if bytes.Contains(head, m) {
+			return RateLimited, reason
+		}
+	}
+	for _, m := range r.CheckpointMarkers {
+		if bytes.Contains(head, m) {
+			return Checkpoint, reason
+		}
+	}
+	for _, m := range r.LoginMarkers {
+		if bytes.Contains(head, m) {
+			return LoginWall, reason
+		}
+	}
+	return SoftError, reason
 }
 
 // isHTML reports whether a GraphQL response is an HTML page. Facebook labels

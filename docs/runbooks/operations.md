@@ -39,7 +39,7 @@ Only the leader scheduler publishes AIMD, budget, schedule-lag and consumer-lag 
 
 The fleet reacts on its own, at three levels:
 
-- **Identity:** a rate-limited identity cools down; one that keeps being blocked, walled or checkpointed is retired, and so is one whose exit stops answering (3 transport failures in a row: `reason="transport"`).
+- **Identity:** a rate-limited identity cools down for 30 s, then 60 s, 2 min and 4 min if it is limited again, and retires at the fifth limit in a row (`reason="blocked"`); a login wall or a checkpoint retires it at once, and so do 3 transport failures in a row (`reason="transport"`). Each identity keeps one browser fingerprint, picked at random from `fb.fingerprint_profiles`.
 - **Exit bucket:** a static endpoint's /24, or a gateway and country, opens its breaker at `fb.proxy.breaker.open_rate` (15%) over `window` (1m). It gets no new identities, its idle identities are retired, and tasks move to the next tier in `fb.proxy.routing`. After `cooldown` (2m, doubling up to `max_cooldown`) one probe identity tests it.
 - **Fleet:** AIMD, on the leader scheduler, reads the block rate of the whole fleet every 10s. Above `fb.aimd.high_block_rate` (6%) the ceiling becomes 70% of the rate actually sent. Below `low_block_rate` (2%), while the fleet uses most of the ceiling, the ceiling grows by 2% (at least 1 rps) per window. Recovery from the floor is deliberately slow.
 
@@ -49,6 +49,7 @@ What to check:
 2. `igs_breaker_state{name=~"proxy:.*"}` and `igs_ig_requests_total` by tier. If one provider or tier is affected, change `fb.proxy.routing` to prefer another.
 3. `igs_identity_retired_total` by reason.
 4. If login walls appear at the same depth everywhere, it is coverage, not blocking: jobs report `timelines_truncated` / `posts_truncated`.
+5. If the platform answers with an error code, status or page the rules do not know, responses show as `soft_error` (HTTP 400, 401 and 403 without a known marker classify so). Add the code or marker under `fb.detect` (appended to the built-in rules; `replace: true` swaps a list) and roll the crawlers; no release is needed.
 
 To pin the ceiling by hand, for example during an incident, set the key the crawlers read (they pick it up within 5s):
 

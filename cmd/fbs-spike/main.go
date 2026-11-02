@@ -441,13 +441,16 @@ func newStack(cfg *config.Config, f flags) (spike.Stack, error) {
 		return spike.Stack{}, err
 	}
 	// Each page holds an identity and briefly a second one (portability).
-	pool, err := session.NewPool(session.PoolConfig{BaseURL: cfg.FB.BaseURL, Profile: cfg.FB.FingerprintProfile,
+	pool, err := session.NewPool(session.PoolConfig{BaseURL: cfg.FB.BaseURL, Profile: cfg.FB.FingerprintProfile, Profiles: cfg.FB.FingerprintProfiles,
 		Timeout: cfg.FB.RequestTimeout, IdentityRPS: f.rps, IdentityBurst: 1, MaxRequestsMin: 100000, MaxRequestsMax: 100001,
 		MaxPerTier: f.conc*2 + 2}, proxies, fps, nil)
 	if err != nil {
 		return spike.Stack{}, err
 	}
-	rules := detect.DefaultRules()
+	rules, err := detect.DefaultRules().Apply(cfg.FB.Detect)
+	if err != nil {
+		return spike.Stack{}, err
+	}
 	return spike.Stack{
 		BaseURL: cfg.FB.BaseURL, Proxies: proxies, Pool: pool,
 		Loader: &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage, Hooks: fbclient.Hooks(cfg.FB.AcceptLanguage)},

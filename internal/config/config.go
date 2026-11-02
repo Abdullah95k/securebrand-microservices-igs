@@ -11,6 +11,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/breaker"
 	pconfig "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 )
 
 // EnvPrefix is the prefix of environment variable overrides.
@@ -133,10 +134,14 @@ type S3 struct {
 }
 
 type FB struct {
-	BaseURL                string        `koanf:"base_url"`
-	RegistrySeed           string        `koanf:"registry_seed"`
-	RegistryRefresh        time.Duration `koanf:"registry_refresh"`
-	FingerprintProfile     string        `koanf:"fingerprint_profile"`
+	BaseURL            string        `koanf:"base_url"`
+	RegistrySeed       string        `koanf:"registry_seed"`
+	RegistryRefresh    time.Duration `koanf:"registry_refresh"`
+	FingerprintProfile string        `koanf:"fingerprint_profile"`
+	// FingerprintProfiles, when set, are the profiles new identities pick
+	// from at random (each identity keeps its own), so one pod does not show
+	// a single browser build; empty means FingerprintProfile alone.
+	FingerprintProfiles    []string      `koanf:"fingerprint_profiles"`
 	Locale                 string        `koanf:"locale"`
 	AcceptLanguage         string        `koanf:"accept_language"`
 	RequestTimeout         time.Duration `koanf:"request_timeout"`
@@ -147,7 +152,6 @@ type FB struct {
 	PageRPS                int           `koanf:"page_rps"`
 	PageRPSP0              int           `koanf:"page_rps_p0"`
 	GlobalRPS              int           `koanf:"global_rps"`
-	BootstrapAttempts      int           `koanf:"bootstrap_attempts"`
 	CaptureRaw             string        `koanf:"capture_raw"`
 	Proxy                  Proxy         `koanf:"proxy"`
 	// QueryBreaker stops sending a (query, doc_id) whose responses keep
@@ -158,6 +162,9 @@ type FB struct {
 	AIMD AIMD `koanf:"aimd"`
 	// Browser is the headless-Chromium fallback (internal/fb/browser).
 	Browser Browser `koanf:"browser"`
+	// Detect extends the built-in response classification rules (error
+	// codes, wall paths, markers) without a release.
+	Detect detect.Config `koanf:"detect"`
 	// ShadowRate is the share of responses a registered candidate parser
 	// also parses (internal/crawl/shadow); nothing runs without one.
 	ShadowRate float64 `koanf:"shadow_rate"`

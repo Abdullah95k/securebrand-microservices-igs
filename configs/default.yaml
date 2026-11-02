@@ -70,6 +70,9 @@ fb:
   registry_seed: "queries.seed.yaml"
   registry_refresh: 30s
   fingerprint_profile: chrome_146
+  # Profiles new identities pick from at random (each keeps its own); empty
+  # means fingerprint_profile alone. Every name must be in fingerprints.yaml.
+  fingerprint_profiles: [chrome_152, chrome_146]
   locale: en_US
   accept_language: "en-US,en;q=0.9"
   request_timeout: 30s
@@ -112,7 +115,22 @@ fb:
     high_block_rate: 0.06
     min_samples: 100
     min_utilization: 0.8
-  bootstrap_attempts: 3
+  # Extra classification rules, appended to the built-in ones (replace:
+  # true puts each list given in place of the built-in one): error codes,
+  # stale-query messages (regular expressions), wall paths and markers.
+  detect:
+    replace: false
+    rate_limit_codes: []
+    soft_codes: []
+    login_codes: []
+    stale_messages: []
+    login_markers: []
+    block_markers: []
+    checkpoint_markers: []
+    checkpoint_paths: []
+    login_paths: []
+    checkpoint_page_markers: []
+    login_page_markers: []
   capture_raw: failures    # all | failures | none
   # Share of responses a candidate parser (internal/crawl/shadow) also
   # parses, to prove a new parser version on live traffic before it becomes

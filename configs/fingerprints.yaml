@@ -4,6 +4,13 @@
 # implements (see profiles.MappedTLSClients). Verify the GREASE brand strings
 # against a real Chrome of the same major version before production.
 profiles:
+  # The owner's recordings came from a Chromium 152 build, which sent the
+  # GREASE brand "Not?A_Brand";v="24" (Google Chrome 152 sends the same).
+  chrome_152:
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+    sec_ch_ua: '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"'
+    sec_ch_ua_mobile: "?0"
+    sec_ch_ua_platform: '"Windows"'
   chrome_146:
     user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
     sec_ch_ua: '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"'
