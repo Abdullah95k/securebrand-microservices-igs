@@ -64,8 +64,10 @@ def sh(*args, check=True, capture=True, timeout=600):
     return r
 
 
-def psql(sql, db=DB):
-    return sh("docker", "exec", "fbs-postgres-1", "psql", "-U", "fbs", "-d", db, "-tAc", sql).stdout.strip()
+def psql(sql, db=None):
+    # db defaults to the chart's database at call time: use_chart sets DB
+    # after this function is defined.
+    return sh("docker", "exec", "fbs-postgres-1", "psql", "-U", "fbs", "-d", db or DB, "-tAc", sql).stdout.strip()
 
 
 def render(args):
