@@ -1,4 +1,5 @@
-// Package api implements igs's REST API (/v1): crawl jobs, the profiles
+// Package api implements igs's REST API (/v1, described in
+// api/openapi/igs.v1.yaml): crawl jobs, the profiles
 // registered for scheduled crawls, and reads of the stored profiles,
 // posts, comments, metrics and media. Keys, scopes and errors come from
 // internal/httpapi; data comes from schema ig.

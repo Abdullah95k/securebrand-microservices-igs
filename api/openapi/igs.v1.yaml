@@ -1,0 +1,447 @@
+openapi: 3.1.0
+info:
+  title: igs - Instagram public profile scraper API
+  version: "1.0.0"
+  description: |
+    On-demand and scheduled reads of public Instagram profiles (logged out): the profile, its posts
+    and reels (with each reel's views from the reels tab), top-level comments, highlights and media.
+    All endpoints require `Authorization: Bearer igs_<prefix>_<secret>`.
+    Scopes: `jobs:write`, `profiles:write`, `data:read`, `pii:read`, `admin` (implies all).
+    A profile is named by its username (`brand`, `@brand`, a profile URL) or by `id:<user pk>`.
+    Errors use RFC 9457 problem documents (`application/problem+json`).
+servers:
+  - url: /v1
+security:
+  - apiKey: []
+paths:
+  /jobs:
+    post:
+      summary: Read a profile now (on-demand, priority lane p0)
+      description: >-
+        Requires `jobs:write`. Repeating a request with the same `Idempotency-Key` returns the original job (200).
+        Mode auto (default) reads only the posts newer than the newest stored one once the profile's grid was read.
+      parameters:
+        - {in: header, name: Idempotency-Key, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateJob'}
+            example: {profile: "@brand", mode: auto, max_age_days: 90}
+      responses:
+        "202": {description: Job accepted, content: {application/json: {schema: {$ref: '#/components/schemas/Job'}}}}
+        "200": {description: Existing job for this Idempotency-Key, content: {application/json: {schema: {$ref: '#/components/schemas/Job'}}}}
+        "400": {$ref: '#/components/responses/Problem'}
+        "422": {description: "A profile asked for by id:<pk> that igs never read (its username is unknown)", content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        "429":
+          description: Too many running jobs for this client, the on-demand capacity is reached, or rate limited. Retry after Retry-After seconds.
+          headers:
+            Retry-After: {schema: {type: integer}}
+          content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    get:
+      summary: List jobs (own jobs and the scheduled jobs of registered profiles; all with admin)
+      parameters:
+        - {in: query, name: profile, schema: {type: string}}
+        - {in: query, name: status, schema: {$ref: '#/components/schemas/JobStatus'}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        "200":
+          description: Jobs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs: {type: array, items: {$ref: '#/components/schemas/Job'}}
+                  next_cursor: {type: string}
+  /jobs/{id}:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Job status, live counters while running, completeness when done
+      responses:
+        "200": {description: The job, content: {application/json: {schema: {$ref: '#/components/schemas/Job'}}}}
+        "404": {$ref: '#/components/responses/Problem'}
+  /jobs/{id}/cancel:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+    post:
+      summary: Cancel a running job (own jobs; scheduled ones only with admin)
+      responses:
+        "202": {description: Cancelling}
+        "404": {$ref: '#/components/responses/Problem'}
+  /profiles:
+    post:
+      summary: Register a profile for scheduled reads
+      description: >-
+        Requires `profiles:write`. The profile is read every ig.schedule.interval (3 hours: its newest posts,
+        the reels tab, comment refreshes of recent posts) and the profile itself daily. A profile with no job
+        yet gets a backfill now (lane p2).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Register'}
+      responses:
+        "201": {description: Registered (with backfill_job when one started)}
+        "200": {description: Already registered (settings updated)}
+        "400": {$ref: '#/components/responses/Problem'}
+    get:
+      summary: The caller's registered profiles (all with admin)
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        "200":
+          description: Schedules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles: {type: array, items: {$ref: '#/components/schemas/Schedule'}}
+  /profiles/{profile}:
+    parameters:
+      - {$ref: '#/components/parameters/ProfileRef'}
+    get:
+      summary: A stored profile, with its schedule when registered
+      responses:
+        "200": {description: The profile, content: {application/json: {schema: {$ref: '#/components/schemas/Profile'}}}}
+        "404": {$ref: '#/components/responses/Problem'}
+    patch:
+      summary: Change a registration (schedule, crawl options)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                schedule: {$ref: '#/components/schemas/ScheduleSettings'}
+                options: {$ref: '#/components/schemas/CrawlOptions'}
+      responses:
+        "200": {description: The schedule, content: {application/json: {schema: {$ref: '#/components/schemas/Schedule'}}}}
+        "404": {$ref: '#/components/responses/Problem'}
+    delete:
+      summary: Remove the caller's registration; the schedule ends with the last one (admin removes it outright)
+      responses:
+        "204": {description: Removed}
+        "404": {$ref: '#/components/responses/Problem'}
+  /profiles/{profile}/posts:
+    parameters:
+      - {$ref: '#/components/parameters/ProfileRef'}
+    get:
+      summary: The profile's posts, newest first
+      parameters:
+        - {in: query, name: since, schema: {type: string, format: date-time}}
+        - {in: query, name: until, schema: {type: string, format: date-time}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        "200":
+          description: Posts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  posts: {type: array, items: {$ref: '#/components/schemas/Post'}}
+                  next_cursor: {type: string}
+  /profiles/{profile}/snapshots:
+    parameters:
+      - {$ref: '#/components/parameters/ProfileRef'}
+    get:
+      summary: The profile's history (followers, counts, name), newest first; a row only when something changed
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        "200": {description: Snapshots}
+  /profiles/{profile}/highlights:
+    parameters:
+      - {$ref: '#/components/parameters/ProfileRef'}
+    get:
+      summary: The profile's highlights with their items
+      responses:
+        "200": {description: Highlights}
+  /posts/{post}:
+    parameters:
+      - {$ref: '#/components/parameters/PostRef'}
+    get:
+      summary: A stored post
+      responses:
+        "200": {description: The post, content: {application/json: {schema: {$ref: '#/components/schemas/Post'}}}}
+        "404": {$ref: '#/components/responses/Problem'}
+  /posts/{post}/comments:
+    parameters:
+      - {$ref: '#/components/parameters/PostRef'}
+    get:
+      summary: The post's top-level comments, newest first
+      description: >-
+        Logged out, Instagram serves top-level comments only; reply_count gives each one's replies.
+        Author identity (author_pk, author_username) needs `pii:read`; author_key is always shown.
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments: {type: array, items: {$ref: '#/components/schemas/Comment'}}
+                  next_cursor: {type: string}
+  /posts/{post}/metrics:
+    parameters:
+      - {$ref: '#/components/parameters/PostRef'}
+    get:
+      summary: The post's engagement samples, oldest first; a sample only when a count changed
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        "200": {description: Samples}
+  /posts/{post}/media:
+    parameters:
+      - {$ref: '#/components/parameters/PostRef'}
+    get:
+      summary: The post's media renditions (carousel children included)
+      responses:
+        "200": {description: Media}
+  /erasure-requests:
+    post:
+      summary: Erase a person or a profile (GDPR); admin only
+      description: >-
+        author: the person's comments are redacted and they are never stored again. profile: everything
+        read from the profile is deleted and it is never read again. Announced on ig.erasure.v1.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_type]
+              properties:
+                subject_type: {type: string, enum: [author, profile]}
+                user_pk: {type: integer, format: int64}
+                username: {type: string}
+      responses:
+        "202": {description: Queued, content: {application/json: {schema: {$ref: '#/components/schemas/Erasure'}}}}
+        "400": {$ref: '#/components/responses/Problem'}
+  /erasure-requests/{id}:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: An erasure request's state
+      responses:
+        "200": {description: The request, content: {application/json: {schema: {$ref: '#/components/schemas/Erasure'}}}}
+  /admin/queries:
+    get:
+      summary: The query registry (doc_ids)
+      responses:
+        "200": {description: Queries}
+  /admin/queries/{name}:
+    parameters:
+      - {in: path, name: name, required: true, schema: {type: string}}
+    put:
+      summary: Set a registry entry; crawlers pick it up on their next reload
+      responses:
+        "200": {description: The query}
+        "400": {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    apiKey: {type: http, scheme: bearer}
+  parameters:
+    Limit: {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 500, default: 50}}
+    Cursor: {in: query, name: cursor, schema: {type: string}, description: next_cursor of the previous page}
+    ProfileRef: {in: path, name: profile, required: true, schema: {type: string}, description: "username, @username, URL-escaped profile URL, or id:<user pk>"}
+    PostRef: {in: path, name: post, required: true, schema: {type: string}, description: shortcode or media pk}
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+    JobStatus: {type: string, enum: [running, finalizing, cancelling, completed, partial, failed, cancelled]}
+    CrawlOptions:
+      type: object
+      properties:
+        max_age_days: {type: integer, description: Up to ig.limits.max_age_cap_days (365)}
+        max_posts: {type: integer, description: 0 reads every post in the age window}
+        max_comments_per_post: {type: integer, description: 0 reads every top-level comment}
+        include_comments: {type: boolean}
+        include_reels: {type: boolean, description: Read the reels tab for each reel's views}
+        include_highlights: {type: boolean}
+        include_media: {type: boolean, description: Download media files (off by default)}
+        video_policy: {type: string, enum: [none, thumbnail, sd, hd]}
+    CreateJob:
+      allOf:
+        - type: object
+          required: [profile]
+          properties:
+            profile: {type: string}
+            mode: {type: string, enum: [auto, full, incremental]}
+            refresh_profile: {type: boolean, description: Read the profile itself on an incremental run}
+        - {$ref: '#/components/schemas/CrawlOptions'}
+    ScheduleSettings:
+      type: object
+      properties:
+        enabled: {type: boolean}
+        interval_hours: {type: integer, minimum: 1, maximum: 720}
+    Register:
+      allOf:
+        - type: object
+          required: [profile]
+          properties:
+            profile: {type: string}
+            schedule: {$ref: '#/components/schemas/ScheduleSettings'}
+            backfill: {type: boolean, description: Run a full read now (default only for a profile with no job yet)}
+        - {$ref: '#/components/schemas/CrawlOptions'}
+    Job:
+      type: object
+      properties:
+        job_id: {type: string, format: uuid}
+        kind: {type: string, enum: [on_demand, scheduled, backfill]}
+        lane: {type: string, enum: [p0, p1, p2]}
+        mode: {type: string, enum: [full, incremental]}
+        profile_ref: {type: string}
+        user_pk: {type: integer, format: int64}
+        status: {$ref: '#/components/schemas/JobStatus'}
+        params: {type: object}
+        counters:
+          type: object
+          additionalProperties: {type: integer}
+          description: profiles, posts, posts_detailed, posts_gated, reels, comments, highlights, media, requests, tasks_failed, ...
+        completeness:
+          type: object
+          description: >-
+            Instagram's comment count includes replies, which logged-out readers do not get, so the ratios are
+            information, never a failure. "partial" jobs had a truncated grid or comments, or failed tasks.
+          properties:
+            posts: {type: integer}
+            posts_complete: {type: integer}
+            posts_truncated: {type: integer}
+            posts_skipped: {type: integer, description: Unchanged since the last read, gated, or without comments}
+            posts_gated: {type: integer, description: A login wall drawn in place of the post}
+            median_ratio: {type: number}
+            min_ratio: {type: number}
+            comments_reported: {type: integer}
+            comments_collected: {type: integer}
+        error: {type: object}
+        pending_tasks: {type: integer}
+        created_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+    Schedule:
+      type: object
+      properties:
+        profile_ref: {type: string}
+        user_pk: {type: integer, format: int64}
+        enabled: {type: boolean}
+        interval_seconds: {type: integer}
+        next_run_at: {type: string, format: date-time}
+        next_profile_read_at: {type: string, format: date-time}
+        last_run_at: {type: string, format: date-time}
+        last_job_id: {type: string, format: uuid}
+        consecutive_failures: {type: integer}
+        options: {$ref: '#/components/schemas/CrawlOptions'}
+    Profile:
+      type: object
+      properties:
+        user_pk: {type: integer, format: int64}
+        username: {type: string}
+        full_name: {type: string}
+        biography: {type: string}
+        bio_links: {type: array, items: {type: object}}
+        verified: {type: boolean}
+        private: {type: boolean}
+        follower_count: {type: integer, format: int64}
+        following_count: {type: integer, format: int64}
+        media_count: {type: integer, format: int64}
+        profile_pic_url: {type: string}
+        category: {type: string}
+        is_business: {type: boolean}
+        highlight_count: {type: integer}
+        status: {type: string, enum: [active, private, unavailable, suppressed]}
+        first_seen_at: {type: string, format: date-time}
+        last_scraped_at: {type: string, format: date-time}
+        last_profile_read_at: {type: string, format: date-time}
+        schedule: {$ref: '#/components/schemas/Schedule'}
+    Post:
+      type: object
+      properties:
+        media_pk: {type: integer, format: int64}
+        shortcode: {type: string}
+        permalink: {type: string}
+        owner_pk: {type: integer, format: int64}
+        taken_at: {type: string, format: date-time}
+        media_type: {type: integer, enum: [1, 2, 8], description: 1 photo, 2 video, 8 carousel}
+        product_type: {type: string, description: feed, clips (a reel), carousel_container, igtv}
+        caption: {type: string}
+        caption_edited: {type: boolean}
+        hashtags: {type: array, items: {type: string}}
+        mentions: {type: array, items: {type: string}}
+        accessibility_caption: {type: string}
+        location: {type: object}
+        usertags: {type: array, items: {type: object}}
+        coauthors: {type: array, items: {type: object}}
+        music: {type: object}
+        topics: {type: array, items: {type: string}}
+        ai_label: {type: string}
+        like_count: {type: integer, format: int64, description: Absent when the owner hid the counts}
+        counts_hidden: {type: boolean}
+        comment_count: {type: integer, format: int64, description: Instagram's count, replies included}
+        commenting_disabled: {type: boolean}
+        play_count: {type: integer, format: int64, description: A reel's views (from the reels tab)}
+        is_pinned: {type: boolean}
+        child_count: {type: integer}
+        video_duration_ms: {type: integer, format: int64}
+        media_ids: {type: array, items: {type: string}}
+        status: {type: string, enum: [visible, unavailable]}
+        first_seen_at: {type: string, format: date-time}
+        last_seen_at: {type: string, format: date-time}
+    Comment:
+      type: object
+      properties:
+        comment_pk: {type: integer, format: int64}
+        media_pk: {type: integer, format: int64}
+        author_key: {type: string, description: "Hex HMAC of \"ig:user:\" + the author's pk (pseudonymous)"}
+        author_pk: {type: integer, format: int64, description: Needs pii:read}
+        author_username: {type: string, description: Needs pii:read}
+        author_verified: {type: boolean}
+        text: {type: string}
+        created_at: {type: string, format: date-time}
+        like_count: {type: integer, format: int64}
+        reply_count: {type: integer, format: int64}
+        is_op: {type: boolean}
+        status: {type: string}
+        redacted: {type: boolean}
+        edit_count: {type: integer}
+        first_seen_at: {type: string, format: date-time}
+    Media:
+      type: object
+      properties:
+        media_id: {type: string, format: uuid}
+        source_media_id: {type: string}
+        kind: {type: string}
+        variant: {type: string, enum: [original, sd, hd, thumbnail]}
+        media_pk: {type: integer, format: int64}
+        parent_media_pk: {type: integer, format: int64}
+        position: {type: integer}
+        status: {type: string, enum: [discovered, ready, deleted, expired, failed, skipped]}
+        s3_bucket: {type: string}
+        s3_key: {type: string}
+    Erasure:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        subject_type: {type: string, enum: [author, profile]}
+        status: {type: string, enum: [pending, done, failed]}
+        stats: {type: object}
+        error: {type: string}
+        created_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}

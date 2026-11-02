@@ -2,7 +2,7 @@
 // ig: the planner (scheduled runs every ig.schedule.interval, the profile
 // itself every ig.schedule.profile_refresh, comment refreshes of recent
 // posts), the job finalizer, the reaper, partition maintenance, AIMD and
-// consumer-lag gauges.
+// consumer-lag gauges, and the erasure requests.
 package main
 
 import (
@@ -18,6 +18,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
+	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
@@ -26,6 +27,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 )
@@ -71,6 +73,12 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	reaper := &scheduler.Reaper{DB: db, Jobs: tracker, After: cfg.Scheduler.ReaperAfter}
 	maint := &scheduler.Maintenance{DB: db, Cfg: cfg}
 	lag := &scheduler.LagGauges{Admin: kadm.NewClient(producer.Client()), Prefix: cfg.Kafka.TopicPrefix}
+	eraser := &iggdpr.Eraser{DB: db, Producer: producer}
+	if cfg.S3.Endpoint != "" {
+		if eraser.S3, err = s3x.Open(ctx, cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Region, cfg.S3.UseSSL, cfg.S3.MediaBucket); err != nil {
+			return err
+		}
+	}
 	loops := []run.Func{
 		func(ctx context.Context) error { return scheduler.Every(ctx, "maintenance", time.Hour, maint.Tick) },
 		func(ctx context.Context) error {
@@ -81,6 +89,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 		},
 		func(ctx context.Context) error { return scheduler.Every(ctx, "reaper", time.Minute, reaper.Tick) },
 		func(ctx context.Context) error { return scheduler.Every(ctx, "consumer-lag", 30*time.Second, lag.Tick) },
+		func(ctx context.Context) error { return scheduler.Every(ctx, "erasure", 10*time.Second, eraser.Tick) },
 	}
 	if cfg.IG.AIMD.Enabled {
 		aimd := ratelimit.NewController(rdb, cfg.Kafka.TopicPrefix, cfg.IG.AIMD, cfg.IG.GlobalRPS)
