@@ -1,3 +1,5 @@
+// Package store holds database lifecycle helpers shared by igs's binaries:
+// schema ig's migrations and partition maintenance.
 package store
 
 import (

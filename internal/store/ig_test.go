@@ -10,11 +10,11 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
 )
 
-// igs's migrations go up, down and up again in schema ig, beside fbs's
-// copied schema in public, with goose's versions in ig.goose_db_version;
-// each partition helper acts on its own schema only.
+// igs's migrations go up, down and up again in schema ig, with goose's
+// versions in ig.goose_db_version; the partition helpers act on the pool's
+// schema only, leaving another service's tables in public alone.
 func TestIGMigrationsAndPartitions(t *testing.T) {
-	pub := testenv.Postgres(t) // fbs's copied schema, migrated in public
+	pub := testenv.Postgres(t)
 	ctx := context.Background()
 	must := func(err error) {
 		t.Helper()
@@ -22,6 +22,11 @@ func TestIGMigrationsAndPartitions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Another service's partitioned table of the same name in public (fbs
+	// keeps one), which igs's helpers must leave alone.
+	_, err := pub.Exec(ctx, `CREATE TABLE public.posts (taken_at timestamptz NOT NULL, id bigint) PARTITION BY RANGE (taken_at)`)
+	must(err)
+	other := store.Layout{Monthly: []string{"posts"}}
 	tables := func(schema string) int {
 		var n int
 		must(pub.QueryRow(ctx, `SELECT count(*) FROM pg_tables WHERE schemaname = $1`, schema).Scan(&n))
@@ -63,7 +68,7 @@ func TestIGMigrationsAndPartitions(t *testing.T) {
 	if created != 4*3+3*1 { // 3 monthly tables x 4 months, 1 daily table x 3 days
 		t.Fatalf("created %d ig partitions", created)
 	}
-	if _, err := store.EnsurePartitions(ctx, pub, now, w); err != nil {
+	if _, err := other.EnsurePartitions(ctx, pub, now, w); err != nil {
 		t.Fatal(err)
 	}
 	var inIG, inPublic int

@@ -9,3 +9,9 @@ lint:
 breaking:
   use:
     - FILE
+  # The copied fbs contracts (securebrand.fb.v1, securebrand.fbs.task.v1)
+  # were deleted with the copied Facebook code (ADR 0004 §2); fbs owns them
+  # in its own repository.
+  ignore:
+    - api/proto/securebrand/fb
+    - api/proto/securebrand/fbs

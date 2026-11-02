@@ -240,7 +240,13 @@ func newStack(cfg *config.Config, base, fingerprint string, rps float64, paralle
 	if err != nil {
 		return stack{}, err
 	}
-	proxies, err := proxy.New(cfg.FB.Proxy)
+	// ig.proxy, or the proxies file the Phase 0 machine shares with fbs's
+	// kit (fb.proxy), as phase0 reads it.
+	pc := cfg.IG.Proxy
+	if len(pc.Tiers) == 0 {
+		pc = cfg.FB.Proxy
+	}
+	proxies, err := proxy.New(pc)
 	if err != nil {
 		return stack{}, err
 	}
@@ -261,8 +267,8 @@ func newStack(cfg *config.Config, base, fingerprint string, rps float64, paralle
 	}
 	rules := igdetect.Rules()
 	return stack{pool: pool,
-		loader: &session.Loader{Rules: rules, AcceptLanguage: cfg.FB.AcceptLanguage, Hooks: igclient.Hooks()},
-		gql:    &graphql.Client{Registry: registry.NewStatic(seed), Rules: rules, Builder: igclient.Builder{AcceptLanguage: cfg.FB.AcceptLanguage}},
+		loader: &session.Loader{Rules: rules, AcceptLanguage: cfg.IG.AcceptLanguage, Hooks: igclient.Hooks()},
+		gql:    &graphql.Client{Registry: registry.NewStatic(seed), Rules: rules, Builder: igclient.Builder{AcceptLanguage: cfg.IG.AcceptLanguage}},
 	}, nil
 }
 

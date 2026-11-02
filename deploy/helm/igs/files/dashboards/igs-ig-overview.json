@@ -1191,58 +1191,9 @@
       ]
     },
     {
-      "type": "timeseries",
-      "title": "Shadow parser outcomes",
-      "id": 24,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 46
-      },
-      "description": "A candidate parser's results on sampled responses: same, differs, drift.",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "fillOpacity": 5,
-            "stacking": {
-              "mode": "none"
-            },
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (query, outcome) (rate(igs_parse_shadow_total[$__rate_interval]))",
-          "legendFormat": "{{query}} {{outcome}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
       "type": "row",
       "title": "Pipeline",
-      "id": 25,
+      "id": 24,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1254,7 +1205,7 @@
     {
       "type": "timeseries",
       "title": "Tasks by stage and outcome",
-      "id": 26,
+      "id": 25,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1303,7 +1254,7 @@
     {
       "type": "timeseries",
       "title": "Lane slots",
-      "id": 27,
+      "id": 26,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1352,7 +1303,7 @@
     {
       "type": "timeseries",
       "title": "Consumer lag",
-      "id": 28,
+      "id": 27,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1401,7 +1352,7 @@
     {
       "type": "timeseries",
       "title": "Retries and DLQ",
-      "id": 29,
+      "id": 28,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1459,7 +1410,7 @@
     {
       "type": "timeseries",
       "title": "Task duration p95",
-      "id": 30,
+      "id": 29,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1508,7 +1459,7 @@
     {
       "type": "timeseries",
       "title": "Persisted rows",
-      "id": 31,
+      "id": 30,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1566,7 +1517,7 @@
     {
       "type": "row",
       "title": "Jobs and schedule",
-      "id": 32,
+      "id": 31,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1578,7 +1529,7 @@
     {
       "type": "timeseries",
       "title": "Jobs finished",
-      "id": 33,
+      "id": 32,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1667,7 +1618,7 @@
           "refId": "B"
         }
       ],
-      "id": 34,
+      "id": 33,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1709,7 +1660,7 @@
           "refId": "A"
         }
       ],
-      "id": 35,
+      "id": 34,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1751,7 +1702,7 @@
           "refId": "A"
         }
       ],
-      "id": 36,
+      "id": 35,
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -1762,7 +1713,7 @@
     {
       "type": "timeseries",
       "title": "Schedule lag",
-      "id": 37,
+      "id": 36,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1811,7 +1762,7 @@
     {
       "type": "row",
       "title": "Media and API",
-      "id": 38,
+      "id": 37,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1823,7 +1774,7 @@
     {
       "type": "timeseries",
       "title": "Media downloads",
-      "id": 39,
+      "id": 38,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1872,7 +1823,7 @@
     {
       "type": "timeseries",
       "title": "Media deleted",
-      "id": 40,
+      "id": 39,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1921,7 +1872,7 @@
     {
       "type": "timeseries",
       "title": "API requests",
-      "id": 41,
+      "id": 40,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"

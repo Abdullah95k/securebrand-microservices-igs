@@ -115,7 +115,7 @@ func (l *Loader) Load(ctx context.Context, id *Identity, rawURL string) (*PageLo
 			if ctx.Err() == nil { // a cancelled load says nothing about the exit
 				Outcome(id, detect.Transport)
 			}
-			metrics.FBRequests.WithLabelValues("page_html", detect.Transport.String(), id.Endpoint.Tier).Inc()
+			metrics.Requests.WithLabelValues("page_html", detect.Transport.String(), id.Endpoint.Tier).Inc()
 			return nil, fmt.Errorf("session: load %s: %w: %w", target, ErrTransport, err)
 		}
 		total += resp.BytesIn + resp.BytesOut
@@ -131,7 +131,7 @@ func (l *Loader) Load(ctx context.Context, id *Identity, rawURL string) (*PageLo
 		}
 		cls, reason := l.Rules.Classify(detect.Input{Status: resp.Status, Location: resp.Location,
 			ContentType: resp.Header.Get("Content-Type"), Body: resp.Body, Expect: "html"})
-		metrics.FBRequests.WithLabelValues("page_html", cls.String(), id.Endpoint.Tier).Inc()
+		metrics.Requests.WithLabelValues("page_html", cls.String(), id.Endpoint.Tier).Inc()
 		if l.Browser != nil {
 			l.Browser.Observe()
 		}

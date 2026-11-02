@@ -7,8 +7,7 @@
 #
 # Gauges the leader scheduler publishes (AIMD, schedule lag, consumer lag)
 # are read through igs:leader:* so a former leader's last values do not
-# count. Recording rules are named igs:ig_* so a Prometheus that also loads
-# the copied fbs rules (igs:*) keeps both.
+# count. Recording rules are named igs:ig_*.
 groups:
   - name: igs.ig.recording
     interval: 30s

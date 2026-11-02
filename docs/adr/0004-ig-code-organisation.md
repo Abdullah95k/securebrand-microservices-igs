@@ -81,6 +81,12 @@ for M1 and M2, and are removed once the `fakeig` suites of M6 to M8 cover the
 same code. Facebook code is never run against Facebook from the igs
 repository.
 
+*Done in M10 (2026-11-02):* the copied Facebook code is removed: `internal/fb`,
+`internal/fakefb`, `internal/e2e`, fbs's pipeline packages and binaries, the
+`securebrand.fb.v1` and `securebrand.fbs.task.v1` protos, fbs's migrations,
+chart and Compose services (`UPSTREAM.md` lists them). The config keeps its
+`fb:` section while the Phase 0 machine's proxies file is keyed `fb.proxy`.
+
 ### 3. The crawl framework
 igs's copy of the worker works on igs's own envelope
 (`securebrand.igs.task.v1`, ADR 0005), so it needs no cross-platform

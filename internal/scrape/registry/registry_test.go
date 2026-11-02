@@ -8,32 +8,36 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 )
 
+// igs's embedded seed parses, holds its queries, and renders a query's
+// variables from the caller's values; a placeholder without a value or a
+// default renders null.
 func TestSeedAndRender(t *testing.T) {
-	b, _ := configs.FS.ReadFile("queries.seed.yaml")
+	b, _ := configs.FS.ReadFile("ig/queries.seed.yaml")
 	seed, err := ParseSeed(b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	reg := NewStatic(seed)
-	for _, name := range []string{"timeline", "comments", "comments_newest", "replies"} {
+	for _, name := range []string{"profile", "grid_first", "grid", "comments"} {
 		if _, err := reg.Get(name); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
 	q, _ := reg.Get("comments")
-	out, err := Render(q.Variables, map[string]any{"feedback_id": "ZmVlZA==", "cursor": "C1"})
+	out, err := Render(q.Variables, map[string]any{"media_pk": "3123", "cursor": "C1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var v map[string]any
 	_ = json.Unmarshal(out, &v)
-	if v["id"] != "ZmVlZA==" || v["commentsAfterCursor"] != "C1" || v["commentsAfterCount"] != float64(-1) {
+	if v["media_id"] != "3123" || v["after"] != "C1" || v["first"] != float64(10) {
 		t.Fatalf("rendered %s", out)
 	}
-	out, _ = Render(q.Variables, map[string]any{"feedback_id": "x"})
+	v = nil
+	out, _ = Render(q.Variables, map[string]any{"media_pk": "3123"})
 	_ = json.Unmarshal(out, &v)
-	if v["commentsAfterCursor"] != nil {
-		t.Fatalf("missing placeholder must render null, got %v", v["commentsAfterCursor"])
+	if v["after"] != nil {
+		t.Fatalf("missing placeholder must render null, got %v", v["after"])
 	}
 }
 
@@ -70,8 +74,11 @@ func TestFallbackOrdering(t *testing.T) {
 	}
 }
 
+// The seed survives MarshalSeed and ParseSeed, and placeholder doc_ids are
+// told apart: igs's embedded seed carries the doc_ids of the owner's
+// recordings, none a placeholder.
 func TestSeedRoundTripAndPlaceholders(t *testing.T) {
-	b, err := configs.FS.ReadFile("queries.seed.yaml")
+	b, err := configs.FS.ReadFile("ig/queries.seed.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,10 +86,13 @@ func TestSeedRoundTripAndPlaceholders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := PlaceholderQueries(s); len(got) != len(s.Queries) {
-		t.Fatalf("every embedded seed query is a placeholder, got %v", got)
+	if got := PlaceholderQueries(s); len(got) != 0 {
+		t.Fatalf("igs's seed has placeholder doc_ids: %v", got)
 	}
-	s.Queries[0].DocID = "24681357902468135"
+	s.Queries[0].DocID = "9000000000000001"
+	if got := PlaceholderQueries(s); len(got) != 1 || got[0] != s.Queries[0].Name {
+		t.Fatalf("placeholders after setting one: %v", got)
+	}
 	out, err := MarshalSeed(s)
 	if err != nil {
 		t.Fatal(err)
@@ -91,11 +101,8 @@ func TestSeedRoundTripAndPlaceholders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(back.Queries) != len(s.Queries) || back.Queries[0].DocID != "24681357902468135" {
+	if len(back.Queries) != len(s.Queries) || back.Queries[0].DocID != "9000000000000001" {
 		t.Fatalf("round trip lost data: %+v", back.Queries)
-	}
-	if got := PlaceholderQueries(back); len(got) != len(s.Queries)-1 {
-		t.Fatalf("placeholders after update: %v", got)
 	}
 	for i := range s.Queries {
 		var a, b map[string]any

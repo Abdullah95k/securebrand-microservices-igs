@@ -1,21 +1,18 @@
 /bin/
 # go build ./cmd/<name> in the repository root
 /igs-spike
-/fbs-spike
+/igsctl
+/fakeig
 *.test
 *.out
 spike-results.jsonl
 /coverage*
 .env
 __pycache__/
-# Phase 0: credentials, your page list and results stay local. Everything
+# Phase 0: credentials, your profile list and results stay local. Everything
 # in phase0/ is ignored except the kit's own files, so editor swap files and
 # backups of proxies.yaml (which hold credentials) can't be committed either.
 /phase0/*
-!/phase0/dryrun-pages.csv
-!/phase0/dryrun.sh
-!/phase0/dryrun.yaml
-!/phase0/pages.example.csv
 !/phase0/proxies.example.yaml
 !/phase0/ig-profiles.example.txt
 !/phase0/igs-dryrun.sh

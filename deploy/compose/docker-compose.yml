@@ -1,24 +1,29 @@
-# Local stack: infrastructure + every fbs service + fakefb.
+# igs's local stack: infrastructure (Postgres, Redpanda, Valkey, an
+# in-memory S3), fakeig (a synthetic logged-out Instagram) and every igs
+# service.
 #   make compose-up        build the image and start everything
 #   make compose-down
-# The crawler points at fakefb (a synthetic Facebook). To try real Facebook
-# set IGS_FB__BASE_URL=https://www.facebook.com and configure proxies in
-# deploy/compose/local.yaml first (see docs/runbooks/phase0-spike.md).
-name: fbs
+#   make infra-up          only the infrastructure, for the integration tests
+# The API answers on localhost:8080; create a key with
+#   docker compose -f deploy/compose/docker-compose.yml exec api igsctl apikey create --name dev
+# and register fakeig's profiles (profile_01 .. profile_05) with
+#   curl -H "Authorization: Bearer $KEY" -d '{"profile":"profile_01"}' localhost:8080/v1/profiles
+# Never point it at real Instagram with these rates (local.yaml).
+name: igs
 
-x-fbs: &fbs
-  image: ${IGS_IMAGE:-fbs:dev}
+x-igs: &igs
+  image: ${IGS_IMAGE:-igs:dev}
   restart: unless-stopped
-  environment: &fbs-env
-    IGS_CONFIG: /etc/fbs/local.yaml
+  environment: &igs-env
+    IGS_CONFIG: /etc/igs/local.yaml
     IGS_POSTGRES__DSN: postgres://fbs:fbs@postgres:5432/fbs?sslmode=disable
     IGS_REDIS__ADDR: valkey:6379
     IGS_KAFKA__BROKERS: redpanda:9092
     IGS_KAFKA__SCHEMA_REGISTRY__URL: http://redpanda:8081
     IGS_S3__ENDPOINT: s3:9000
-    IGS_FB__BASE_URL: ${IGS_FB_BASE_URL:-http://fakefb:8090}
+    IGS_IG__BASE_URL: ${IGS_IG_BASE_URL:-http://fakeig:8091}
   volumes:
-    - ./local.yaml:/etc/fbs/local.yaml:ro
+    - ./local.yaml:/etc/igs/local.yaml:ro
   depends_on:
     init: {condition: service_completed_successfully}
     topics: {condition: service_completed_successfully}
@@ -50,71 +55,67 @@ services:
   # In-memory S3 for development. Swap for MinIO/SeaweedFS/AWS S3 by changing
   # IGS_S3__ENDPOINT and credentials.
   s3:
-    image: ${IGS_IMAGE:-fbs:dev}
+    image: ${IGS_IMAGE:-igs:dev}
     entrypoint: ["/usr/local/bin/devs3", "--addr", ":9000"]
     ports: ["9000:9000"]
 
-  fakefb:
-    image: ${IGS_IMAGE:-fbs:dev}
-    entrypoint: ["/usr/local/bin/fakefb", "--addr", ":8090", "--pages", "5", "--posts", "30"]
-    ports: ["8090:8090"]
+  fakeig:
+    image: ${IGS_IMAGE:-igs:dev}
+    entrypoint: ["/usr/local/bin/fakeig", "--addr", ":8091", "--profiles", "5", "--posts", "30",
+                 "--cdn-base", "http://fakeig:8091/fake-cdn"]
+    ports: ["8091:8091"]
 
   init:
-    image: ${IGS_IMAGE:-fbs:dev}
-    environment: *fbs-env
+    image: ${IGS_IMAGE:-igs:dev}
+    environment: *igs-env
     volumes:
-      - ./local.yaml:/etc/fbs/local.yaml:ro
-    entrypoint: ["/usr/local/bin/fbctl", "migrate", "up"]
+      - ./local.yaml:/etc/igs/local.yaml:ro
+    entrypoint: ["/usr/local/bin/igsctl", "migrate", "up"]
     depends_on:
       postgres: {condition: service_healthy}
-      redpanda: {condition: service_healthy}
 
   topics:
-    image: ${IGS_IMAGE:-fbs:dev}
-    environment: *fbs-env
+    image: ${IGS_IMAGE:-igs:dev}
+    environment: *igs-env
     volumes:
-      - ./local.yaml:/etc/fbs/local.yaml:ro
-    entrypoint: ["/usr/local/bin/fbctl", "kafka", "apply", "--partitions-cap", "3", "--replicas", "1"]
+      - ./local.yaml:/etc/igs/local.yaml:ro
+    entrypoint: ["/usr/local/bin/igsctl", "kafka", "apply", "--partitions-cap", "3", "--replicas", "1"]
     depends_on:
       redpanda: {condition: service_healthy}
 
   schemas:
-    image: ${IGS_IMAGE:-fbs:dev}
-    environment: *fbs-env
+    image: ${IGS_IMAGE:-igs:dev}
+    environment: *igs-env
     volumes:
-      - ./local.yaml:/etc/fbs/local.yaml:ro
-    entrypoint: ["/usr/local/bin/fbctl", "schemas", "apply"]
+      - ./local.yaml:/etc/igs/local.yaml:ro
+    entrypoint: ["/usr/local/bin/igsctl", "schemas", "apply"]
     depends_on:
       redpanda: {condition: service_healthy}
 
   api:
-    <<: *fbs
-    entrypoint: ["/usr/local/bin/fbs-api"]
+    <<: *igs
+    entrypoint: ["/usr/local/bin/igs-api"]
     ports: ["8080:8080"]
 
   scheduler:
-    <<: *fbs
-    entrypoint: ["/usr/local/bin/fbs-scheduler"]
+    <<: *igs
+    entrypoint: ["/usr/local/bin/igs-scheduler"]
 
   crawler:
-    <<: *fbs
-    entrypoint: ["/usr/local/bin/fbs-crawler", "--stages", "page,post,thread,retry"]
+    <<: *igs
+    entrypoint: ["/usr/local/bin/igs-crawler", "--stages", "profile,post,retry"]
 
   persister:
-    <<: *fbs
-    entrypoint: ["/usr/local/bin/fbs-persister"]
+    <<: *igs
+    entrypoint: ["/usr/local/bin/igs-persister"]
 
-  media-downloader:
-    <<: *fbs
-    entrypoint: ["/usr/local/bin/fbs-media-downloader"]
-
-  media-janitor:
-    <<: *fbs
-    entrypoint: ["/usr/local/bin/fbs-media-janitor"]
+  media:
+    <<: *igs
+    entrypoint: ["/usr/local/bin/igs-media", "--roles", "downloader,janitor"]
 
   registry-sync:
-    <<: *fbs
-    entrypoint: ["/usr/local/bin/fbs-registry-sync"]
+    <<: *igs
+    entrypoint: ["/usr/local/bin/igs-registry-sync"]
 
 volumes:
   pgdata: {}

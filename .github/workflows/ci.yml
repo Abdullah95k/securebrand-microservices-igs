@@ -40,9 +40,9 @@ jobs:
       - name: Fixtures contain no real signed URLs
         run: |
           if grep -rlE 'oh=00_|_nc_cat=' testdata/; then
-            echo "fixtures with real fbcdn signatures: run fbctl fixtures scrub"; exit 1
+            echo "fixtures with real CDN signatures: scrub them (internal/ig/fixtures)"; exit 1
           fi
-      - name: Unit tests (parsers, fake Facebook client layer, accounting)
+      - name: Unit tests (parsers, client layer, accounting)
         env: {IGS_BROWSER_NO_SANDBOX: "1"} # runners may not allow the Chromium sandbox
         run: go test -race -count=1 ./...
       - uses: golangci/golangci-lint-action@v8
@@ -79,7 +79,7 @@ jobs:
           IGS_TEST_KAFKA_BROKERS: localhost:19092
           IGS_TEST_SCHEMA_REGISTRY: http://localhost:18081
           IGS_BROWSER_NO_SANDBOX: "1"
-        run: go test -count=1 -timeout 20m ./internal/persist/... ./internal/e2e/... ./internal/spike/... ./internal/registrysync/... ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./cmd/igsctl/...
+        run: go test -count=1 -timeout 20m ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./cmd/igsctl/...
       - name: igs Phase 0 dry run (fakeig, rotated doc_ids; must say GO)
         run: make igs-phase0-dryrun
 
@@ -95,24 +95,18 @@ jobs:
         run: |
           go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
           make chart-check
-          helm template fbs deploy/helm/fbs --set keda.enabled=false,api.ingress.enabled=true,networkPolicy.enabled=true > /dev/null
-          helm template fbs deploy/helm/fbs --set alerts.enabled=true,dashboards.enabled=true,serviceMonitor.enabled=true > /tmp/monitoring.yaml
-          grep -q "kind: PrometheusRule" /tmp/monitoring.yaml && grep -q "fbs-overview.json" /tmp/monitoring.yaml
           helm template igs deploy/helm/igs --set keda.enabled=false,api.ingress.enabled=true,networkPolicy.enabled=true > /dev/null
           helm template igs deploy/helm/igs --set alerts.enabled=true,dashboards.enabled=true,serviceMonitor.enabled=true > /tmp/igs-monitoring.yaml
           grep -q "kind: PrometheusRule" /tmp/igs-monitoring.yaml && grep -q "igs-ig-overview.json" /tmp/igs-monitoring.yaml
       - name: Docker build
         run: |
-          docker build -f deploy/docker/Dockerfile -t fbs:ci .
-          docker build -f deploy/docker/Dockerfile --target browser -t fbs:ci-browser .
-          docker run --rm --entrypoint chromium fbs:ci-browser --version
-      - name: Chart smoke runs (each chart's workloads in Docker against fakefb and fakeig)
+          docker build -f deploy/docker/Dockerfile -t igs:ci .
+          docker build -f deploy/docker/Dockerfile --target browser -t igs:ci-browser .
+          docker run --rm --entrypoint chromium igs:ci-browser --version
+      - name: Chart smoke run (the chart's workloads in Docker against fakeig)
         run: |
           python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y python3-yaml
           make infra-up
-          make chart-smoke IMAGE=fbs:ci
-          make igs-chart-smoke IMAGE=fbs:ci
+          make chart-smoke IMAGE=igs:ci
       - name: Compose config is valid
-        run: |
-          docker compose -f deploy/compose/docker-compose.yml config -q
-          docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/igs.yml config -q
+        run: docker compose -f deploy/compose/docker-compose.yml config -q
