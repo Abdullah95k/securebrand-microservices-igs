@@ -239,6 +239,13 @@ paths:
       summary: The query registry (doc_ids)
       responses:
         "200": {description: Queries}
+  /admin/registry-sync/runs:
+    get:
+      summary: The latest igs-registry-sync runs, newest first (docs/runbooks/igs-registry-sync.md)
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        "200": {description: Runs with their reports}
   /admin/queries/{name}:
     parameters:
       - {in: path, name: name, required: true, schema: {type: string}}

@@ -60,7 +60,7 @@ func TestNoFacebookDependencies(t *testing.T) {
 	if err != nil {
 		t.Skip("go not on PATH")
 	}
-	out, err := exec.Command(gobin, "list", "-deps", "./...", "../../cmd/igs-crawler", "../../cmd/igs-persister", "../../cmd/igs-api", "../../cmd/igs-scheduler", "../../cmd/igs-media").CombinedOutput()
+	out, err := exec.Command(gobin, "list", "-deps", "./...", "../../cmd/igs-crawler", "../../cmd/igs-persister", "../../cmd/igs-api", "../../cmd/igs-scheduler", "../../cmd/igs-media", "../../cmd/igs-registry-sync", "../../cmd/igs-spike", "../../cmd/fakeig").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list: %v\n%s", err, out)
 	}

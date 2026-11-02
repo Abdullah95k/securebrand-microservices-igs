@@ -37,6 +37,9 @@ type Bootstrapper struct {
 	// Hooks are the platform's page hooks, as the HTTP loader's: tokens,
 	// wall paths and AfterLoad (run with canReload false).
 	Hooks session.Hooks
+	// CaptureFilter selects the requests Capture records (default
+	// IsGraphQL, Facebook's endpoint; Instagram's are IsInstagramGraphQL).
+	CaptureFilter func(rawURL string) bool
 
 	sem    chan struct{}
 	mu     sync.Mutex
@@ -190,6 +193,7 @@ func (b *Bootstrapper) Capture(ctx context.Context, id *session.Identity, rawURL
 		return nil, err
 	}
 	opts.Scrolls = 2
+	opts.Capture = b.CaptureFilter
 	res, err := b.render(ctx, b.Binary, opts)
 	if err != nil {
 		return nil, err

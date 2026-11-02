@@ -48,8 +48,12 @@ type IG struct {
 	Browser      Browser        `koanf:"browser"`
 	Detect       detect.Config  `koanf:"detect"`
 	Limits       IGLimits       `koanf:"limits"`
-	Schedule     IGSchedule     `koanf:"schedule"`
-	Privacy      IGPrivacy      `koanf:"privacy"`
+	// RegistrySync follows Instagram's doc_id rotations (igs-registry-sync):
+	// canary_pages are public profiles (usernames) with regular posts,
+	// comments, reels and highlights.
+	RegistrySync RegistrySync `koanf:"registry_sync"`
+	Schedule     IGSchedule   `koanf:"schedule"`
+	Privacy      IGPrivacy    `koanf:"privacy"`
 }
 
 // IGLimits are the defaults applied to jobs that do not override them.

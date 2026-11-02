@@ -399,4 +399,15 @@ ig:
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"
+  registry_sync:
+    interval: 30m
+    canary_pages: []             # usernames of public profiles; set at least three in production
+    tier: ""
+    max_bundles: 60
+    bundles_via_proxy: false
+    promote: true
+    keep_fallbacks: 2
+    retire_after: 3
+    recheck_retired: 24h
+    timeout: 10m
 
