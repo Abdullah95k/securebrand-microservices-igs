@@ -29,29 +29,12 @@ type Layout struct {
 	LZ4 map[string][]string
 }
 
-// FBLayout is the copied Facebook pipeline's tables (schema public).
-var FBLayout = Layout{
-	Monthly:    []string{"posts", "comments", "page_snapshots"},
-	Daily:      []string{"post_metrics"},
-	FillFactor: map[string]bool{"posts": true, "comments": true},
-	LZ4: map[string][]string{
-		"posts":    {"text", "text_ranges", "links", "extra"},
-		"comments": {"text", "text_ranges", "attachments", "extra"},
-	},
-}
-
 // PartitionWindow describes which partitions must exist.
 type PartitionWindow struct {
 	MonthsBack  int // monthly tables: how many months before now
 	MonthsAhead int
 	DaysBack    int // daily tables
 	DaysAhead   int
-}
-
-// EnsurePartitions creates every missing partition of FBLayout inside the
-// window.
-func EnsurePartitions(ctx context.Context, pool *pgxpool.Pool, now time.Time, w PartitionWindow) (int, error) {
-	return FBLayout.EnsurePartitions(ctx, pool, now, w)
 }
 
 // EnsurePartitions creates every missing partition of l inside the window.
@@ -85,12 +68,6 @@ func (l Layout) EnsurePartitions(ctx context.Context, pool *pgxpool.Pool, now ti
 		}
 	}
 	return created, nil
-}
-
-// EnsurePartitionFor creates the partition of FBLayout's table that holds
-// ts. The persister calls it when an insert fails with "no partition".
-func EnsurePartitionFor(ctx context.Context, pool *pgxpool.Pool, table string, ts time.Time) error {
-	return FBLayout.EnsurePartitionFor(ctx, pool, table, ts)
 }
 
 // EnsurePartitionFor creates the partition of l's table that holds ts.

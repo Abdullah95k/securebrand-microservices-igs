@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
-"""Run a Helm chart's workloads in Docker, as the chart defines them.
+"""Run the igs Helm chart's workloads in Docker, as the chart defines them.
 
 Without a Kubernetes cluster, this checks what a cluster would run: it
-renders the chart (--chart fbs: deploy/helm/fbs with
-examples/fakefb.yaml; --chart igs: deploy/helm/igs with examples/fakeig.yaml)
-and starts every hook Job and Deployment container with the rendered
-command, environment, ConfigMap and Secret mounts, user, read-only root
-filesystem, dropped capabilities and memory limit, on the network of
-`make infra-up` (Postgres, Redpanda, Valkey), next to the fake platform and
-an in-memory S3. Then it registers the fake's pages or profiles through the
-API and waits for their backfills: every job must finish, with comments and
-media stored, and no component may log an error.
+renders deploy/helm/igs with examples/fakeig.yaml and starts every hook Job
+and Deployment container with the rendered command, environment, ConfigMap
+and Secret mounts, user, read-only root filesystem, dropped capabilities
+and memory limit, on the network of `make infra-up` (Postgres, Redpanda,
+Valkey), next to fakeig and an in-memory S3. Then it registers fakeig's
+profiles through the API and waits for their backfills: every job must
+finish, with posts, comments and media stored, and no component may log an
+error.
 
 It does not exercise what only Kubernetes does: Services, probes, KEDA,
 PodDisruptionBudgets. `kubeconform` checks those objects' schemas.
 
-    python3 scripts/chart-smoke.py --image fbs:dev [--chart igs] [--values FILE] [--keep]
+    python3 scripts/chart-smoke.py --image igs:dev [--values FILE] [--keep]
 
-Each chart uses its own database, Redis DB (15 for fbs, 14 for igs; the
-tests' stacks claim 1 to 13) and topic prefix, so it can run next to the
-tests and the other chart's run.
+It uses its own database (igs_smoke), Redis DB 14 (the tests' stacks claim
+1 to 13) and topic prefix (igsmoke.), so it can run next to the tests.
 """
 import argparse
 import json
@@ -33,28 +31,17 @@ import urllib.request
 
 import yaml
 
-PAGES = ["brand0", "brand1", "brand2"]
 PROFILES = ["profile_01", "profile_02", "profile_03"]
 
-# Per chart: release and chart path, default values, container prefix, topic
-# prefix, database, Redis DB, the env var of the privacy HMAC key, and the
-# schema its tables live in.
-CHARTS = {
-    "fbs": dict(release="fbs", path="deploy/helm/fbs", values="deploy/helm/fbs/examples/fakefb.yaml", prefix="fbs-smoke-",
-                topic_prefix="chartsmoke.", db="fbs_smoke", redis_db=15, hmac_env="IGS_PRIVACY__AUTHOR_HMAC_KEY", schema="public"),
-    "igs": dict(release="igs", path="deploy/helm/igs", values="deploy/helm/igs/examples/fakeig.yaml", prefix="igs-smoke-",
-                topic_prefix="igsmoke.", db="igs_smoke", redis_db=14, hmac_env="IGS_IG__PRIVACY__AUTHOR_HMAC_KEY", schema="ig"),
-}
-CHART = CHARTS["fbs"]
+# Release and chart path, default values, container prefix, topic prefix,
+# database, Redis DB, the env var of the privacy HMAC key.
+CHART = dict(release="igs", path="deploy/helm/igs", values="deploy/helm/igs/examples/fakeig.yaml", prefix="igs-smoke-",
+             topic_prefix="igsmoke.", db="igs_smoke", redis_db=14, hmac_env="IGS_IG__PRIVACY__AUTHOR_HMAC_KEY")
 PREFIX = CHART["prefix"]
 TOPIC_PREFIX = CHART["topic_prefix"]
 DB = CHART["db"]
-
-
-def use_chart(name):
-    global CHART, PREFIX, TOPIC_PREFIX, DB
-    CHART = CHARTS[name]
-    PREFIX, TOPIC_PREFIX, DB = CHART["prefix"], CHART["topic_prefix"], CHART["db"]
+# The containers of `make infra-up` (compose project igs).
+POSTGRES, REDPANDA, VALKEY = "igs-postgres-1", "igs-redpanda-1", "igs-valkey-1"
 
 
 def sh(*args, check=True, capture=True, timeout=600):
@@ -65,9 +52,7 @@ def sh(*args, check=True, capture=True, timeout=600):
 
 
 def psql(sql, db=None):
-    # db defaults to the chart's database at call time: use_chart sets DB
-    # after this function is defined.
-    return sh("docker", "exec", "fbs-postgres-1", "psql", "-U", "fbs", "-d", db or DB, "-tAc", sql).stdout.strip()
+    return sh("docker", "exec", POSTGRES, "psql", "-U", "fbs", "-d", db or DB, "-tAc", sql).stdout.strip()
 
 
 def render(args):
@@ -142,57 +127,9 @@ def cleanup():
     names = sh("docker", "ps", "-aq", "--filter", f"name={PREFIX}").stdout.split()
     if names:
         sh("docker", "rm", "-f", *names, check=False)
-    sh("docker", "exec", "fbs-postgres-1", "psql", "-U", "fbs", "-d", "postgres", "-c", f"DROP DATABASE IF EXISTS {DB} WITH (FORCE)", check=False)
-    sh("docker", "exec", "fbs-redpanda-1", "rpk", "topic", "delete", "-r", "^" + TOPIC_PREFIX.replace(".", r"\.") + ".*", check=False)
-    sh("docker", "exec", "fbs-valkey-1", "valkey-cli", "-n", str(CHART["redis_db"]), "flushdb", check=False)
-
-
-def fbs_flow(args, work, failures):
-    """Registers fakefb's pages (fbctl pages import) and checks their backfills."""
-    # An API key, as the go-live runbook creates it.
-    out = sh("docker", "exec", PREFIX + "fbs-api", "/usr/local/bin/fbctl", "apikey", "create", "--name", "smoke",
-             "--scopes", "pages:write,jobs:write,data:read").stdout
-    key = json.loads(out[out.index("{"):])["api_key"]
-    pages_file = os.path.join(work, "pages.csv")
-    with open(pages_file, "w") as f:
-        f.write("page\n" + "\n".join(PAGES) + "\n")
-    os.chmod(pages_file, 0o644)
-    out = sh("docker", "run", "--rm", "--network", args.network, "-v", f"{pages_file}:/pages.csv:ro",
-             "--entrypoint", "/usr/local/bin/fbctl", args.image, "pages", "import",
-             "--api", "http://fbs-api:8080", "--key", key, "/pages.csv").stdout
-    imported = json.loads(out[out.index("{"):])
-    print(f"pages import: {imported}")
-    if imported.get("created") != len(PAGES):
-        failures.append(f"pages import created {imported.get('created')}, want {len(PAGES)}")
-    # Importing again changes nothing.
-    out = sh("docker", "run", "--rm", "--network", args.network, "-v", f"{pages_file}:/pages.csv:ro",
-             "--entrypoint", "/usr/local/bin/fbctl", args.image, "pages", "import",
-             "--api", "http://fbs-api:8080", "--key", key, "/pages.csv").stdout
-    again = json.loads(out[out.index("{"):])
-    if again.get("existing") != len(PAGES) or again.get("created"):
-        failures.append(f"second import: {again}")
-
-    deadline = time.time() + args.timeout
-    while time.time() < deadline:
-        done = int(psql("SELECT count(*) FROM jobs WHERE status IN ('completed','partial','failed','cancelled')") or 0)
-        if done >= len(PAGES):
-            break
-        time.sleep(2)
-    statuses = psql("SELECT string_agg(kind || ':' || status, ',') FROM jobs")
-    posts = int(psql("SELECT count(*) FROM posts"))
-    comments = int(psql("SELECT count(*) FROM comments"))
-    media = psql("SELECT coalesce(string_agg(status || '=' || n, ','), '') FROM (SELECT status, count(*) n FROM media GROUP BY status) m")
-    print(f"jobs {statuses}; posts {posts}; comments {comments}; media {media}")
-    if statuses is None or statuses.count(":completed") != len(PAGES):
-        failures.append(f"jobs: {statuses}")
-    if posts == 0 or comments == 0:
-        failures.append("nothing stored")
-    if "ready=" not in media and "deleted=" not in media:
-        failures.append(f"no media downloaded: {media}")
-    api_port = host_port("fbs-api", 8080)
-    status, body = http(f"http://127.0.0.1:{api_port}/v1/pages", key)
-    if status != 200:
-        failures.append(f"GET /v1/pages: {status} {body[:200]}")
+    sh("docker", "exec", POSTGRES, "psql", "-U", "fbs", "-d", "postgres", "-c", f"DROP DATABASE IF EXISTS {DB} WITH (FORCE)", check=False)
+    sh("docker", "exec", REDPANDA, "rpk", "topic", "delete", "-r", "^" + TOPIC_PREFIX.replace(".", r"\.") + ".*", check=False)
+    sh("docker", "exec", VALKEY, "valkey-cli", "-n", str(CHART["redis_db"]), "flushdb", check=False)
 
 
 def igs_flow(args, failures):
@@ -242,25 +179,22 @@ def igs_flow(args, failures):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--image", default="fbs:dev")
-    ap.add_argument("--chart", choices=sorted(CHARTS), default="fbs")
-    ap.add_argument("--values", default="", help="values file (default: the chart's fake-platform example)")
-    ap.add_argument("--network", default="fbs_default")
+    ap.add_argument("--image", default="igs:dev")
+    ap.add_argument("--values", default=CHART["values"])
+    ap.add_argument("--network", default="igs_default")
     ap.add_argument("--helm", default="helm")
     ap.add_argument("--timeout", type=int, default=300, help="seconds for the backfills")
     ap.add_argument("--keep", action="store_true", help="leave the containers running")
     args = ap.parse_args()
-    use_chart(args.chart)
-    args.values = args.values or CHART["values"]
 
     # make infra-up returns once Postgres answers; Redpanda may still be
     # starting. A fresh broker also answers its first producer-ID requests
     # with NOT_COORDINATOR for a while: produce once (idempotently, as the
     # components do) before starting them.
-    sh("docker", "exec", "fbs-redpanda-1", "rpk", "cluster", "health", "--exit-when-healthy", timeout=180)
+    sh("docker", "exec", REDPANDA, "rpk", "cluster", "health", "--exit-when-healthy", timeout=180)
     cleanup()
     deadline = time.time() + 120
-    while sh("docker", "exec", "fbs-redpanda-1", "sh", "-c",
+    while sh("docker", "exec", REDPANDA, "sh", "-c",
              f"rpk topic create {TOPIC_PREFIX}warmup >/dev/null 2>&1; echo warmup | rpk topic produce {TOPIC_PREFIX}warmup", check=False).returncode != 0:
         if time.time() > deadline:
             raise SystemExit("Redpanda does not accept idempotent produce requests")
@@ -294,13 +228,9 @@ def main():
     # The Services the values expect besides the infrastructure.
     sh("docker", "run", "-d", "--name", PREFIX + "s3", "--network", args.network, "--network-alias", "s3",
        "--entrypoint", "/usr/local/bin/devs3", args.image, "--addr", ":9000")
-    if args.chart == "igs":
-        sh("docker", "run", "-d", "--name", PREFIX + "fakeig", "--network", args.network, "--network-alias", "fakeig",
-           "--entrypoint", "/usr/local/bin/fakeig", args.image, "--addr", ":8091", "--profiles", str(len(PROFILES)), "--posts", "10",
-           "--cdn-base", "http://fakeig:8091/fake-cdn")
-    else:
-        sh("docker", "run", "-d", "--name", PREFIX + "fakefb", "--network", args.network, "--network-alias", "fakefb",
-           "--entrypoint", "/usr/local/bin/fakefb", args.image, "--addr", ":8090", "--pages", str(len(PAGES)), "--posts", "10")
+    sh("docker", "run", "-d", "--name", PREFIX + "fakeig", "--network", args.network, "--network-alias", "fakeig",
+       "--entrypoint", "/usr/local/bin/fakeig", args.image, "--addr", ":8091", "--profiles", str(len(PROFILES)), "--posts", "10",
+       "--cdn-base", "http://fakeig:8091/fake-cdn")
 
     failures = []
     try:
@@ -334,10 +264,7 @@ def main():
             raise SystemExit(f"not ready after 120s: {sorted(pending)}")
         print(f"all {len(deployments)} deployments ready")
 
-        if args.chart == "igs":
-            igs_flow(args, failures)
-        else:
-            fbs_flow(args, work, failures)
+        igs_flow(args, failures)
 
         logs = {}
         for d in deployments + hooks:

@@ -24,19 +24,16 @@ type chart struct {
 	// recordPrefix names the chart's recording rules, so a Prometheus that
 	// loads both charts' rules keeps both sets.
 	recordPrefix string
-	// absent are registered metrics the chart's service never emits:
-	// fbs's comment deletion checks, completeness histogram, page tiers,
-	// post refreshes and daily budget have no igs counterpart, so an igs
-	// rule on them would never fire.
+	// absent are registered metrics the chart's service never emits: the
+	// daily budget's gauges (internal/scrape/ratelimit) are set by a
+	// scheduler loop igs-scheduler does not run, so a rule on them would
+	// never fire.
 	absent []string
 }
 
 var charts = []chart{
-	{name: "fbs", files: "../../../deploy/helm/fbs/files", runbook: "../../../docs/runbooks/operations.md", recordPrefix: "igs:"},
 	{name: "igs", files: "../../../deploy/helm/igs/files", runbook: "../../../docs/runbooks/igs-operations.md", recordPrefix: "igs:ig_",
-		absent: []string{"igs_deletion_checks_total", "igs_comment_completeness_ratio", "igs_scheduled_pages", "igs_post_refreshes_total",
-			"igs_comment_changes_total", "igs_timeline_truncated_total", "igs_budget_used", "igs_budget_projected", "igs_budget_limit",
-			"igs_budget_backfill_paused", "igs_budget_stretch"}},
+		absent: []string{"igs_budget_used", "igs_budget_projected", "igs_budget_limit", "igs_budget_backfill_paused", "igs_budget_stretch"}},
 }
 
 // forCharts runs f once per chart, as a subtest.

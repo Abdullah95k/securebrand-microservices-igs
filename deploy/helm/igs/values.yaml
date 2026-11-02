@@ -1,7 +1,6 @@
 image:
-  # The one image holds every binary (fbs's and igs's); each Deployment
-  # picks its command.
-  repository: ghcr.io/abdullah95k/fbs
+  # The one image holds every igs binary; each Deployment picks its command.
+  repository: ghcr.io/abdullah95k/igs
   # Defaults to the chart's appVersion (the release workflow publishes both).
   tag: ""
   # Image built with `--target browser` (Chromium included). When set, the

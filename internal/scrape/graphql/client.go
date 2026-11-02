@@ -181,7 +181,7 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 	tr, err := id.Doer.Do(ctx, &transport.Request{Method: "POST", URL: endpoint.String(), Header: hdr, Body: body})
 	elapsed := time.Since(start)
 	tier := id.Endpoint.Tier
-	metrics.FBRequestSecs.WithLabelValues(q.Name, tier).Observe(elapsed.Seconds())
+	metrics.RequestSeconds.WithLabelValues(q.Name, tier).Observe(elapsed.Seconds())
 	if err != nil {
 		if ctx.Err() == nil { // a cancelled request says nothing about the exit
 			session.Outcome(id, detect.Transport)
@@ -189,12 +189,12 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 		if c.Outcomes != nil {
 			c.Outcomes.Observe(detect.Transport, req.Lane, int64(len(body))) // the request went out
 		}
-		metrics.FBRequests.WithLabelValues(q.Name, detect.Transport.String(), tier).Inc()
+		metrics.Requests.WithLabelValues(q.Name, detect.Transport.String(), tier).Inc()
 		return nil, fmt.Errorf("%w: %w", ErrTransport, err)
 	}
 	metrics.ProxyBytes.WithLabelValues(tier, "in").Add(float64(tr.BytesIn))
 	metrics.ProxyBytes.WithLabelValues(tier, "out").Add(float64(tr.BytesOut))
-	metrics.FBResponseBytes.WithLabelValues(q.Name).Observe(float64(len(tr.Body)))
+	metrics.ResponseBytes.WithLabelValues(q.Name).Observe(float64(len(tr.Body)))
 
 	parts := SplitParts(tr.Body)
 	errs := Errors(parts)
@@ -208,7 +208,7 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 	if c.Outcomes != nil {
 		c.Outcomes.Observe(cls, req.Lane, tr.BytesIn+tr.BytesOut)
 	}
-	metrics.FBRequests.WithLabelValues(q.Name, cls.String(), tier).Inc()
+	metrics.Requests.WithLabelValues(q.Name, cls.String(), tier).Inc()
 	if c.Raw != nil && (c.CaptureAll || cls != detect.OK) {
 		c.Raw.Capture(ctx, q.Name, cls, tr.Body, req.Vars)
 	}

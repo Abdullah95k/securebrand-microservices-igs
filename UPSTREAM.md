@@ -5,6 +5,14 @@ This repository (igs) owns a copy of the code of fbs, the Facebook page scraper.
 - **Upstream repository:** [`Abdullah95k/securebrand-microservices`](https://github.com/Abdullah95k/securebrand-microservices)
 - **Copied from:** `f1377a9` (main, 2026-10-31), with its full history, so `git blame` reaches back into fbs.
 - **Seed changes:** `.github/workflows/release.yml` removed (on a `v*` tag it would have published `ghcr.io/<owner>/fbs` and fbs's Helm chart); this file and a note at the top of the README added.
+- **Copied Facebook code removed (M10, 2026-11-02):** once igs's suites covered the pipeline (ADR 0004 §2). The removal covered:
+  - `internal/fb`, `internal/fakefb`, `internal/e2e`;
+  - fbs's pipeline packages (`api`, `app`, `dispatch`, `persist`, `scheduler`, `media`, `gdpr`, `registrysync`, `spike`, `topics`, `crawl/stage`, `crawl/task`, `crawl/emit`, `crawl/dlq`, `crawl/shadow`, `fixtures`, `replay`, `pilot`);
+  - `cmd/fbs-*`, `fbctl`, `fakefb`;
+  - the `securebrand.fb.v1` and `securebrand.fbs.task.v1` protos;
+  - fbs's migrations, chart, Compose services, runbooks and fixtures.
+
+  What stays was neutral code, now igs's: `internal/scrape/*`, `internal/crawl/{jobs,checkpoint,lanes,rawsink}`, `internal/platform/*`. Porting an fbs change to those still works by path. The config keeps its `fb:` section for now: the Phase 0 machine's proxies file is keyed `fb.proxy`, and igs falls back to it.
 
 To port an fbs change: `git remote add upstream https://github.com/Abdullah95k/securebrand-microservices`, `git fetch upstream`, then `git cherry-pick <sha>` while the paths still match, or port it by hand. Record it below either way. Fetching is read-only; never push to fbs's repository.
 
@@ -32,4 +40,6 @@ Fixes made in igs's copy of shared code that fbs still lacks. fbs's own sessions
 | 2026-11-02 | M2c | Detection rules were hard-coded although the code called them config: `fb.detect` now extends (or replaces) them; HTTP 400, 401 and 403 classified as OK and now go by their body (block → rate limit, checkpoint, login) with a soft-error fallback | `internal/fb/detect/detect.go`, `internal/config/config.go` |
 | 2026-11-02 | M2c | The rate-limit cooldown was effectively a constant 60 s: a second block retired the identity first. It now grows (30 s, 60 s, 2 min, 4 min) and retires at the fifth limit in a row | `internal/fb/session/identity.go` |
 | 2026-11-02 | M2c | Every identity of a pod used one fingerprint: `fb.fingerprint_profiles` (default `chrome_152`, `chrome_146`) is picked per identity, and `chrome_152` joins `fingerprints.yaml`; the unused `fb.bootstrap_attempts` is gone | `internal/fb/session/pool.go`, `configs/fingerprints.yaml` |
-
+| 2026-11-02 | #36 | The integration tests' stacks each took a random Valkey DB index (1..14) and flushed it; two test binaries running at once (go test runs packages in parallel) sometimes wiped each other's live state. Stacks now claim their index in DB 0 (`testenv.Redis`) | `internal/testenv/testenv.go` |
+| 2026-11-02 | #36 | The schema registry client did not retry a write to a socket the transport had already closed (`use of closed network connection`, which Redpanda causes) | `internal/platform/schemareg/schemareg.go` |
+| 2026-11-02 | #39 | A finished task's checkpoint stayed in Valkey for 24 h, though nothing reads it once the task is marked done, and done markers stayed 7 days, longer than the task topics' retention needs. At volume these dominate Valkey's memory: `checkpoint.Store.Complete` drops the checkpoint with the done marker, and the marker's TTL is the caller's | `internal/crawl/checkpoint/checkpoint.go`, `internal/crawl/stage/worker.go` (`finish`) |
