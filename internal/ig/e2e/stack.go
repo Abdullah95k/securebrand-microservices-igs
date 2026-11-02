@@ -4,8 +4,12 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"sync"
@@ -23,11 +27,16 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
+	igapi "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
@@ -45,6 +54,8 @@ type Stack struct {
 	Fake     *fakeig.Server
 	Crawler  *igapp.Crawler
 	Jobs     *jobs.Tracker
+	Dispatch *dispatch.Dispatcher
+	API      *httptest.Server
 
 	mu     sync.Mutex
 	groups map[string]*group
@@ -168,7 +179,87 @@ func Start(t *testing.T, o Options) *Stack {
 	}
 	s.start("crawler", s.Crawler.Components...)
 	s.RestartPersister(t)
+	s.Dispatch = &dispatch.Dispatcher{DB: db, Jobs: s.Jobs, Producer: producer}
+	srv := &igapi.Server{Cfg: cfg, DB: db, Redis: rdb, Dispatch: s.Dispatch}
+	s.API = httptest.NewServer(srv.Handler())
+	t.Cleanup(s.API.Close)
 	return s
+}
+
+// StartScheduler runs the planner and the finalizer, as igs-scheduler's
+// leader does, with short intervals.
+func (s *Stack) StartScheduler() {
+	planner := &scheduler.Planner{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
+	fin := &scheduler.Finalizer{DB: s.DB, Jobs: s.Jobs, Producer: s.Producer, Cfg: s.Cfg, Timeout: 30 * time.Second}
+	s.start("scheduler",
+		func(ctx context.Context) error {
+			return scheduler.Every(ctx, "planner", 200*time.Millisecond, planner.Tick)
+		},
+		func(ctx context.Context) error {
+			return scheduler.Every(ctx, "finalizer", 200*time.Millisecond, fin.Tick)
+		})
+}
+
+// WaitStatus waits until the job is terminal and returns its status.
+func (s *Stack) WaitStatus(t *testing.T, job string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		var st string
+		if err := s.DB.QueryRow(context.Background(), `SELECT status FROM jobs WHERE job_id = $1`, job).Scan(&st); err != nil {
+			t.Fatal(err)
+		}
+		switch st {
+		case "completed", "partial", "failed", "cancelled":
+			return st
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s still %s after %s", job, st, timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// Key creates an API client with scopes and returns its key.
+func (s *Stack) Key(t *testing.T, scopes ...string) string {
+	t.Helper()
+	k, _, err := httpapi.CreateClient(context.Background(), s.DB, "e2e", scopes, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// Do performs an API request and decodes a JSON answer into out (when not
+// nil). It returns the status code.
+func (s *Stack) Do(t *testing.T, key, method, path string, body any, out any, header ...string) int {
+	t.Helper()
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, _ := http.NewRequestWithContext(context.Background(), method, s.API.URL+path, rdr)
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	for i := 0; i+1 < len(header); i += 2 {
+		req.Header.Set(header[i], header[i+1])
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	if out != nil && len(b) > 0 && resp.StatusCode < 300 {
+		if err := json.Unmarshal(b, out); err != nil {
+			t.Fatalf("%s %s: decode %s: %v", method, path, b, err)
+		}
+	}
+	return resp.StatusCode
 }
 
 func (s *Stack) start(name string, comps ...run.Func) {
@@ -287,7 +378,9 @@ func (s *Stack) Wait(t *testing.T, timeout time.Duration, jobIDs ...string) map[
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("job %s not done after %s: %+v", j, timeout, st)
+				prefix := redisx.KeyPrefix + "{job:" + j + "}:"
+				missing, _ := s.Redis.SDiff(ctx, prefix+"spawned", prefix+"done").Result()
+				t.Fatalf("job %s not done after %s: %+v; unfinished tasks %v", j, timeout, st, missing)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}

@@ -46,3 +46,16 @@ func TestIDsAndContinuations(t *testing.T) {
 		t.Fatalf("post: %+v", p)
 	}
 }
+
+// A segment's continuation has the same id whatever the stage learned
+// meanwhile: a run again after a crash, which skips the profile phase,
+// must spawn the continuation the first run registered.
+func TestContinuationIDIgnoresLearnedScope(t *testing.T) {
+	root := NewProfile("job", igstaskv1.Lane_LANE_P0, commonv1.CrawlMode_CRAWL_MODE_FULL, "u:brand", 0, &igstaskv1.Limits{}, nil)
+	learned := Continuation(root, "g:x")
+	root.GetProfile().UserPk = 42
+	again := Continuation(root, "g:x")
+	if learned.TaskId != again.TaskId || learned.LineageId != again.LineageId {
+		t.Fatalf("continuation ids differ: %s vs %s", learned.TaskId, again.TaskId)
+	}
+}

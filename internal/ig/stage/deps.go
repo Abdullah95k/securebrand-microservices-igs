@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/checkpoint"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
@@ -30,6 +30,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/suppress"
 )
 
 // Deps are the collaborators every stage uses.
@@ -44,7 +45,7 @@ type Deps struct {
 	Jobs        *jobs.Tracker
 	Ckpt        *checkpoint.Store
 	DB          *pgxpool.Pool // schema ig: crawl_cursors; nil disables watermarks
-	Suppression *gdpr.Suppression
+	Suppression *suppress.Suppression
 	Now         func() time.Time
 }
 
@@ -186,7 +187,9 @@ func (d *Deps) spawn(ctx context.Context, children ...*igstaskv1.Task) error {
 	if err := d.Jobs.Spawn(ctx, children[0].JobId, ids...); err != nil {
 		return fmt.Errorf("stage: spawn: %w", err)
 	}
-	return d.Producer.ProduceSync(ctx, recs...)
+	err := d.Producer.ProduceSync(ctx, recs...)
+	slog.Debug("tasks spawned", "job", children[0].JobId, "tasks", ids, "err", err)
+	return err
 }
 
 // media publishes media metadata, and download tasks when the job asks for

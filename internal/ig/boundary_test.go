@@ -4,6 +4,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -48,5 +49,28 @@ func TestNoFacebookImports(t *testing.T) {
 	}
 	if files == 0 {
 		t.Fatal("no Go files found")
+	}
+}
+
+// Nor through another package: igs's code and binaries must build with the
+// copied Facebook code deleted (ADR 0004 §2), so no Facebook package may be
+// among their dependencies.
+func TestNoFacebookDependencies(t *testing.T) {
+	gobin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go not on PATH")
+	}
+	out, err := exec.Command(gobin, "list", "-deps", "./...", "../../cmd/igs-crawler", "../../cmd/igs-persister", "../../cmd/igs-api", "../../cmd/igs-scheduler").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list: %v\n%s", err, out)
+	}
+	for _, dep := range strings.Fields(string(out)) {
+		for _, bad := range append(forbidden, module+"/gen/go/securebrand/fbs/", module+"/internal/topics", module+"/internal/gdpr",
+			module+"/internal/crawl/stage", module+"/internal/crawl/emit", module+"/internal/persist", module+"/internal/api",
+			module+"/internal/dispatch", module+"/internal/scheduler", module+"/internal/media", module+"/internal/app") {
+			if dep == strings.TrimSuffix(bad, "/") || strings.HasPrefix(dep, strings.TrimSuffix(bad, "/")+"/") {
+				t.Errorf("igs depends on %s", dep)
+			}
+		}
 	}
 }

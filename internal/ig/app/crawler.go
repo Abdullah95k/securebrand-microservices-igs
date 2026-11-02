@@ -23,7 +23,6 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/lanes"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/rawsink"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/gdpr"
 	igclient "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/client"
 	igdetect "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
@@ -39,6 +38,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/suppress"
 )
 
 // DefaultStages are igs's crawler stages.
@@ -56,7 +56,7 @@ type Crawler struct {
 	Deps        *stage.Deps
 	Worker      *stage.Worker
 	Registry    *registry.DB
-	Suppression *gdpr.Suppression
+	Suppression *suppress.Suppression
 	Components  []run.Func
 }
 
@@ -138,7 +138,7 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		metrics.BreakerState.WithLabelValues("query:" + key).Set(float64(to))
 		slog.Warn("graphql: query breaker", "query", key, "from", from.String(), "to", to.String())
 	}
-	supp := gdpr.NewSuppression(db)
+	supp := suppress.NewSuppression(db)
 	loader := &session.Loader{Rules: rules, AcceptLanguage: g.AcceptLanguage, Hooks: igclient.Hooks()}
 	if g.Browser.Enabled {
 		b, err := browser.NewBootstrapper(g.Browser, g.AcceptLanguage, igclient.Hooks())

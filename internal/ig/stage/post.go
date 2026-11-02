@@ -93,7 +93,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 					// Three fresh identities saw the same wall: the post is
 					// age-gated or otherwise closed to logged-out readers.
 					c["posts_gated"]++
-					_, _ = d.Jobs.SetPost(ctx, t.JobId, sc.MediaPk, createdUnix, sc.ReportedCommentCount, jobs.PostTruncated)
+					_, _ = d.Jobs.SetPost(ctx, t.JobId, sc.MediaPk, createdUnix, sc.ReportedCommentCount, jobs.PostSkipped)
 					return done(c)
 				}
 				_ = d.saveCkpt(ctx, t, st, c)
@@ -286,9 +286,12 @@ func (s *PostStage) publish(ctx context.Context, t *igstaskv1.Task, sc *igstaskv
 	if d.Suppression.PageSuppressed(p.OwnerPk) {
 		return done(map[string]int64{"posts_suppressed": 1}), true
 	}
-	// The task comes from the grid, which tells whether the post is pinned.
-	pinned := sc.Pinned
-	p.IsPinned = &pinned
+	// A task from the grid (a full read) knows whether the post is pinned; a
+	// scheduled refresh does not, and leaves the stored flag.
+	if t.Mode == commonv1.CrawlMode_CRAWL_MODE_FULL {
+		pinned := sc.Pinned
+		p.IsPinned = &pinned
+	}
 	if p.ProductType == "clips" && p.DiscoveredVia == igv1.DiscoveredVia_DISCOVERED_VIA_UNSPECIFIED {
 		p.DiscoveredVia = igv1.DiscoveredVia_DISCOVERED_VIA_GRID
 	}

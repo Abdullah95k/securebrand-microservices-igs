@@ -110,6 +110,11 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	if st.Extra["user_id"] == "" {
 		st.Extra["user_id"] = sc.UserId
 	}
+	// What an earlier run of this segment learned (it may have crashed
+	// after the profile phase, which does not run again).
+	if sc.UserPk == 0 {
+		sc.UserPk = atoi64(st.Extra["user_pk"])
+	}
 	// The newest post an earlier segment saw: the grid runs newest first,
 	// so later segments only see older posts.
 	if sc.NewestSeenAt != nil && sc.NewestSeenAt.Seconds > st.NewestSeenUnix {
@@ -118,7 +123,10 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	phase, _ := splitCursor(st.Cursor)
 
 	if phase == "" {
-		if t.Seq == 0 && (sc.RefreshProfile || t.Mode == commonv1.CrawlMode_CRAWL_MODE_FULL || sc.UserPk == 0 || st.Extra["user_id"] == "") {
+		// A scheduled run reads the profile only for the daily refresh: the
+		// grid's first page (by username) gives the user id the later pages
+		// and the reels tab need.
+		if t.Seq == 0 && (sc.RefreshProfile || t.Mode == commonv1.CrawlMode_CRAWL_MODE_FULL || sc.UserPk == 0) {
 			out, stop := s.profile(ctx, t, id, sc, &st, c, page)
 			if stop {
 				return out
@@ -199,24 +207,30 @@ func (s *ProfileStage) profile(ctx context.Context, t *igstaskv1.Task, id *sessi
 		return done(map[string]int64{"profiles_suppressed": 1}), true
 	}
 	b := d.Producer.NewBatch()
+	if t.Limits.GetIncludeHighlights() && len(res.Highlights) > 0 && !bytes.Equal(res.HighlightsHash, sc.HighlightsHash) {
+		if err := s.highlights(ctx, t, id, b, res, c, page); err != nil {
+			slog.Debug("profile: highlights", "profile", p.UserPk, "err", err)
+			c["highlights_failed"]++
+			if t.Attempt < 2 {
+				return retry(t, "", "30s", "highlights: "+err.Error(), c), true
+			}
+			// Published without their items: the stored hash stays empty,
+			// so the next run reads them again.
+			p.HighlightsHash = nil
+		}
+	}
 	if err := d.Emit.Profile(ctx, b, src, p); err != nil {
 		return retry(t, "", "30s", err.Error(), c), true
 	}
 	if _, err := d.media(ctx, b, t, src, res.Media); err != nil {
 		return retry(t, "", "30s", err.Error(), c), true
 	}
-	if t.Limits.GetIncludeHighlights() && len(res.Highlights) > 0 && !bytes.Equal(res.HighlightsHash, sc.HighlightsHash) {
-		if err := s.highlights(ctx, t, id, b, res, c, page); err != nil {
-			slog.Debug("profile: highlights", "profile", p.UserPk, "err", err)
-			c["highlights_failed"]++
-		}
-	}
 	if err := b.Wait(ctx); err != nil {
 		return retry(t, "", "30s", "produce: "+err.Error(), c), true
 	}
 	c["profiles"]++
-	sc.UserPk, sc.HighlightsHash = p.UserPk, res.HighlightsHash
-	st.Extra["user_id"] = res.UserID
+	sc.UserPk, sc.HighlightsHash = p.UserPk, p.HighlightsHash
+	st.Extra["user_id"], st.Extra["user_pk"] = res.UserID, itoa(p.UserPk)
 	sc.UserId = res.UserID
 	if p.IsPrivate {
 		c["profiles_private"]++
