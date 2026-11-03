@@ -338,7 +338,7 @@ func discoveryImport(ctx context.Context, cfg *config.Config, args []string) err
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		in = f
 	}
 	db, err := openDB(ctx, cfg)
