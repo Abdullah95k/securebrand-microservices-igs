@@ -139,6 +139,10 @@ type IGDiscovery struct {
 	MinFollowers int64 `koanf:"min_followers"`
 	// FlushEvery is how often crawlers write their sightings.
 	FlushEvery time.Duration `koanf:"flush_every"`
+	// MaxNewPerDay caps the profiles discovery registers per UTC day (03:00
+	// Iraq time); 0 = no cap. Candidates over the cap wait as "capped" and
+	// are registered on the next days, highest score first.
+	MaxNewPerDay int `koanf:"max_new_per_day"`
 }
 
 // IGPrivacy keeps igs's person keys apart from fbs's (ADR 0005 §1).

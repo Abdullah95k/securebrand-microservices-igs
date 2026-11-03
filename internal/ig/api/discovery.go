@@ -27,8 +27,11 @@ type Candidate struct {
 	Comments    int             `json:"comments"`
 	IraqContext int             `json:"iraq_context"`
 	// Sources is how many different registered accounts it was met in.
-	Sources     int        `json:"sources"`
-	Priority    float64    `json:"priority"`
+	Sources  int     `json:"sources"`
+	Priority float64 `json:"priority"`
+	// Origins is where it came from: network (met in posts igs reads), or
+	// an intake (google, facebook, youtube, manual...).
+	Origins     []string   `json:"origins"`
 	FirstSeenAt time.Time  `json:"first_seen_at"`
 	LastSeenAt  time.Time  `json:"last_seen_at"`
 	DecidedAt   *time.Time `json:"decided_at,omitempty"`
@@ -38,13 +41,13 @@ type Candidate struct {
 }
 
 const selectCandidate = `SELECT username, user_pk, status, score, signals, tags, coauthors, mentions, comments, iraq_context, sources,
-	priority, first_seen_at, last_seen_at, decided_at, vet FROM discovery_candidates`
+	priority, origins, first_seen_at, last_seen_at, decided_at, vet FROM discovery_candidates`
 
 func scanCandidate(r pgx.CollectableRow) (Candidate, error) {
 	var c Candidate
 	var sig, read []byte
 	err := r.Scan(&c.Username, &c.UserPK, &c.Status, &c.Score, &sig, &c.Tags, &c.Coauthors, &c.Mentions, &c.Comments, &c.IraqContext,
-		&c.Sources, &c.Priority, &c.FirstSeenAt, &c.LastSeenAt, &c.DecidedAt, &read)
+		&c.Sources, &c.Priority, &c.Origins, &c.FirstSeenAt, &c.LastSeenAt, &c.DecidedAt, &read)
 	if len(sig) > 0 {
 		c.Signals = sig
 	}
@@ -90,6 +93,32 @@ func (s *Server) listCandidates(w http.ResponseWriter, r *http.Request) {
 		cs = []Candidate{}
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"candidates": cs})
+}
+
+type intakeReq struct {
+	// Accounts are usernames or profile links.
+	Accounts []string `json:"accounts"`
+	// Origin is where they were found: google, facebook, youtube, manual...
+	Origin string `json:"origin"`
+}
+
+// intakeCandidates takes accounts found elsewhere as candidates, vetted
+// and scored like the ones the crawl meets.
+func (s *Server) intakeCandidates(w http.ResponseWriter, r *http.Request) {
+	var req intakeReq
+	if err := httpapi.Decode(r, &req); err != nil {
+		httpapi.Problem(w, http.StatusBadRequest, "invalid body", err.Error())
+		return
+	}
+	res, err := discovery.Intake(r.Context(), s.DB, s.Cfg.IG.Discovery, req.Accounts, req.Origin)
+	if err != nil {
+		httpapi.Problem(w, http.StatusBadRequest, "invalid intake", err.Error())
+		return
+	}
+	if res.Invalid == nil {
+		res.Invalid = []string{}
+	}
+	httpapi.WriteJSON(w, http.StatusOK, res)
 }
 
 func candidateName(r *http.Request) string {

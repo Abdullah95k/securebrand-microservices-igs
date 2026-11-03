@@ -165,3 +165,64 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 		t.Fatalf("collab_02 rejected: %d schedules, status %s", n, status("collab_02"))
 	}
 }
+
+// Accounts found elsewhere (here "google") are taken in through the API,
+// in any form (a username, a profile link, an @handle), and vetted like
+// the network's. Under a daily cap of one, the first Iraqi account is
+// registered and the second waits as capped; when the day turns (today's
+// registration no longer counts) it is registered too.
+func TestDiscoveryIntakeAndDailyCap(t *testing.T) {
+	s := Start(t, Options{Spec: spec(), Config: func(c *config.Config) {
+		c.IG.Discovery = config.IGDiscovery{Enabled: true, Sources: []string{"tags", "coauthors", "mentions"}, Threshold: 4, MinPriority: 2,
+			VetInFlight: 10, Interval: 200 * time.Millisecond, FlushEvery: 100 * time.Millisecond, MaxNewPerDay: 1}
+	}})
+	s.World.AddProfile(fakeig.ProfileSpec{Username: "found_one", FullName: "مطعم بغداد", Bio: "مطعم في بغداد 🇮🇶 للحجز 07701234567", Followers: 3000,
+		Captions: []string{"افتتاح فرعنا الجديد"}})
+	s.World.AddProfile(fakeig.ProfileSpec{Username: "found_two", FullName: "Basra Shop", Bio: "Shop in Basra, delivery to all of Iraq", Followers: 1200})
+	s.StartScheduler()
+	ctx := context.Background()
+	admin := s.Key(t, httpapi.ScopeAdmin)
+	var res struct {
+		Added, Known int
+		Invalid      []string
+	}
+	if code := s.Do(t, admin, "POST", "/v1/discovery/candidates", map[string]any{"origin": "google",
+		"accounts": []string{"found_one", "https://www.instagram.com/found_two/", "@found_none", "not a username!"}}, &res); code != http.StatusOK {
+		t.Fatalf("intake: %d", code)
+	}
+	if res.Added != 3 || res.Known != 0 || len(res.Invalid) != 1 {
+		t.Fatalf("intake %+v", res)
+	}
+	if code := s.Do(t, admin, "POST", "/v1/discovery/candidates", map[string]any{"origin": "network", "accounts": []string{"x"}}, nil); code != http.StatusBadRequest {
+		t.Fatalf("an intake may not claim the network origin: %d", code)
+	}
+	status := func(u string) string {
+		var st string
+		_ = s.DB.QueryRow(ctx, `SELECT status FROM discovery_candidates WHERE username = $1`, u).Scan(&st)
+		return st
+	}
+	settled := func() bool {
+		a, b := status("found_one"), status("found_two")
+		return status("found_none") == "gone" && ((a == "registered" && b == "capped") || (a == "capped" && b == "registered"))
+	}
+	for deadline := time.Now().Add(2 * time.Minute); !settled(); time.Sleep(200 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("found_one %s, found_two %s, found_none %s", status("found_one"), status("found_two"), status("found_none"))
+		}
+	}
+	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE 'google' = ANY(origins)`); n != 3 {
+		t.Errorf("%d candidates with origin google, want 3", n)
+	}
+	// The day turns.
+	if _, err := s.DB.Exec(ctx, `UPDATE discovery_vets SET vetted_at = vetted_at - interval '1 day' WHERE status = 'registered'`); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(time.Minute); status("found_one") != "registered" || status("found_two") != "registered"; time.Sleep(200 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("after the day turned: found_one %s, found_two %s", status("found_one"), status("found_two"))
+		}
+	}
+	if n := count(t, s, `SELECT count(*) FROM profile_schedule WHERE profile_ref IN ('u:found_one', 'u:found_two')`); n != 2 {
+		t.Fatalf("%d of the 2 found accounts on the schedule", n)
+	}
+}
