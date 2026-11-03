@@ -253,10 +253,15 @@ func (s *ProfileStage) profile(ctx context.Context, t *igstaskv1.Task, id *sessi
 	}
 	b := d.Producer.NewBatch()
 	if t.Limits.GetIncludeHighlights() && len(res.Highlights) > 0 && !bytes.Equal(res.HighlightsHash, sc.HighlightsHash) {
-		if err := s.highlights(ctx, t, id, b, res, c, page); err != nil {
+		if cls, err := s.highlights(ctx, t, id, b, res, c, page); err != nil {
 			slog.Debug("profile: highlights", "profile", p.UserPk, "err", err)
 			c["highlights_failed"]++
 			if t.Attempt < 2 {
+				if cls.Blocking() {
+					// A block fails over to another identity within the run
+					// (Run), and only then waits for a retry.
+					return classOutcome(t, cls, "highlights", "", c), true
+				}
 				return retry(t, "", "30s", "highlights: "+err.Error(), c), true
 			}
 			// Published without their items: the stored hash stays empty,
@@ -285,9 +290,10 @@ func (s *ProfileStage) profile(ctx context.Context, t *igstaskv1.Task, id *sessi
 }
 
 // highlights reads each highlight's items and publishes the highlights. A
-// highlight whose items cannot be read is still published without them.
+// highlight whose items cannot be read is still published without them;
+// the error then says why, with the response class of a refused query.
 func (s *ProfileStage) highlights(ctx context.Context, t *igstaskv1.Task, id *session.Identity, b *kafka.Batch, res parse.ProfileResult,
-	c map[string]int64, page string) error {
+	c map[string]int64, page string) (detect.Class, error) {
 	d := s.D
 	ids := make([]any, 0, len(res.Highlights))
 	for _, h := range res.Highlights {
@@ -316,20 +322,20 @@ func (s *ProfileStage) highlights(ctx context.Context, t *igstaskv1.Task, id *se
 			h = full
 		}
 		if err := d.Emit.Highlight(ctx, b, src, h); err != nil {
-			return err
+			return detect.OK, err
 		}
 		c["highlights"]++
 	}
 	if _, err := d.media(ctx, b, t, src, media); err != nil {
-		return err
+		return detect.OK, err
 	}
 	if err != nil {
-		return err
+		return detect.Transport, err
 	}
 	if resp.Class != detect.OK {
-		return errors.New(resp.Class.String())
+		return resp.Class, errors.New(resp.Class.String())
 	}
-	return nil
+	return detect.OK, nil
 }
 
 // unavailable publishes a profile that is gone (renamed, deleted, refused).

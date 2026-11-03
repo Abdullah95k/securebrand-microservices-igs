@@ -72,6 +72,9 @@ type Faults struct {
 	// again. ExitStats reports what each exit saw.
 	ExitRateLimit    int
 	ExitRateLimitFor time.Duration
+	// RateLimitFirst answers the first N requests of a query (by friendly
+	// name, e.g. OpHighlights) with HTTP 429.
+	RateLimitFirst map[string]int
 	// GridWallAfter walls grid pages that start at or past this many posts
 	// (U1: the browser stopped at 24).
 	GridWallAfter int
@@ -135,6 +138,14 @@ type ExitStat struct {
 	Limits, Limited int
 	count           int
 	until           time.Time
+}
+
+// QueryCount is how many requests of a query (by friendly name) arrived.
+func (s *Server) QueryCount(friendly string) int64 {
+	if n, ok := s.Requests.Load(friendly); ok {
+		return n.(*atomic.Int64).Load()
+	}
+	return 0
 }
 
 // ExitStats returns a copy of each exit's counts.
@@ -367,7 +378,11 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	f := r.PostForm
 	friendly := f.Get("fb_api_req_friendly_name")
 	n, _ := s.Requests.LoadOrStore(friendly, new(atomic.Int64))
-	n.(*atomic.Int64).Add(1)
+	seen := n.(*atomic.Int64).Add(1)
+	if k := s.opts.Faults.RateLimitFirst[friendly]; seen <= int64(k) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
 	if s.exitLimited(r, true) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		return

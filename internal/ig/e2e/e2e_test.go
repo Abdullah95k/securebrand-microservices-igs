@@ -105,6 +105,24 @@ func TestExitFailoverEqualsTruth(t *testing.T) {
 	}
 }
 
+// A highlights query that keeps meeting rate limits fails over to other
+// identities within the run, then retries: the highlights end with their
+// items rather than published without them. (TestExitFailoverEqualsTruth
+// met it once in CI: two rate-limited attempts, and the items were gone.)
+func TestHighlightsSurviveRateLimits(t *testing.T) {
+	sp := spec()
+	sp.Profiles = 1
+	s := Start(t, Options{Spec: sp, Faults: fakeig.Faults{RateLimitFirst: map[string]int{fakeig.OpHighlights: 3}}})
+	lim := s.Limits()
+	p := s.World.Profiles()[0]
+	s.Wait(t, 2*time.Minute, s.Crawl(t, p.Username, full, lim, nil))
+	truth, _ := s.World.Truth(p.Username, time.Now().Add(-time.Duration(lim.MaxAgeSeconds)*time.Second))
+	checkTruth(t, s, truth)
+	if n := s.Fake.QueryCount(fakeig.OpHighlights); n != 4 {
+		t.Errorf("%d highlights queries, want 4 (3 refused, then the items)", n)
+	}
+}
+
 // checkTruth compares the store with a profile's ground truth.
 func checkTruth(t *testing.T, s *Stack, truth fakeig.ProfileTruth) {
 	t.Helper()
