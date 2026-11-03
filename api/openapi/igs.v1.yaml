@@ -242,7 +242,7 @@ paths:
         with one profile read and scored for Iraqi signals; public ones at ig.discovery.threshold or above are
         registered for the schedule (status registered). signals holds the score's parts.
       parameters:
-        - {in: query, name: status, schema: {type: string}, description: 'comma separated: new, vetting, registered, below, private, gone, failed, rejected'}
+        - {in: query, name: status, schema: {type: string}, description: 'comma separated: new, vetting, registered, capped, below, private, gone, failed, rejected'}
         - {in: query, name: min_score, schema: {type: number}}
         - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -254,6 +254,34 @@ paths:
                 type: object
                 properties:
                   candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}
+        "400": {$ref: '#/components/responses/Problem'}
+    post:
+      summary: Take in accounts found elsewhere as candidates (admin)
+      description: >-
+        For the Google discovery tool, links on Facebook pages and YouTube channels, or a list by hand. Each account
+        (a username or a profile link) is vetted and scored like the ones the crawl meets, queued ahead of single
+        sightings. Known candidates keep their status. At most 1000 a call; also `igsctl discovery import`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accounts, origin]
+              properties:
+                accounts: {type: array, maxItems: 1000, items: {type: string}}
+                origin: {type: string, description: 'where they were found: google, facebook, youtube, manual...'}
+      responses:
+        "200":
+          description: What the intake did
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added: {type: integer}
+                  known: {type: integer}
+                  invalid: {type: array, items: {type: string}}
         "400": {$ref: '#/components/responses/Problem'}
   /discovery/candidates/{username}/reject:
     parameters:
@@ -384,7 +412,8 @@ components:
       properties:
         username: {type: string}
         user_pk: {type: integer, format: int64}
-        status: {type: string, enum: [new, vetting, registered, below, private, gone, failed, rejected]}
+        status: {type: string, enum: [new, vetting, registered, capped, below, private, gone, failed, rejected]}
+        origins: {type: array, items: {type: string}, description: 'network (met in posts igs reads), or an intake such as google or facebook'}
         score: {type: number}
         signals: {type: object, additionalProperties: {type: number}, description: 'the score''s parts, e.g. iraq_city: 2'}
         tags: {type: integer}

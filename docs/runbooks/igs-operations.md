@@ -160,14 +160,33 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
      - a Gulf account naming Dubai and a global English star are not added.
 4. **Decision.**
    - Public and at the threshold or above: registered for the 3-hourly schedule under the API client `discovery`, and backfilled.
+   - With a daily cap (`max_new_per_day`, below) that is used up for the day: `capped`. Capped candidates are registered on the next days, highest score first, before any new one.
    - Otherwise: `below`, `private` or `gone` (no such account). These are vetted again if seen again after `revet_after` (30 days).
    - Every vet is kept: the latest read on the candidate (shown as `read` in the API), and each one with its score, signals and decision in `ig.discovery_vets`. Erasure requests delete a person's rows.
    - A `below` candidate whose audience grows is scored again from its stored read, with no new read of Instagram (`igs_discovery_vets_total{outcome="rescored_registered"}`).
 
+5. **Intake.** Accounts found elsewhere join as candidates, vetted and scored like the ones the crawl meets: the Google discovery tool, links on Facebook pages and YouTube channels, or a list by hand.
+   - Each candidate's `origins` says where it came from: `network` (met in posts igs reads) or the intake's name.
+   - Intake accounts are vetted ahead of single sightings. Coming from an intake adds nothing to the score: only what the vet reads, and the Iraqi audience, decide.
+   - An account already a candidate keeps its status; the intake only adds its origin.
+
 Operations:
-- `GET /v1/discovery/candidates?status=registered` (admin) lists candidates with their scores and parts.
+- `GET /v1/discovery/candidates?status=registered` (admin) lists candidates with their scores, parts and origins.
 - `POST /v1/discovery/candidates/{username}/reject` takes a discovered profile off the schedule and keeps it from being discovered again. An admin's `DELETE /v1/profiles/u:{username}` does the same.
 - `POST .../accept` registers a candidate whatever its score.
+- `POST /v1/discovery/candidates` (admin) takes up to 1,000 accounts a call, as usernames or profile links, with their origin:
+
+  ```bash
+  curl -H "Authorization: Bearer $ADMIN_KEY" -d '{"origin":"google","accounts":["<username>","https://www.instagram.com/<username>/"]}' https://<igs.example.com>/v1/discovery/candidates
+  ```
+
+  It answers how many were `added`, how many were `known` already, and which were `invalid`.
+- `igsctl discovery import` does the same from a file, one account a line (`#` starts a comment; `--file -` reads standard input):
+
+  ```bash
+  kubectl -n igs exec -i deploy/igs-api -- igsctl discovery import --origin facebook --file - < accounts.txt
+  ```
+
 - **Metrics:**
   - `igs_discovery_sightings_total{source}`;
   - `igs_discovery_vets_total{outcome}`;
@@ -176,6 +195,7 @@ Operations:
   - Raise `threshold` if registered profiles turn out not to be Iraqi; lower it, or `min_priority`, to find more.
   - Vets share the exits with crawling (about 10 s of one exit's time each) and wait behind scheduled runs (lane p2). The daily budget holds them with backfill.
   - To slow discovery, lower `vet_in_flight`.
+  - **Daily cap:** `max_new_per_day` (0, no cap, by default) is the most profiles discovery registers a day. The day starts at 00:00 UTC, 03:00 Iraq time. Over it, candidates wait as `capped` (`igs_discovery_candidates{status="capped"}`) and are registered on the next days. Profiles registered by hand or with `accept` neither count towards it nor wait for it. Setting the cap back to 0 lets every capped candidate through on the next vetter tick.
 
 ## Block storm (block rate > 10%)
 

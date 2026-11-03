@@ -222,9 +222,9 @@ func (c *Collector) Flush(ctx context.Context) error {
 				SELECT * FROM unnest($8::text[], $9::bigint[]) ON CONFLICT DO NOTHING
 				RETURNING username
 			), added AS (SELECT username, count(*)::int AS n FROM new_sources GROUP BY username)
-			INSERT INTO discovery_candidates AS c (username, user_pk, tags, coauthors, mentions, comments, iraq_context, sources, priority)
+			INSERT INTO discovery_candidates AS c (username, user_pk, tags, coauthors, mentions, comments, iraq_context, sources, priority, origins)
 			SELECT x.u, NULLIF(x.pk, 0), x.t, x.co, x.m, x.cm, x.iq, coalesce(a.n, 0),
-				3*x.co + 2*x.t + 2*x.m + x.cm + 2*x.iq + 3*coalesce(a.n, 0)
+				3*x.co + 2*x.t + 2*x.m + x.cm + 2*x.iq + 3*coalesce(a.n, 0), '{network}'
 			FROM unnest($1::text[], $2::bigint[], $3::int[], $4::int[], $5::int[], $6::int[], $7::int[]) AS x(u, pk, t, co, m, cm, iq)
 			LEFT JOIN added a ON a.username = x.u
 			ON CONFLICT (username) DO UPDATE SET
@@ -232,7 +232,8 @@ func (c *Collector) Flush(ctx context.Context) error {
 				tags = c.tags + EXCLUDED.tags, coauthors = c.coauthors + EXCLUDED.coauthors,
 				mentions = c.mentions + EXCLUDED.mentions, comments = c.comments + EXCLUDED.comments,
 				iraq_context = c.iraq_context + EXCLUDED.iraq_context, sources = c.sources + EXCLUDED.sources,
-				priority = c.priority + EXCLUDED.priority, last_seen_at = now()`,
+				priority = c.priority + EXCLUDED.priority, last_seen_at = now(),
+				origins = CASE WHEN 'network' = ANY(c.origins) THEN c.origins ELSE c.origins || '{network}'::text[] END`,
 			users, pks, tags, coauthors, mentions, comments, iraq, edgeUsers, edgeFrom)
 		return err
 	})

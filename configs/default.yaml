@@ -445,6 +445,9 @@ ig:
     revet_after: 720h
     min_followers: 0
     flush_every: 10s
+    # Profiles registered per UTC day (03:00 Iraq time); 0 = no cap. Over
+    # it, candidates wait as "capped", registered on the next days.
+    max_new_per_day: 0
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

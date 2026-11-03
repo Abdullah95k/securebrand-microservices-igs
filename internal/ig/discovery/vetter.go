@@ -33,6 +33,9 @@ const (
 	StatusGone       = "gone"
 	StatusFailed     = "failed"
 	StatusRejected   = "rejected"
+	// StatusCapped: at the threshold, waiting for room under
+	// ig.discovery.max_new_per_day.
+	StatusCapped = "capped"
 )
 
 // maxVetAttempts: a candidate whose vet job ended three times without a
@@ -64,6 +67,9 @@ func (v *Vetter) Tick(ctx context.Context) error {
 	}
 	if err := v.rescore(ctx); err != nil {
 		return fmt.Errorf("discovery: rescore: %w", err)
+	}
+	if err := v.promote(ctx); err != nil {
+		return fmt.Errorf("discovery: promote capped: %w", err)
 	}
 	if err := v.start(ctx); err != nil {
 		return fmt.Errorf("discovery: start vets: %w", err)
@@ -115,25 +121,22 @@ func (v *Vetter) rescore(ctx context.Context) error {
 		sb, _ := json.Marshal(sig)
 		status := StatusBelow
 		if vet.Found && !vet.Private && score >= d.Threshold && vet.Followers >= d.MinFollowers {
-			status = StatusRegistered
-			if err := Register(ctx, v.DB, v.Dispatch, v.Cfg, x.username, pk); err != nil {
-				return fmt.Errorf("register %s: %w", x.username, err)
-			}
-			seen, _ := json.Marshal(x.s)
-			var upk *int64
-			if pk != 0 {
-				upk = &pk
-			}
-			// A new decision on the same read: kept with the others.
-			if _, err := v.DB.Exec(ctx, `INSERT INTO discovery_vets (username, vetted_at, user_pk, status, score, signals, sightings, vet)
-				VALUES ($1, now(), $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`, x.username, upk, status, score, sb, seen, x.vet); err != nil {
+			ok, err := v.room(ctx)
+			if err != nil {
 				return err
 			}
-			metrics.DiscoveryVets.WithLabelValues("rescored_registered").Inc()
-			slog.Info("discovery: candidate registered on a grown audience", "candidate", x.username, "score", score, "sources", x.s.Sources)
+			status = StatusCapped
+			if ok {
+				status = StatusRegistered
+				if err := v.registerKept(ctx, x.username, pk, score, sb, x.s, x.vet); err != nil {
+					return err
+				}
+				slog.Info("discovery: candidate registered on a grown audience", "candidate", x.username, "score", score, "sources", x.s.Sources)
+			}
+			metrics.DiscoveryVets.WithLabelValues("rescored_" + status).Inc()
 		}
 		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = $2, score = $3, signals = $4, sources_at_decision = $5,
-				decided_at = CASE WHEN $2 = 'registered' THEN now() ELSE decided_at END
+				decided_at = CASE WHEN $2 = 'below' THEN decided_at ELSE now() END
 			WHERE username = $1`, x.username, status, score, sb, x.s.Sources); err != nil {
 			return err
 		}
@@ -206,7 +209,14 @@ func (v *Vetter) decide(ctx context.Context) error {
 		case vet.Private:
 			status = StatusPrivate
 		case score >= d.Threshold && vet.Followers >= d.MinFollowers:
-			status = StatusRegistered
+			ok, err := v.room(ctx)
+			if err != nil {
+				return err
+			}
+			status = StatusCapped
+			if ok {
+				status = StatusRegistered
+			}
 		}
 		if status == StatusRegistered {
 			if err := Register(ctx, v.DB, v.Dispatch, v.Cfg, x.username, pk); err != nil {
@@ -305,6 +315,82 @@ func (v *Vetter) start(ctx context.Context) error {
 	return nil
 }
 
+// room reports whether discovery may register one more profile today under
+// ig.discovery.max_new_per_day (counted from today's registered decisions
+// in discovery_vets, by UTC day).
+func (v *Vetter) room(ctx context.Context) (bool, error) {
+	limit := v.Cfg.IG.Discovery.MaxNewPerDay
+	if limit <= 0 {
+		return true, nil
+	}
+	var n int
+	err := v.DB.QueryRow(ctx, `SELECT count(*) FROM discovery_vets WHERE status = 'registered'
+		AND vetted_at >= date_trunc('day', now(), 'UTC')`).Scan(&n)
+	return n < limit, err
+}
+
+// registerKept registers a candidate decided on a stored read (a rescore,
+// or a capped one let through) and keeps the decision in discovery_vets.
+func (v *Vetter) registerKept(ctx context.Context, username string, pk int64, score float64, signals []byte, s Sightings, vet []byte) error {
+	if err := Register(ctx, v.DB, v.Dispatch, v.Cfg, username, pk); err != nil {
+		return fmt.Errorf("register %s: %w", username, err)
+	}
+	seen, _ := json.Marshal(s)
+	var upk *int64
+	if pk != 0 {
+		upk = &pk
+	}
+	_, err := v.DB.Exec(ctx, `INSERT INTO discovery_vets (username, vetted_at, user_pk, status, score, signals, sightings, vet)
+		VALUES ($1, now(), $2, 'registered', $3, $4, $5, $6) ON CONFLICT DO NOTHING`, username, upk, score, signals, seen, vet)
+	return err
+}
+
+// promote registers capped candidates, highest score first, while today's
+// cap has room.
+func (v *Vetter) promote(ctx context.Context) error {
+	if v.Cfg.IG.Discovery.MaxNewPerDay <= 0 {
+		// No cap (any more): every capped candidate goes through.
+		_, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = 'below', sources_at_decision = -1 WHERE status = 'capped'`)
+		return err
+	}
+	rows, err := v.DB.Query(ctx, `SELECT username, coalesce(user_pk, 0), score, signals, vet, tags, coauthors, mentions, comments,
+			iraq_context, sources
+		FROM discovery_candidates WHERE status = 'capped' ORDER BY score DESC, priority DESC LIMIT 100`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		username     string
+		pk           int64
+		score        float64
+		signals, vet []byte
+		s            Sightings
+	}
+	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
+		var x row
+		return x, r.Scan(&x.username, &x.pk, &x.score, &x.signals, &x.vet, &x.s.Tags, &x.s.Coauthors, &x.s.Mentions, &x.s.Comments,
+			&x.s.IraqContext, &x.s.Sources)
+	})
+	if err != nil {
+		return err
+	}
+	for _, x := range list {
+		ok, err := v.room(ctx)
+		if err != nil || !ok {
+			return err
+		}
+		if err := v.registerKept(ctx, x.username, x.pk, x.score, x.signals, x.s, x.vet); err != nil {
+			return err
+		}
+		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = 'registered', decided_at = now() WHERE username = $1`,
+			x.username); err != nil {
+			return err
+		}
+		metrics.DiscoveryVets.WithLabelValues("capped_registered").Inc()
+	}
+	return nil
+}
+
 // forgetSuppressed deletes the candidate and its vets when its account was
 // erased (as a profile or as a commenter): it is never vetted, registered
 // or kept.
@@ -347,7 +433,8 @@ func (v *Vetter) gauges(ctx context.Context) error {
 		counts[s] = float64(n)
 	}
 	rows.Close()
-	for _, s := range []string{StatusNew, StatusVetting, StatusRegistered, StatusBelow, StatusPrivate, StatusGone, StatusFailed, StatusRejected} {
+	for _, s := range []string{StatusNew, StatusVetting, StatusRegistered, StatusCapped, StatusBelow, StatusPrivate, StatusGone, StatusFailed,
+		StatusRejected} {
 		metrics.DiscoveryQueue.WithLabelValues(s).Set(counts[s])
 	}
 	return rows.Err()

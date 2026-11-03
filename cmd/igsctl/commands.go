@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dlq"
 	igtopics "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
@@ -317,4 +319,67 @@ func dlqReplay(ctx context.Context, cfg *config.Config, args []string) error {
 	res, err := dlq.Replay(ctx, cl, p, jobs.New(rdb), dlq.Options{Persisted: *persisted, Reason: *reason, Max: *maxN, Idle: *idle})
 	printJSON(res)
 	return err
+}
+
+// discoveryImport takes accounts found elsewhere (a file of usernames or
+// profile links, one a line; - reads standard input) as discovery
+// candidates, in batches of discovery.MaxIntake.
+func discoveryImport(ctx context.Context, cfg *config.Config, args []string) error {
+	fs := flag.NewFlagSet("discovery import", flag.ExitOnError)
+	file := fs.String("file", "", "file of usernames or profile links, one a line (- for standard input)")
+	origin := fs.String("origin", "manual", "where they were found: google, facebook, youtube, manual...")
+	_ = fs.Parse(args)
+	if *file == "" {
+		return errors.New("--file is required")
+	}
+	in := os.Stdin
+	if *file != "-" {
+		f, err := os.Open(*file)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		in = f
+	}
+	db, err := openDB(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	total := discovery.IntakeResult{Invalid: []string{}}
+	var batch []string
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		res, err := discovery.Intake(ctx, db, cfg.IG.Discovery, batch, *origin)
+		if err != nil {
+			return err
+		}
+		total.Added += res.Added
+		total.Known += res.Known
+		total.Invalid = append(total.Invalid, res.Invalid...)
+		batch = batch[:0]
+		return nil
+	}
+	sc := bufio.NewScanner(in)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if batch = append(batch, line); len(batch) == discovery.MaxIntake {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
+		return err
+	}
+	printJSON(total)
+	return nil
 }

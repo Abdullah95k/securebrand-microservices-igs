@@ -34,7 +34,8 @@ commands:
   apikey create --name NAME [--scopes s1,s2] [--rate N]
   apikey revoke --prefix PREFIX
   registry list | registry set --file query.json | registry import --file registry.yaml [--keep-promoted]
-  dlq replay [--reason R] [--max N] [--idle 10s] [--persist]`)
+  dlq replay [--reason R] [--max N] [--idle 10s] [--persist]
+  discovery import --file accounts.txt [--origin google|facebook|youtube|manual]`)
 	os.Exit(2)
 }
 
@@ -77,6 +78,8 @@ func main() {
 		err = registryImport(ctx, cfg, rest)
 	case "dlq replay":
 		err = dlqReplay(ctx, cfg, rest)
+	case "discovery import":
+		err = discoveryImport(ctx, cfg, rest)
 	default:
 		usage()
 	}
