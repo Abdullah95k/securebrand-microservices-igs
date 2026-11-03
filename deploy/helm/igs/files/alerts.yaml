@@ -131,6 +131,19 @@ groups:
             about 4 hours they go to the DLQ. Add exits, or lower
             ig.exit_rps if the rests are rate limits.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#rotation-retries-and-failover
+      - alert: IgsIgBudgetHoldingBackfill
+        # Set only while ig.budget has a limit; the leader scheduler alone
+        # publishes it.
+        expr: max(igs_budget_backfill_paused * on (pod) group_left igs_scheduler_leader) == 1
+        for: 2h
+        labels: {severity: warning}
+        annotations:
+          summary: The daily traffic budget has held backfill for 2 hours
+          description: >-
+            New profiles wait for their first read. Raise
+            ig.budget.requests_per_day or bytes_per_day, or accept the wait
+            until the next UTC day.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#daily-budget
       - alert: IgsIgIdentitiesRetiringFast
         # Identities retire after 500 to 750 requests by design; retiring on
         # blocks instead means the pool is burning out.

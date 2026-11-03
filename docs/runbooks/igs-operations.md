@@ -13,6 +13,7 @@ The binaries:
 `igsctl` is the operations CLI.
 
 Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and `igsctl kafka apply` before each install and upgrade. Runbooks for the other jobs:
+- going live (release, secrets, install, canary, ramp): [`igs-go-live.md`](igs-go-live.md);
 - the Phase 0 kit: [`igs-phase0.md`](igs-phase0.md);
 - the probe: [`igs-probe.md`](igs-probe.md);
 - doc_id rotations: [`igs-registry-sync.md`](igs-registry-sync.md).
@@ -27,6 +28,7 @@ Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and
 | Identity churn | `igs_identity_retired_total{tier,reason}` | mostly `max_requests` (identities retire after 500 to 750 requests by design) |
 | Exits | `igs_exits_resting{tier}` against `igs_exits{tier}`; `igs_exit_rests_total{tier,reason}`; `igs_identity_hops_total{stage,class}` | few exits resting; rests and failovers flat |
 | Parked tasks | `igs_tasks_total{outcome="parked"}` | 0: a task parks only while every exit rests |
+| Daily budget | `igs_budget_projected{kind}` against `igs_budget_limit{kind}`; `igs_budget_backfill_paused` | under the limit; 0 |
 | Breakers | `igs_breaker_state{name="proxy:..."}`, `{name="query:..."}` (2 = open) | all 0 |
 | Parser health | `igs_parse_total{outcome="drift"}`, `igs:ig_parse_missing_per_response:rate1h` against 7 days ago | drift ≈ 0; optional fields as last week |
 | Registry | `igs_registry_query_healthy{query}`, `igs_registry_sync_last_success_timestamp_seconds` | all 1; last success < 1 h ago |
@@ -95,6 +97,17 @@ What to do when exits keep resting:
 2. **Rate limits:** a steady stream of `rate_limited` rests means `ig.exit_rps` is above what Instagram tolerates per IP. Lower it, or add exits to keep the throughput.
 3. **Checkpoints and page walls:** these mean the provider's IPs are flagged. Replace those endpoints in the `igs-proxies` Secret.
 4. **Every exit resting:** the crawl stops until rests end. If it lasts, add exits from another provider or subnet.
+
+## Daily budget
+
+`ig.budget` (D9) caps the fleet's daily requests and wire bytes (page loads and queries); both are 0, no budget, by default. Exit pacing already bounds the request rate (exits × `ig.exit_rps`), so the byte budget is the one to set when the proxy plan bills per GB.
+
+- Crawlers count requests and bytes per lane in Valkey. Every `ig.budget.interval`, the leader scheduler projects the day's total (UTC) from the last `projection_span`.
+- When the day would exceed the budget, backfill (p2, new profiles' first reads) pauses: crawlers take its slots away, and running tasks finish.
+- When on-demand and scheduled traffic alone would exceed it, every scheduled run's interval is multiplied by `ig.budget.stretch` (2: every 6 hours instead of 3).
+- On-demand (p0) work is never held. The state expires if the leader stops publishing it, so crawlers never stay paused on a stale decision.
+- Watch `igs_budget_used{kind,lane}`, `igs_budget_projected{kind}`, `igs_budget_limit{kind}`, `igs_budget_backfill_paused` and `igs_budget_stretch`.
+- `IgsIgBudgetHoldingBackfill` fires after 2 hours of held backfill.
 
 ## Block storm (block rate > 10%)
 

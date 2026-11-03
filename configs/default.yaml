@@ -409,6 +409,20 @@ ig:
     jitter: 0.1
     post_refresh_window: 168h    # posts of the last 7 days: comments and counts refreshed
     post_refresh_per_run: 30
+  # Daily traffic budget, fleet-wide (D9; 0 = none). Every interval the
+  # leader scheduler projects the day's requests and wire bytes (page loads
+  # and queries) from the last projection_span. When the day would exceed
+  # the budget, backfill (p2) pauses; when on-demand and scheduled traffic
+  # alone would, every scheduled run's interval is multiplied by stretch.
+  # On-demand (p0) work is never held. Exit pacing (exit_rps) already bounds
+  # the request rate; a byte budget suits a proxy plan billed per GB.
+  budget:
+    enabled: true
+    requests_per_day: 0
+    bytes_per_day: 0
+    interval: 1m
+    stretch: 2
+    projection_span: 1h
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

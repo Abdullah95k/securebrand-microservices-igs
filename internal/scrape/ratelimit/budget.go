@@ -241,6 +241,8 @@ type BudgetGate struct {
 	cur atomic.Pointer[BudgetState]
 	// OnChange is called when PauseP2 changes.
 	OnChange func(BudgetState)
+	// Every is how often Run reads the state (default 15s).
+	Every time.Duration
 }
 
 // NewBudgetGate returns a gate in the neutral state.
@@ -266,9 +268,13 @@ func (g *BudgetGate) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// Run refreshes every 15 seconds until ctx is done.
+// Run refreshes every Every (15 seconds) until ctx is done.
 func (g *BudgetGate) Run(ctx context.Context) error {
-	t := time.NewTicker(15 * time.Second)
+	every := g.Every
+	if every <= 0 {
+		every = 15 * time.Second
+	}
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		if err := g.Refresh(ctx); err != nil && ctx.Err() == nil {
