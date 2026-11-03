@@ -30,18 +30,24 @@ type Candidate struct {
 	FirstSeenAt time.Time       `json:"first_seen_at"`
 	LastSeenAt  time.Time       `json:"last_seen_at"`
 	DecidedAt   *time.Time      `json:"decided_at,omitempty"`
+	// Read is what the latest vet found: name, biography, links, followers,
+	// recent captions.
+	Read json.RawMessage `json:"read,omitempty"`
 }
 
 const selectCandidate = `SELECT username, user_pk, status, score, signals, tags, coauthors, mentions, comments, iraq_context, priority,
-	first_seen_at, last_seen_at, decided_at FROM discovery_candidates`
+	first_seen_at, last_seen_at, decided_at, vet FROM discovery_candidates`
 
 func scanCandidate(r pgx.CollectableRow) (Candidate, error) {
 	var c Candidate
-	var sig []byte
+	var sig, read []byte
 	err := r.Scan(&c.Username, &c.UserPK, &c.Status, &c.Score, &sig, &c.Tags, &c.Coauthors, &c.Mentions, &c.Comments, &c.IraqContext,
-		&c.Priority, &c.FirstSeenAt, &c.LastSeenAt, &c.DecidedAt)
+		&c.Priority, &c.FirstSeenAt, &c.LastSeenAt, &c.DecidedAt, &read)
 	if len(sig) > 0 {
 		c.Signals = sig
+	}
+	if len(read) > 0 {
+		c.Read = read
 	}
 	return c, err
 }
@@ -106,7 +112,7 @@ func (s *Server) rejectCandidate(w http.ResponseWriter, r *http.Request) {
 	ref := "u:" + u
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO discovery_candidates (username, status, decided_at) VALUES ($1, 'rejected', now())
-			ON CONFLICT (username) DO UPDATE SET status = 'rejected', decided_at = now(), vet = NULL`, u); err != nil {
+			ON CONFLICT (username) DO UPDATE SET status = 'rejected', decided_at = now()`, u); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM profile_registrations WHERE profile_ref = $1 AND api_client_id = $2`, ref, client); err != nil {
@@ -138,7 +144,7 @@ func (s *Server) acceptCandidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.DB.Exec(ctx, `INSERT INTO discovery_candidates (username, status, decided_at) VALUES ($1, 'registered', now())
-		ON CONFLICT (username) DO UPDATE SET status = 'registered', decided_at = now(), vet = NULL`, u); err != nil {
+		ON CONFLICT (username) DO UPDATE SET status = 'registered', decided_at = now()`, u); err != nil {
 		httpapi.ServerError(w, err)
 		return
 	}

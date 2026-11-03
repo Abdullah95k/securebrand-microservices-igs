@@ -18,9 +18,9 @@ import (
 // are registered and backfilled, an English account stays below the
 // threshold, a private one is not registered, and accounts that do not
 // exist are gone. A vet publishes nothing: the accounts not registered
-// leave no profile in the store, and what the vet read is dropped once
-// decided. An admin lists the candidates with their signals, and a
-// rejected one leaves the schedule.
+// leave no profile in the store. What every vet read is kept, on the
+// candidate and in discovery_vets. An admin lists the candidates with
+// their signals and reads, and a rejected one leaves the schedule.
 func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 	s := Start(t, Options{Spec: spec(), Config: func(c *config.Config) {
 		c.IG.Discovery = config.IGDiscovery{Enabled: true, Sources: []string{"tags", "coauthors", "mentions", "commenters"},
@@ -79,8 +79,16 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 		WHERE p.profile_ref IN ('u:profile_01', 'u:profile_02')`); n != 0 {
 		t.Errorf("%d registered profiles counted as candidates of their own posts", n)
 	}
-	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE vet IS NOT NULL AND status NOT IN ('new','vetting')`); n != 0 {
-		t.Errorf("%d decided candidates keep what their vet read", n)
+	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE vet IS NULL AND status IN ('registered','below','private','gone')`); n != 0 {
+		t.Errorf("%d decided candidates lost what their vet read", n)
+	}
+	if n := count(t, s, `SELECT count(*) FROM discovery_vets v JOIN discovery_candidates c USING (username)
+		WHERE c.username IN ('collab_01', 'collab_02', 'tagged_01_0', 'tagged_01_3', 'tagged_01_6') AND v.status = c.status`); n != 5 {
+		t.Errorf("%d of 5 decisions kept in discovery_vets", n)
+	}
+	var bio string
+	if err := s.DB.QueryRow(ctx, `SELECT vet->>'biography' FROM discovery_vets WHERE username = 'tagged_01_0'`).Scan(&bio); err != nil || bio == "" {
+		t.Errorf("the below-threshold account's read was not kept: %q %v", bio, err)
 	}
 	if n := count(t, s, `SELECT count(*) FROM profiles WHERE username IN ('tagged_01_0', 'tagged_01_3', 'tagged_01_6')`); n != 0 {
 		t.Errorf("a vet published %d profiles of accounts not registered", n)
@@ -108,7 +116,8 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 	if code := s.Do(t, admin, "GET", "/v1/discovery/candidates?status=registered", nil, &list); code != http.StatusOK {
 		t.Fatalf("list: %d", code)
 	}
-	if len(list.Candidates) != 2 || list.Candidates[0].Score == nil || *list.Candidates[0].Score < 4 || len(list.Candidates[0].Signals) == 0 {
+	if len(list.Candidates) != 2 || list.Candidates[0].Score == nil || *list.Candidates[0].Score < 4 || len(list.Candidates[0].Signals) == 0 ||
+		len(list.Candidates[0].Read) == 0 {
 		t.Fatalf("registered candidates %+v", list.Candidates)
 	}
 	if code := s.Do(t, key, "GET", "/v1/discovery/candidates", nil, nil); code != http.StatusForbidden {

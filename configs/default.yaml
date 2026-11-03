@@ -296,10 +296,14 @@ privacy:
   pii_mode: full        # full | pseudonymized
   author_hmac_key: "dev-only-change-me"
   download_author_avatars: false
+  # igs keeps collected data forever (the owner, 2026-11-03): comments,
+  # authors and post metrics are never dropped by age (0). Erasure requests
+  # still delete a person's data. The job log, raw failure captures and
+  # deleted media rows are operational and still expire.
   retention:
-    comments_days: 365
-    authors_inactive_days: 365
-    metrics_days: 180
+    comments_days: 0
+    authors_inactive_days: 0
+    metrics_days: 0
     raw_payload_days: 7
     media_rows_days: 30
     jobs_days: 90

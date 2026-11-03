@@ -97,9 +97,10 @@ operations, alerts and sizing: [`igs-operations.md`](docs/runbooks/igs-operation
 
 ## Privacy and legal
 
-igs reads only what Instagram shows logged out. `ig.privacy.pii_mode: pseudonymized` replaces commenters'
-identities with keyed hashes; `POST /v1/erasure-requests` deletes a subject's data and media and keeps
-later crawls from storing it again. Legal sign-off comes before go-live (C4).
+igs reads only what Instagram shows logged out, and keeps what it collects forever
+([retention](docs/runbooks/igs-operations.md#data-retention)). `ig.privacy.pii_mode: pseudonymized` replaces
+commenters' identities with keyed hashes; `POST /v1/erasure-requests` deletes a subject's data and media
+and keeps later crawls from storing it again. Legal signed off (C4, 2026-11-03).
 
 ## Development
 

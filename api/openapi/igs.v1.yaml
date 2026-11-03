@@ -396,6 +396,7 @@ components:
         first_seen_at: {type: string, format: date-time}
         last_seen_at: {type: string, format: date-time}
         decided_at: {type: string, format: date-time}
+        read: {type: object, description: 'what the latest vet read: full_name, biography, links, followers, private, recent captions'}
     Schedule:
       type: object
       properties:

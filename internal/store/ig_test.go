@@ -42,13 +42,16 @@ func TestIGMigrationsAndPartitions(t *testing.T) {
 	}
 	var version int64
 	must(pub.QueryRow(ctx, `SELECT max(version_id) FROM ig.goose_db_version`).Scan(&version))
-	if version != 2 {
+	if version != 3 {
 		t.Fatalf("ig version %d", version)
 	}
-	// Each down undoes one migration: 00002 (discovery), then 00001.
-	must(store.MigrateIGDown(ctx, pub))
-	if n := tables("ig"); n != up-1 {
-		t.Fatalf("schema ig has %d tables after one down, want %d", n, up-1)
+	// Each down undoes one migration and its table: 00003 (discovery
+	// history), 00002 (discovery), then 00001.
+	for i := 1; i <= 2; i++ {
+		must(store.MigrateIGDown(ctx, pub))
+		if n := tables("ig"); n != up-i {
+			t.Fatalf("schema ig has %d tables after %d downs, want %d", n, i, up-i)
+		}
 	}
 	must(store.MigrateIGDown(ctx, pub))
 	if n := tables("ig"); n != 1 { // only goose's version table is left
