@@ -26,23 +26,25 @@ type Candidate struct {
 	Mentions    int             `json:"mentions"`
 	Comments    int             `json:"comments"`
 	IraqContext int             `json:"iraq_context"`
-	Priority    float64         `json:"priority"`
-	FirstSeenAt time.Time       `json:"first_seen_at"`
-	LastSeenAt  time.Time       `json:"last_seen_at"`
-	DecidedAt   *time.Time      `json:"decided_at,omitempty"`
+	// Sources is how many different registered accounts it was met in.
+	Sources     int        `json:"sources"`
+	Priority    float64    `json:"priority"`
+	FirstSeenAt time.Time  `json:"first_seen_at"`
+	LastSeenAt  time.Time  `json:"last_seen_at"`
+	DecidedAt   *time.Time `json:"decided_at,omitempty"`
 	// Read is what the latest vet found: name, biography, links, followers,
 	// recent captions.
 	Read json.RawMessage `json:"read,omitempty"`
 }
 
-const selectCandidate = `SELECT username, user_pk, status, score, signals, tags, coauthors, mentions, comments, iraq_context, priority,
-	first_seen_at, last_seen_at, decided_at, vet FROM discovery_candidates`
+const selectCandidate = `SELECT username, user_pk, status, score, signals, tags, coauthors, mentions, comments, iraq_context, sources,
+	priority, first_seen_at, last_seen_at, decided_at, vet FROM discovery_candidates`
 
 func scanCandidate(r pgx.CollectableRow) (Candidate, error) {
 	var c Candidate
 	var sig, read []byte
 	err := r.Scan(&c.Username, &c.UserPK, &c.Status, &c.Score, &sig, &c.Tags, &c.Coauthors, &c.Mentions, &c.Comments, &c.IraqContext,
-		&c.Priority, &c.FirstSeenAt, &c.LastSeenAt, &c.DecidedAt, &read)
+		&c.Sources, &c.Priority, &c.FirstSeenAt, &c.LastSeenAt, &c.DecidedAt, &read)
 	if len(sig) > 0 {
 		c.Signals = sig
 	}

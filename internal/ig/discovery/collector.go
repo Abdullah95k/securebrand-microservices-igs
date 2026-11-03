@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
@@ -36,6 +37,9 @@ type Collector struct {
 type sighting struct {
 	pk int64
 	Sightings
+	// from are the registered accounts (user pks) it was met in since the
+	// last flush; Flush counts the ones new to ig.discovery_sources.
+	from map[int64]bool
 }
 
 // maxPending flushes early when this many accounts wait.
@@ -67,11 +71,14 @@ func (c *Collector) add(username string, pk, ownerPK int64, iraq bool, source st
 	}
 	s := c.pending[u]
 	if s == nil {
-		s = &sighting{}
+		s = &sighting{from: map[int64]bool{}}
 		c.pending[u] = s
 	}
 	if pk != 0 {
 		s.pk = pk
+	}
+	if ownerPK != 0 {
+		s.from[ownerPK] = true
 	}
 	bump(&s.Sightings)
 	if iraq {
@@ -177,7 +184,9 @@ func (c *Collector) Run(ctx context.Context) error {
 	}
 }
 
-// Flush writes the sightings gathered since the last flush. Those it could
+// Flush writes the sightings gathered since the last flush: the registered
+// accounts each candidate was met in (ig.discovery_sources), then its
+// counts, with the sources new to it, in one transaction. Those it could
 // not write are kept for the next.
 func (c *Collector) Flush(ctx context.Context) error {
 	c.mu.Lock()
@@ -191,6 +200,8 @@ func (c *Collector) Flush(ctx context.Context) error {
 	users := make([]string, 0, n)
 	pks := make([]int64, 0, n)
 	var tags, coauthors, mentions, comments, iraq []int32
+	var edgeUsers []string
+	var edgeFrom []int64
 	for u, s := range batch {
 		users = append(users, u)
 		pks = append(pks, s.pk)
@@ -199,18 +210,32 @@ func (c *Collector) Flush(ctx context.Context) error {
 		mentions = append(mentions, int32(s.Mentions))
 		comments = append(comments, int32(s.Comments))
 		iraq = append(iraq, int32(s.IraqContext))
+		for from := range s.from {
+			edgeUsers = append(edgeUsers, u)
+			edgeFrom = append(edgeFrom, from)
+		}
 	}
-	_, err := c.DB.Exec(ctx, `
-		INSERT INTO discovery_candidates AS c (username, user_pk, tags, coauthors, mentions, comments, iraq_context, priority)
-		SELECT u, NULLIF(pk, 0), t, co, m, cm, iq, 3*co + 2*t + 2*m + cm + 2*iq
-		FROM unnest($1::text[], $2::bigint[], $3::int[], $4::int[], $5::int[], $6::int[], $7::int[]) AS x(u, pk, t, co, m, cm, iq)
-		ON CONFLICT (username) DO UPDATE SET
-			user_pk = COALESCE(c.user_pk, EXCLUDED.user_pk),
-			tags = c.tags + EXCLUDED.tags, coauthors = c.coauthors + EXCLUDED.coauthors,
-			mentions = c.mentions + EXCLUDED.mentions, comments = c.comments + EXCLUDED.comments,
-			iraq_context = c.iraq_context + EXCLUDED.iraq_context,
-			priority = c.priority + EXCLUDED.priority, last_seen_at = now()`,
-		users, pks, tags, coauthors, mentions, comments, iraq)
+	err := pgx.BeginFunc(ctx, c.DB, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			WITH new_sources AS (
+				INSERT INTO discovery_sources (username, source_pk)
+				SELECT * FROM unnest($8::text[], $9::bigint[]) ON CONFLICT DO NOTHING
+				RETURNING username
+			), added AS (SELECT username, count(*)::int AS n FROM new_sources GROUP BY username)
+			INSERT INTO discovery_candidates AS c (username, user_pk, tags, coauthors, mentions, comments, iraq_context, sources, priority)
+			SELECT x.u, NULLIF(x.pk, 0), x.t, x.co, x.m, x.cm, x.iq, coalesce(a.n, 0),
+				3*x.co + 2*x.t + 2*x.m + x.cm + 2*x.iq + 3*coalesce(a.n, 0)
+			FROM unnest($1::text[], $2::bigint[], $3::int[], $4::int[], $5::int[], $6::int[], $7::int[]) AS x(u, pk, t, co, m, cm, iq)
+			LEFT JOIN added a ON a.username = x.u
+			ON CONFLICT (username) DO UPDATE SET
+				user_pk = COALESCE(c.user_pk, EXCLUDED.user_pk),
+				tags = c.tags + EXCLUDED.tags, coauthors = c.coauthors + EXCLUDED.coauthors,
+				mentions = c.mentions + EXCLUDED.mentions, comments = c.comments + EXCLUDED.comments,
+				iraq_context = c.iraq_context + EXCLUDED.iraq_context, sources = c.sources + EXCLUDED.sources,
+				priority = c.priority + EXCLUDED.priority, last_seen_at = now()`,
+			users, pks, tags, coauthors, mentions, comments, iraq, edgeUsers, edgeFrom)
+		return err
+	})
 	if err != nil {
 		c.mu.Lock()
 		for u, s := range batch {
@@ -220,6 +245,9 @@ func (c *Collector) Flush(ctx context.Context) error {
 				p.Mentions += s.Mentions
 				p.Comments += s.Comments
 				p.IraqContext += s.IraqContext
+				for from := range s.from {
+					p.from[from] = true
+				}
 			} else if len(c.pending) < maxPending {
 				c.pending[u] = s
 			}

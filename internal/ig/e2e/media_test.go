@@ -150,6 +150,13 @@ func TestErasure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The profile is also a source of another candidate's audience.
+	if _, err := s.DB.Exec(ctx, `INSERT INTO discovery_candidates (username, sources) VALUES ('fan_of_p', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(ctx, `INSERT INTO discovery_sources (username, source_pk) VALUES ('fan_of_p', $1)`, p.PK); err != nil {
+		t.Fatal(err)
+	}
 	discovered := func(pk int64) int {
 		return count(t, s, `SELECT (SELECT count(*) FROM discovery_candidates WHERE user_pk = $1) + (SELECT count(*) FROM discovery_vets WHERE user_pk = $1)`, pk)
 	}
@@ -201,6 +208,10 @@ func TestErasure(t *testing.T) {
 	}
 	if n := discovered(p.PK); n != 0 {
 		t.Fatalf("%d discovery rows of the erased profile left", n)
+	}
+	if n := count(`SELECT count(*) FROM discovery_sources WHERE source_pk = $1`) +
+		count(`SELECT sources FROM discovery_candidates WHERE username = 'fan_of_p' AND $1::bigint > 0`); n != 0 {
+		t.Fatalf("the erased profile still counts in another candidate's audience (%d)", n)
 	}
 	if count(`SELECT count(*) FROM posts WHERE owner_pk = $1`) != 0 {
 		t.Fatal("posts left")

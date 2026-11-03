@@ -62,10 +62,83 @@ func (v *Vetter) Tick(ctx context.Context) error {
 			return fmt.Errorf("discovery: revet: %w", err)
 		}
 	}
+	if err := v.rescore(ctx); err != nil {
+		return fmt.Errorf("discovery: rescore: %w", err)
+	}
 	if err := v.start(ctx); err != nil {
 		return fmt.Errorf("discovery: start vets: %w", err)
 	}
 	return v.gauges(ctx)
+}
+
+// rescore scores again, from their stored read, the candidates below the
+// threshold whose Iraqi audience grew since their decision (more registered
+// accounts link to them): no new read of Instagram is needed. Those now at
+// the threshold are registered.
+func (v *Vetter) rescore(ctx context.Context) error {
+	rows, err := v.DB.Query(ctx, `SELECT username, coalesce(user_pk, 0), vet, tags, coauthors, mentions, comments, iraq_context, sources
+		FROM discovery_candidates WHERE status = 'below' AND vet IS NOT NULL AND sources > sources_at_decision LIMIT 1000`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		username string
+		pk       int64
+		vet      []byte
+		s        Sightings
+	}
+	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
+		var x row
+		return x, r.Scan(&x.username, &x.pk, &x.vet, &x.s.Tags, &x.s.Coauthors, &x.s.Mentions, &x.s.Comments, &x.s.IraqContext, &x.s.Sources)
+	})
+	if err != nil {
+		return err
+	}
+	d := v.Cfg.IG.Discovery
+	for _, x := range list {
+		var vet Vet
+		if err := json.Unmarshal(x.vet, &vet); err != nil {
+			continue
+		}
+		pk := x.pk
+		if vet.UserPK != 0 {
+			pk = vet.UserPK
+		}
+		if gone, err := v.forgetSuppressed(ctx, x.username, pk); err != nil || gone {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		sig := Score(vet, x.s)
+		score := sig.Sum()
+		sb, _ := json.Marshal(sig)
+		status := StatusBelow
+		if vet.Found && !vet.Private && score >= d.Threshold && vet.Followers >= d.MinFollowers {
+			status = StatusRegistered
+			if err := Register(ctx, v.DB, v.Dispatch, v.Cfg, x.username, pk); err != nil {
+				return fmt.Errorf("register %s: %w", x.username, err)
+			}
+			seen, _ := json.Marshal(x.s)
+			var upk *int64
+			if pk != 0 {
+				upk = &pk
+			}
+			// A new decision on the same read: kept with the others.
+			if _, err := v.DB.Exec(ctx, `INSERT INTO discovery_vets (username, vetted_at, user_pk, status, score, signals, sightings, vet)
+				VALUES ($1, now(), $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`, x.username, upk, status, score, sb, seen, x.vet); err != nil {
+				return err
+			}
+			metrics.DiscoveryVets.WithLabelValues("rescored_registered").Inc()
+			slog.Info("discovery: candidate registered on a grown audience", "candidate", x.username, "score", score, "sources", x.s.Sources)
+		}
+		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = $2, score = $3, signals = $4, sources_at_decision = $5,
+				decided_at = CASE WHEN $2 = 'registered' THEN now() ELSE decided_at END
+			WHERE username = $1`, x.username, status, score, sb, x.s.Sources); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // decide scores the candidates whose vet came back and registers those at
@@ -73,7 +146,7 @@ func (v *Vetter) Tick(ctx context.Context) error {
 // back to the queue.
 func (v *Vetter) decide(ctx context.Context) error {
 	rows, err := v.DB.Query(ctx, `SELECT c.username, coalesce(c.user_pk, 0), c.vet, c.tags, c.coauthors, c.mentions, c.comments,
-			c.iraq_context, c.attempts
+			c.iraq_context, c.sources, c.attempts
 		FROM discovery_candidates c LEFT JOIN jobs j ON j.job_id = c.vet_job_id
 		WHERE c.status = 'vetting' AND (c.vet IS NOT NULL OR j.job_id IS NULL OR j.status IN ('completed','partial','failed','cancelled'))
 		LIMIT 1000`)
@@ -89,7 +162,8 @@ func (v *Vetter) decide(ctx context.Context) error {
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
 		var x row
-		return x, r.Scan(&x.username, &x.pk, &x.vet, &x.s.Tags, &x.s.Coauthors, &x.s.Mentions, &x.s.Comments, &x.s.IraqContext, &x.attempts)
+		return x, r.Scan(&x.username, &x.pk, &x.vet, &x.s.Tags, &x.s.Coauthors, &x.s.Mentions, &x.s.Comments, &x.s.IraqContext, &x.s.Sources,
+			&x.attempts)
 	})
 	if err != nil {
 		return err
@@ -153,8 +227,8 @@ func (v *Vetter) decide(ctx context.Context) error {
 			return err
 		}
 		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = $2, score = $3, signals = $4,
-				user_pk = COALESCE(NULLIF($5::bigint, 0), user_pk), decided_at = now()
-			WHERE username = $1`, x.username, status, score, sb, pk); err != nil {
+				user_pk = COALESCE(NULLIF($5::bigint, 0), user_pk), sources_at_decision = $6, decided_at = now()
+			WHERE username = $1`, x.username, status, score, sb, pk, x.s.Sources); err != nil {
 			return err
 		}
 		slog.Info("discovery: candidate decided", "candidate", x.username, "status", status, "score", score)
@@ -246,6 +320,9 @@ func (v *Vetter) forgetSuppressed(ctx context.Context, username string, pk int64
 		return false, err
 	}
 	if _, err = v.DB.Exec(ctx, `DELETE FROM discovery_vets WHERE username = $1 OR user_pk = $2`, username, pk); err != nil {
+		return true, err
+	}
+	if _, err = v.DB.Exec(ctx, `DELETE FROM discovery_sources WHERE username = $1`, username); err != nil {
 		return true, err
 	}
 	_, err = v.DB.Exec(ctx, `DELETE FROM discovery_candidates WHERE username = $1`, username)

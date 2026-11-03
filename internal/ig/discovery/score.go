@@ -39,12 +39,27 @@ type Sightings struct {
 	Mentions    int `json:"mentions"`
 	Comments    int `json:"comments"`
 	IraqContext int `json:"iraq_context"`
+	// Sources is how many different registered accounts it was met in:
+	// its Iraqi audience.
+	Sources int `json:"sources"`
 }
 
 // Priority weighs sightings for the vetting queue (ig.discovery.min_priority).
 func (s Sightings) Priority() float64 {
-	return float64(3*s.Coauthors + 2*s.Tags + 2*s.Mentions + s.Comments + 2*s.IraqContext)
+	return float64(3*s.Coauthors + 2*s.Tags + 2*s.Mentions + s.Comments + 2*s.IraqContext + 3*s.Sources)
 }
+
+// GlobalFollowers: an account this large with nothing of Iraq of its own
+// (a world star whom Iraqi fans tag) gets at most GlobalNetworkCap from
+// network evidence.
+const (
+	GlobalFollowers  = 1_000_000
+	GlobalNetworkCap = 2.0
+	// NetworkCap bounds network evidence: alone it reaches the default
+	// threshold (4) only with ten or more registered accounts linking to the
+	// account and sightings on posts located in Iraq.
+	NetworkCap = 4.0
+)
 
 // Signals are a score's parts, stored with it so an operator can see why a
 // profile was or was not registered.
@@ -68,10 +83,20 @@ func (s Signals) Sum() float64 {
 //     markers; mostly Arabic script 1;
 //   - another country named without Iraq: -2.
 //
-// How it was met adds up to 3: a co-author 1.5, a tag 1, a mention 0.5,
-// three or more comments 0.5, sightings on posts located in Iraq 1.5. Every
-// candidate was met in a registered profile, so this is the audience the
-// profile shares; alone it is never enough at the default threshold (4).
+// Network evidence (every candidate was met in registered, Iraqi, profiles)
+// adds up to 4:
+//   - iraqi_audience, how many different registered accounts tag, mention,
+//     co-author with or comment as it: one 1, two 1.5, three 2, five 2.5,
+//     ten or more 3;
+//   - seen_in_iraq, sightings on posts located in Iraq: 1.5;
+//   - coauthor, a collab post with a registered account: 0.5.
+//
+// So an Iraqi account that says nothing of Iraq itself (an English-only
+// influencer) is added once ten registered accounts link to it from posts
+// located in Iraq, and a foreign account once a real Iraqi audience
+// surrounds it. An account with a million followers or more and nothing
+// of Iraq of its own (a world star Iraqi fans tag) gets at most 2 from the
+// network.
 func Score(v Vet, s Sightings) Signals {
 	sig := Signals{}
 	own := scan(strings.Join(append([]string{v.FullName, v.Biography, v.Category}, v.Links...), "\n"))
@@ -111,24 +136,45 @@ func Score(v Vet, s Sightings) Signals {
 	if (own.otherCountry || caps.otherCountry) && sig["iraq_named"] == 0 && sig["iraq_phone"] == 0 && sig["iq_link"] == 0 && sig["iraq_city"] == 0 {
 		sig["other_country"] = -2
 	}
-	ctx := 0.0
-	if s.Coauthors > 0 {
-		ctx += 1.5
+	ownSignal := false
+	for _, x := range sig {
+		if x > 0 {
+			ownSignal = true
+		}
 	}
-	if s.Tags > 0 {
-		ctx++
+	src := s.Sources
+	if src == 0 && s.Tags+s.Coauthors+s.Mentions+s.Comments > 0 {
+		src = 1 // met before sources were counted
 	}
-	if s.Mentions > 0 {
-		ctx += 0.5
+	network := 0.0
+	add := func(k string, x float64) {
+		sig[k] = x
+		network += x
 	}
-	if s.Comments >= 3 {
-		ctx += 0.5
+	switch {
+	case src >= 10:
+		add("iraqi_audience", 3)
+	case src >= 5:
+		add("iraqi_audience", 2.5)
+	case src >= 3:
+		add("iraqi_audience", 2)
+	case src == 2:
+		add("iraqi_audience", 1.5)
+	case src == 1:
+		add("iraqi_audience", 1)
 	}
 	if s.IraqContext > 0 {
-		ctx += 1.5
+		add("seen_in_iraq", 1.5)
 	}
-	if ctx > 0 {
-		sig["met_in_registered"] = math.Min(ctx, 3)
+	if s.Coauthors > 0 {
+		add("coauthor", 0.5)
+	}
+	limit := NetworkCap
+	if v.Followers >= GlobalFollowers && !ownSignal {
+		limit = GlobalNetworkCap
+	}
+	if network > limit {
+		sig["network_capped"] = limit - network
 	}
 	return sig
 }

@@ -392,6 +392,7 @@ components:
         mentions: {type: integer}
         comments: {type: integer}
         iraq_context: {type: integer, description: sightings on posts located in Iraq}
+        sources: {type: integer, description: how many different registered accounts it was met in (its Iraqi audience)}
         priority: {type: number}
         first_seen_at: {type: string, format: date-time}
         last_seen_at: {type: string, format: date-time}
