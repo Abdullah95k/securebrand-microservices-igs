@@ -9,6 +9,7 @@ import (
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 )
 
 const (
@@ -120,6 +121,29 @@ func TestHighlightsSurviveRateLimits(t *testing.T) {
 	checkTruth(t, s, truth)
 	if n := s.Fake.QueryCount(fakeig.OpHighlights); n != 4 {
 		t.Errorf("%d highlights queries, want 4 (3 refused, then the items)", n)
+	}
+}
+
+// A profile task that parked while every exit rested still fails over when
+// its highlights query is then rate-limited: parks are no failed tries.
+// (They used to count: two parks, and a single block made the highlights
+// go without their items, as TestExitFailoverEqualsTruth met in CI.)
+func TestHighlightsAfterParks(t *testing.T) {
+	sp := spec()
+	sp.Profiles = 1
+	s := Start(t, Options{Spec: sp, Exits: 2, Faults: fakeig.Faults{RateLimitFirst: map[string]int{fakeig.OpHighlights: 1}}})
+	for i := 1; i <= 2; i++ {
+		s.Crawler.Deps.Proxies.Rest(proxy.Endpoint{Tier: "isp", URL: "http://" + igtest.ExitName(i)}, 8*time.Second)
+	}
+	lim := s.Limits()
+	p := s.World.Profiles()[0]
+	st := s.Wait(t, 2*time.Minute, s.Crawl(t, p.Username, full, lim, nil))
+	truth, _ := s.World.Truth(p.Username, time.Now().Add(-time.Duration(lim.MaxAgeSeconds)*time.Second))
+	checkTruth(t, s, truth)
+	for _, c := range st {
+		if c.Counters["identity_hops"] == 0 {
+			t.Errorf("the rate-limited highlights did not fail over: %v", c.Counters)
+		}
 	}
 }
 

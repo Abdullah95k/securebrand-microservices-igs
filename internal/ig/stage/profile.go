@@ -256,7 +256,9 @@ func (s *ProfileStage) profile(ctx context.Context, t *igstaskv1.Task, id *sessi
 		if cls, err := s.highlights(ctx, t, id, b, res, c, page); err != nil {
 			slog.Debug("profile: highlights", "profile", p.UserPk, "err", err)
 			c["highlights_failed"]++
-			if t.Attempt < 2 {
+			// Two tries that got nowhere, not two attempts: a park (every
+			// exit resting) is no failed try.
+			if t.Stalls < 2 {
 				if cls.Blocking() {
 					// A block fails over to another identity within the run
 					// (Run), and only then waits for a retry.
