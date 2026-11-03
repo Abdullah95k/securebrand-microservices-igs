@@ -25,6 +25,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/rawsink"
 	igclient "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/client"
 	igdetect "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/detect"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/stage"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
@@ -166,6 +167,11 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 	c.Components = []run.Func{
 		func(ctx context.Context) error { return reg.Run(ctx, g.RegistryRefresh) },
 		func(ctx context.Context) error { return supp.Run(ctx, cfg.Crawler.SuppressionRefresh) },
+	}
+	if g.Discovery.Enabled && db != nil {
+		deps.Discovery = discovery.NewCollector(db, g.Discovery, g.Privacy.PIIMode == "full")
+		deps.Discovery.Suppressed = supp.PageSuppressed
+		c.Components = append(c.Components, deps.Discovery.Run)
 	}
 	if g.AIMD.Enabled || g.BudgetOn() {
 		// Outcomes feed AIMD's block rate and the budget's daily use.

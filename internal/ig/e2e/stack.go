@@ -35,6 +35,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	igapi "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
@@ -246,13 +247,21 @@ func Start(t *testing.T, o Options) *Stack {
 func (s *Stack) StartScheduler() {
 	planner := &scheduler.Planner{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg, Redis: s.Redis}
 	fin := &scheduler.Finalizer{DB: s.DB, Jobs: s.Jobs, Producer: s.Producer, Cfg: s.Cfg, Timeout: 30 * time.Second}
-	s.start("scheduler",
+	loops := []run.Func{
 		func(ctx context.Context) error {
 			return scheduler.Every(ctx, "planner", 200*time.Millisecond, planner.Tick)
 		},
 		func(ctx context.Context) error {
 			return scheduler.Every(ctx, "finalizer", 200*time.Millisecond, fin.Tick)
+		},
+	}
+	if s.Cfg.IG.Discovery.Enabled {
+		vetter := &discovery.Vetter{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
+		loops = append(loops, func(ctx context.Context) error {
+			return scheduler.Every(ctx, "discovery", s.Cfg.IG.Discovery.Interval, vetter.Tick)
 		})
+	}
+	s.start("scheduler", loops...)
 }
 
 // StartMedia runs igs-media's downloader and janitor.

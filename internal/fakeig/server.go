@@ -703,7 +703,7 @@ func profileJSON(p *Profile, host string) map[string]any {
 		hl = append(hl, map[string]any{"node": map[string]any{"id": "highlight:" + str(h.ID), "title": h.Title}})
 	}
 	return map[string]any{"pk": str(p.PK), "id": p.ID, "username": p.Username, "full_name": p.FullName,
-		"biography": p.Bio, "is_verified": p.Verified, "is_private": false, "is_memorialized": false,
+		"biography": p.Bio, "is_verified": p.Verified, "is_private": p.Private, "is_memorialized": false,
 		"follower_count": p.Followers, "following_count": p.Following, "all_media_count": nil, "has_any_clips": true,
 		"profile_pic_url": host + "/fake-cdn/" + str(p.PK) + ".jpg", "linked_fb_info": nil,
 		"bio_links":                 []any{map[string]any{"title": "Site", "url": "https://example.com/" + p.Username}},
@@ -730,12 +730,14 @@ func mediaJSON(post *Post, detail bool, cdn string) map[string]any {
 		m["original_width"], m["original_height"] = 1080, 1350
 		tags := []any{}
 		for _, u := range post.Tagged {
-			tags = append(tags, map[string]any{"position": []any{0.5, 0.5}, "user": map[string]any{"id": "1", "username": u, "full_name": u, "is_verified": false}})
+			pk := str(post.Owner.world.userPK(u))
+			tags = append(tags, map[string]any{"position": []any{0.5, 0.5}, "user": map[string]any{"id": pk, "pk": pk, "username": u, "full_name": u, "is_verified": false}})
 		}
 		m["usertags"] = map[string]any{"in": tags}
 		co := []any{}
 		for _, u := range post.Coauthors {
-			co = append(co, map[string]any{"__typename": "User", "id": "2", "pk": "2", "username": u, "full_name": u, "is_verified": false})
+			pk := str(post.Owner.world.userPK(u))
+			co = append(co, map[string]any{"__typename": "User", "id": pk, "pk": pk, "username": u, "full_name": u, "is_verified": false})
 		}
 		m["coauthor_producers"] = co
 		m["location"] = nil

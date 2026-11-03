@@ -3,6 +3,7 @@ package stage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/checkpoint"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
@@ -96,6 +98,9 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 			}
 			if pl.Class == detect.ContentUnavailable {
 				o := s.unavailable(ctx, t, sc, c, "page 404")
+				if sc.Vet {
+					o = s.saveVet(ctx, t, sc, discovery.Vet{}, c)
+				}
 				return &o
 			}
 			if pl.Class != detect.OK || err != nil {
@@ -110,6 +115,17 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	}
 	if o := boot(); o != nil {
 		return *o
+	}
+	if sc.Vet {
+		for {
+			out := s.vet(ctx, t, id, sc, c, page)
+			if !d.failover(ctx, "profile", &id, out, &hops) {
+				return out
+			}
+			if o := boot(); o != nil {
+				return *o
+			}
+		}
 	}
 	st, _, err := d.Ckpt.Load(ctx, t.LineageId, t.Seq)
 	if err != nil {
@@ -332,6 +348,78 @@ func (s *ProfileStage) unavailable(ctx context.Context, t *igstaskv1.Task, sc *i
 		return retry(t, "", "30s", err.Error(), c)
 	}
 	slog.Debug("profile unavailable", "profile", sc.ProfileRef, "why", why)
+	return done(c)
+}
+
+// vet reads a discovery candidate (M11): its profile and, when public, the
+// captions of its grid's first page. What it read goes to
+// ig.discovery_candidates for the vetter to score; nothing is published,
+// so a candidate that is not registered never reaches the analysis.
+func (s *ProfileStage) vet(ctx context.Context, t *igstaskv1.Task, id *session.Identity, sc *igstaskv1.ProfileScope,
+	c map[string]int64, page string) Outcome {
+	d := s.D
+	lane := topics.LaneName(t.Lane)
+	resp, err := d.GQL.Do(ctx, id, graphql.Request{Query: "profile", Vars: map[string]any{"username": sc.Username}, Lane: lane, Referer: page})
+	c["requests"]++
+	if err != nil {
+		c["transport_errors"]++
+		return retry(t, "", "30s", err.Error(), c)
+	}
+	c["wire_bytes"] += resp.BytesIn + resp.BytesOut
+	res, rep := parse.Profile(resp.Parts)
+	if resp.Class != detect.OK && (!res.NotFound || resp.Class != detect.SoftError) {
+		return classOutcome(t, resp.Class, resp.Reason, "", c)
+	}
+	if res.NotFound {
+		return s.saveVet(ctx, t, sc, discovery.Vet{}, c)
+	}
+	if !rep.OK() || res.Profile == nil {
+		return classOutcome(t, detect.SchemaDrift, fmt.Sprint(rep.Missing), "", c)
+	}
+	p := res.Profile
+	v := discovery.Vet{Found: true, Private: p.IsPrivate, UserPK: p.UserPk, Username: p.Username, FullName: p.FullName,
+		Biography: p.Biography, Category: p.Category, Followers: p.GetFollowerCount(), Verified: p.IsVerified, Business: p.IsBusiness}
+	for _, l := range p.BioLinks {
+		v.Links = append(v.Links, l.GetUrl())
+	}
+	if !p.IsPrivate {
+		gresp, err := d.GQL.Do(ctx, id, graphql.Request{Query: "grid_first", Vars: map[string]any{"username": sc.Username, "first": GridPageSize},
+			Lane: lane, Referer: page})
+		c["requests"]++
+		if err != nil {
+			c["transport_errors"]++
+			return retry(t, "", "30s", err.Error(), c)
+		}
+		c["wire_bytes"] += gresp.BytesIn + gresp.BytesOut
+		if gresp.Class != detect.OK {
+			return classOutcome(t, gresp.Class, gresp.Reason, "", c)
+		}
+		g, _ := parse.Grid(gresp.Parts)
+		for i, it := range g.Items {
+			if i == 12 {
+				break
+			}
+			if it.Caption != "" {
+				v.Captions = append(v.Captions, truncate(it.Caption, 500))
+			}
+		}
+	}
+	return s.saveVet(ctx, t, sc, v, c)
+}
+
+// saveVet records what a vet read for the vetter.
+func (s *ProfileStage) saveVet(ctx context.Context, t *igstaskv1.Task, sc *igstaskv1.ProfileScope, v discovery.Vet, c map[string]int64) Outcome {
+	if s.D.DB != nil {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return Outcome{Result: Fail, Reason: "vet: " + err.Error(), Counters: c}
+		}
+		if _, err := s.D.DB.Exec(ctx, `UPDATE discovery_candidates SET vet = $2, vetted_at = now() WHERE username = lower($1)`,
+			sc.Username, b); err != nil {
+			return retry(t, "", "30s", "vet: "+err.Error(), c)
+		}
+	}
+	c["candidates_vetted"]++
 	return done(c)
 }
 

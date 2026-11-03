@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -343,6 +344,13 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 	c := httpapi.ClientFrom(ctx)
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		if c.IsAdmin() {
+			// A profile an admin removes is not discovered again.
+			if u, ok := strings.CutPrefix(ref, "u:"); ok {
+				if _, err := tx.Exec(ctx, `UPDATE discovery_candidates SET status = 'rejected', decided_at = now(), vet = NULL
+					WHERE username = $1`, u); err != nil {
+					return err
+				}
+			}
 			_, err := tx.Exec(ctx, `DELETE FROM profile_schedule WHERE profile_ref = $1`, ref)
 			return err
 		}

@@ -49,6 +49,12 @@ config:
       # pseudonymized replaces commenters' identities with keyed hashes;
       # full keeps them (legal signed off on what the analysis needs).
       pii_mode: full
+    # Profile discovery: Iraqi profiles found from the registered ones,
+    # registered without a cap at threshold or above (operations runbook).
+    discovery:
+      enabled: true
+      threshold: 4
+      vet_in_flight: 50
     # A byte budget suits a proxy plan billed per GB (0: none).
     budget:
       bytes_per_day: 0

@@ -74,6 +74,8 @@ type IG struct {
 	// held. Both limits 0: no budget. StretchTiers is not used by igs.
 	Budget  Budget    `koanf:"budget"`
 	Privacy IGPrivacy `koanf:"privacy"`
+	// Discovery finds profiles to register (M11).
+	Discovery IGDiscovery `koanf:"discovery"`
 }
 
 // IGLimits are the defaults applied to jobs that do not override them.
@@ -112,6 +114,33 @@ type IGSchedule struct {
 	PostRefreshPerRun int `koanf:"post_refresh_per_run"`
 }
 
+// IGDiscovery is profile discovery (M11): the accounts the crawl meets in
+// the profiles it reads are vetted with one profile read each, scored for
+// Iraqi signals, and registered for the schedule at Threshold or above.
+type IGDiscovery struct {
+	Enabled bool `koanf:"enabled"`
+	// Sources are how candidates are met: tags, coauthors, mentions,
+	// commenters (commenters only with privacy.pii_mode full).
+	Sources []string `koanf:"sources"`
+	// Threshold is the score at which a public candidate is registered.
+	Threshold float64 `koanf:"threshold"`
+	// MinPriority: a candidate is vetted once its weighted sightings reach
+	// it (a co-author counts 3, a tag 2, a mention 2, a comment 1, a
+	// sighting on a post located in Iraq 2 more).
+	MinPriority float64 `koanf:"min_priority"`
+	// VetInFlight caps vets running at once (each a backfill-lane job).
+	VetInFlight int `koanf:"vet_in_flight"`
+	// Interval is how often the leader scheduler vets and decides.
+	Interval time.Duration `koanf:"interval"`
+	// RevetAfter: a candidate below the threshold, private or gone is
+	// vetted again when seen again this long after its decision.
+	RevetAfter time.Duration `koanf:"revet_after"`
+	// MinFollowers below which a candidate is not registered.
+	MinFollowers int64 `koanf:"min_followers"`
+	// FlushEvery is how often crawlers write their sightings.
+	FlushEvery time.Duration `koanf:"flush_every"`
+}
+
 // IGPrivacy keeps igs's person keys apart from fbs's (ADR 0005 §1).
 type IGPrivacy struct {
 	PIIMode string `koanf:"pii_mode"`
@@ -134,6 +163,18 @@ func (c *Config) validateIG() []error {
 	}
 	if g.Budget.RequestsPerDay < 0 || g.Budget.BytesPerDay < 0 || (g.Budget.Enabled && g.Budget.Interval <= 0) {
 		errs = append(errs, errors.New("ig.budget: requests_per_day and bytes_per_day must not be negative, and interval must be > 0"))
+	}
+	if d := g.Discovery; d.Enabled {
+		for _, src := range d.Sources {
+			switch src {
+			case "tags", "coauthors", "mentions", "commenters":
+			default:
+				errs = append(errs, fmt.Errorf("ig.discovery.sources: %q must be tags, coauthors, mentions or commenters", src))
+			}
+		}
+		if d.Threshold <= 0 || d.VetInFlight <= 0 || d.Interval <= 0 || d.FlushEvery <= 0 || d.MinPriority < 0 || d.RevetAfter < 0 {
+			errs = append(errs, errors.New("ig.discovery: threshold, vet_in_flight, interval and flush_every must be > 0; min_priority and revet_after not negative"))
+		}
 	}
 	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 {
 		errs = append(errs, errors.New("ig.exit_rps, ig.rate_limit_rest, ig.checkpoint_rest, ig.page_wall_rest and ig.block_hops must not be negative"))

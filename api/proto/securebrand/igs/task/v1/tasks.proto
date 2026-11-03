@@ -80,6 +80,10 @@ message ProfileScope {
   // The user object's id (17841...), which the grid's later pages and the
   // reels tab take; learned from the profile query.
   string user_id = 11;
+  // Vet a discovery candidate (M11): read the profile and the grid's first
+  // page, record what profile discovery scores in ig.discovery_candidates,
+  // and publish nothing.
+  bool vet = 12;
 }
 
 message PostScope {

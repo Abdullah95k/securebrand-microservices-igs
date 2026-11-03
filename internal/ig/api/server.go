@@ -66,6 +66,10 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/erasure-requests", req(httpapi.ScopeAdmin, s.createErasure))
 		r.Get("/erasure-requests/{id}", req(httpapi.ScopeAdmin, s.getErasure))
 
+		r.Get("/discovery/candidates", req(httpapi.ScopeAdmin, s.listCandidates))
+		r.Post("/discovery/candidates/{username}/reject", req(httpapi.ScopeAdmin, s.rejectCandidate))
+		r.Post("/discovery/candidates/{username}/accept", req(httpapi.ScopeAdmin, s.acceptCandidate))
+
 		r.Get("/admin/queries", req(httpapi.ScopeAdmin, s.listQueries))
 		r.Put("/admin/queries/{name}", req(httpapi.ScopeAdmin, s.putQuery))
 		r.Get("/admin/registry-sync/runs", req(httpapi.ScopeAdmin, s.registrySyncRuns))
