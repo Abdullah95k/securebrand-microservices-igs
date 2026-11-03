@@ -154,7 +154,11 @@ Grow in steps while the canary's signals stay healthy:
 kubectl -n igs rollout restart deploy/igs-crawler-profile deploy/igs-crawler-post deploy/igs-registry-sync
 ```
 
-Profile discovery (M11) adds Iraqi profiles without a cap once it ships. Its threshold sets how fast the registered set grows, so ramp it the same way.
+Profile discovery adds Iraqi profiles without a cap, from the profiles you register ([how](igs-operations.md#profile-discovery)). It is on in the chart's values. Each discovered profile needs exits like any other, so watch the same signals. To slow it, lower `config.ig.discovery.vet_in_flight` or raise `threshold`; to stop it, set `enabled: false`. Check its first registrations by hand:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_KEY" "https://<igs.example.com>/v1/discovery/candidates?status=registered"
+```
 
 ## 10. Pause, roll back
 

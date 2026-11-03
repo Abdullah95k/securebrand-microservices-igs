@@ -423,6 +423,24 @@ ig:
     interval: 1m
     stretch: 2
     projection_span: 1h
+  # Profile discovery (M11): the accounts met in the profiles igs reads
+  # (tagged, co-authors, mentioned, commenters) are vetted with one profile
+  # read each (the profile and its newest posts' captions, published
+  # nowhere), scored for Iraqi signals (Iraq, its cities, +964 or .iq in the
+  # name and bio; Arabic script, Sorani Kurdish, Iraqi dialect; sightings on
+  # posts located in Iraq) and, when public and at threshold or above,
+  # registered for the 3-hourly schedule. No cap on how many: exits bound
+  # how fast. GET /v1/discovery/candidates lists them; reject removes one.
+  discovery:
+    enabled: false
+    sources: [tags, coauthors, mentions, commenters]
+    threshold: 4
+    min_priority: 2
+    vet_in_flight: 50
+    interval: 30s
+    revet_after: 720h
+    min_followers: 0
+    flush_every: 10s
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

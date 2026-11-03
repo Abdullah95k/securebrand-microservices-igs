@@ -29,6 +29,7 @@ Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and
 | Exits | `igs_exits_resting{tier}` against `igs_exits{tier}`; `igs_exit_rests_total{tier,reason}`; `igs_identity_hops_total{stage,class}` | few exits resting; rests and failovers flat |
 | Parked tasks | `igs_tasks_total{outcome="parked"}` | 0: a task parks only while every exit rests |
 | Daily budget | `igs_budget_projected{kind}` against `igs_budget_limit{kind}`; `igs_budget_backfill_paused` | under the limit; 0 |
+| Discovery | `igs_discovery_vets_total{outcome}`, `igs_discovery_candidates{status}` | vets flowing; `failed` rare |
 | Breakers | `igs_breaker_state{name="proxy:..."}`, `{name="query:..."}` (2 = open) | all 0 |
 | Parser health | `igs_parse_total{outcome="drift"}`, `igs:ig_parse_missing_per_response:rate1h` against 7 days ago | drift ≈ 0; optional fields as last week |
 | Registry | `igs_registry_query_healthy{query}`, `igs_registry_sync_last_success_timestamp_seconds` | all 1; last success < 1 h ago |
@@ -108,6 +109,53 @@ What to do when exits keep resting:
 - On-demand (p0) work is never held. The state expires if the leader stops publishing it, so crawlers never stay paused on a stale decision.
 - Watch `igs_budget_used{kind,lane}`, `igs_budget_projected{kind}`, `igs_budget_limit{kind}`, `igs_budget_backfill_paused` and `igs_budget_stretch`.
 - `IgsIgBudgetHoldingBackfill` fires after 2 hours of held backfill.
+
+## Profile discovery
+
+`ig.discovery` (M11; on in the chart's values) grows the registered set without a cap. It adds profiles that are Iraqi, or that address an Iraqi audience, found from the profiles already registered.
+
+1. **Sightings.** Crawlers count the accounts they meet in the posts they read: tagged accounts, co-authors, mentions, and commenters (commenters only with `pii_mode: full`). Erased people are never counted. Each sighting adds to the account's priority:
+   - a co-author 3;
+   - a tag or a mention 2;
+   - a comment 1;
+   - a sighting on a post located in Iraq 2 more.
+2. **Vetting.** Every `interval`, the leader scheduler vets the highest-priority accounts at `min_priority` (2) or above, up to `vet_in_flight` (50) at once. A vet is a backfill-lane (p2) job of kind `discovery`:
+   - it reads the profile and its newest 12 posts' captions, 2 or 3 requests;
+   - it writes them to `ig.discovery_candidates`;
+   - it publishes nothing, so accounts that are not registered never reach the analysis.
+3. **Score.** The vetter scores what the vet read ([`internal/ig/discovery/score.go`](../../internal/ig/discovery/score.go)). The account's own words count most:
+
+   | Signal | Points |
+   |---|---|
+   | Iraq named, in any script, or 🇮🇶 | 3 |
+   | An Iraqi phone number (+964, 07xx) | 3 |
+   | An `.iq` link | 2 |
+   | An Iraqi city or province in the name or bio | 2; 3 for two or more; 1 if only in captions |
+   | Kurdistan named | 1.5 |
+   | Sorani Kurdish letters | 1.5 |
+   | Iraqi dialect | 1; 2 for three or more markers |
+   | Mostly Arabic script | 1 |
+   | Another country named without any of the above | −2 |
+   | How the account was met | up to 3 |
+
+   With the default `threshold` (4), how the account was met is never enough on its own.
+4. **Decision.**
+   - Public and at the threshold or above: registered for the 3-hourly schedule under the API client `discovery`, and backfilled.
+   - Otherwise: `below`, `private` or `gone` (no such account). These are vetted again if seen again after `revet_after` (30 days).
+   - What the vet read is deleted once decided; the score and its parts stay.
+
+Operations:
+- `GET /v1/discovery/candidates?status=registered` (admin) lists candidates with their scores and parts.
+- `POST /v1/discovery/candidates/{username}/reject` takes a discovered profile off the schedule and keeps it from being discovered again. An admin's `DELETE /v1/profiles/u:{username}` does the same.
+- `POST .../accept` registers a candidate whatever its score.
+- **Metrics:**
+  - `igs_discovery_sightings_total{source}`;
+  - `igs_discovery_vets_total{outcome}`;
+  - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet.
+- **Tuning:**
+  - Raise `threshold` if registered profiles turn out not to be Iraqi; lower it, or `min_priority`, to find more.
+  - Vets share the exits with crawling (about 10 s of one exit's time each) and wait behind scheduled runs (lane p2). The daily budget holds them with backfill.
+  - To slow discovery, lower `vet_in_flight`.
 
 ## Block storm (block rate > 10%)
 

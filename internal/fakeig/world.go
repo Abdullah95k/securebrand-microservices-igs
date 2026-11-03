@@ -9,6 +9,7 @@ package fakeig
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math/rand/v2"
 	"slices"
 	"sync"
@@ -56,6 +57,9 @@ type Profile struct {
 	Verified   bool
 	Posts      []*Post // newest first
 	Highlights []Highlight
+	// Private accounts show their profile but no posts, logged out.
+	Private bool
+	world   *World
 	// Pinned posts come first in the grid, before the rest newest first.
 	Pinned []*Post
 }
@@ -177,6 +181,7 @@ func NewWorld(s Spec) *World {
 			FullName: fmt.Sprintf("Profile %02d", i+1), Bio: "synthetic biography",
 			Followers: 1000 + r.Int64N(100000), Following: r.Int64N(500), Verified: i%2 == 0}
 		p.ID = fmt.Sprintf("178414%011d", p.PK%100_000_000_000)
+		p.world = w
 		for j := range s.PostsPerProfile {
 			post := w.makePost(p, i, j, Epoch.Add(-time.Duration(j)*s.PostSpacing))
 			p.Posts = append(p.Posts, post)
@@ -250,8 +255,51 @@ func (w *World) makeComment(at time.Time, nth, k int) Comment {
 	return cm
 }
 
-// Profiles returns every profile.
+// Profiles returns every profile (not those added with AddProfile).
 func (w *World) Profiles() []*Profile { return w.profiles }
+
+// ProfileSpec is an account added with AddProfile.
+type ProfileSpec struct {
+	Username, FullName, Bio string
+	Private                 bool
+	Followers               int64
+	// Captions of its posts, newest first (none for a private account).
+	Captions []string
+}
+
+// AddProfile adds an account outside Profiles(): one the profiles tag,
+// co-author or mention (their usernames: tagged_<profile>_<post>,
+// collab_<profile>), for profile discovery to find.
+func (w *World) AddProfile(ps ProfileSpec) *Profile {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	p := &Profile{PK: w.userPK(ps.Username), Username: ps.Username, FullName: ps.FullName, Bio: ps.Bio, Followers: ps.Followers,
+		Private: ps.Private, world: w}
+	p.ID = fmt.Sprintf("178414%011d", p.PK%100_000_000_000)
+	if !ps.Private {
+		for j, c := range ps.Captions {
+			taken := Epoch.Add(-time.Duration(j) * 24 * time.Hour)
+			post := &Post{PK: MediaPK(taken, w.r.Int64N(1<<23)), MediaType: 1, ProductType: "feed", Caption: c, TakenAt: taken, Owner: p}
+			post.Code = shortcode(post.PK)
+			p.Posts = append(p.Posts, post)
+			w.posts[post.PK] = post
+		}
+	}
+	w.byName[p.Username] = p
+	w.byPK[p.PK] = p
+	w.byID[p.ID] = p
+	return p
+}
+
+// userPK is username's pk: its profile's, or one derived from the name.
+func (w *World) userPK(username string) int64 {
+	if p := w.byName[username]; p != nil {
+		return p.PK
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(username))
+	return 70_000_000_000 + int64(h.Sum64()%1_000_000_000)
+}
 
 // Profile returns the profile with username, or nil.
 func (w *World) Profile(username string) *Profile { return w.byName[username] }

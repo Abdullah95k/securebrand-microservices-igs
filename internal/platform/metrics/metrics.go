@@ -101,6 +101,11 @@ var (
 	KafkaCommitted       = counterVec("kafka_commits_total", "Offset commits.", "group", "outcome")
 	ConsumerLag          = gaugeVec("kafka_consumer_lag", "Records behind the end of each topic, per consumer group (leader scheduler).", "group", "topic")
 
+	// Profile discovery (M11).
+	DiscoverySightings = counterVec("discovery_sightings_total", "Accounts met in the posts read, by source (tags, coauthors, mentions, commenters).", "source")
+	DiscoveryVets      = counterVec("discovery_vets_total", "Discovery candidates vetted, by outcome (registered, below, private, gone, failed, already_registered).", "outcome")
+	DiscoveryQueue     = gaugeVec("discovery_candidates", "Discovery candidates by status (new counts those at ig.discovery.min_priority or above).", "status")
+
 	// Registry sync (igs-registry-sync).
 	RegistrySyncRuns        = counterVec("registry_sync_runs_total", "Registry sync runs by status (ok, degraded, error).", "status")
 	RegistrySyncLastSuccess = gauge("registry_sync_last_success_timestamp_seconds", "When the last registry sync run that gave every query a verdict completed.")

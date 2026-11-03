@@ -18,7 +18,10 @@ For each registered profile, igs collects:
 - highlights, and media files once the analysis service consumes them (D5).
 
 It reads every profile's newest posts every 3 hours (D2), the profile itself daily, and re-reads the
-comments and counts of the last 7 days' posts.
+comments and counts of the last 7 days' posts. Profile discovery finds more profiles to register, with no
+cap: Iraqi accounts, or accounts addressing an Iraqi audience, among those the registered profiles tag,
+co-author with, mention, or hear from in comments
+([how](docs/runbooks/igs-operations.md#profile-discovery)).
 
 ## Status
 

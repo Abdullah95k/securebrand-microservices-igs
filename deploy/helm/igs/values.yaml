@@ -56,6 +56,12 @@ config:
     browser:
       enabled: false
       no_sandbox: true
+    # Profile discovery (M11, the owner's choice): accounts met in the
+    # registered profiles' posts are vetted and, when Iraqi and public,
+    # registered. See docs/runbooks/igs-operations.md#profile-discovery.
+    discovery:
+      enabled: true
+      threshold: 4
     # igs-registry-sync follows doc_id rotations on these profiles. Pick at
     # least three public profiles that post often and get comments.
     registry_sync:

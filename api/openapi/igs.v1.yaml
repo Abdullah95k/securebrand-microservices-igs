@@ -234,6 +234,42 @@ paths:
       summary: An erasure request's state
       responses:
         "200": {description: The request, content: {application/json: {schema: {$ref: '#/components/schemas/Erasure'}}}}
+  /discovery/candidates:
+    get:
+      summary: Profile discovery's candidates (admin), highest score first, then the most seen
+      description: >-
+        Accounts met in the profiles igs reads (tagged, co-authors, mentioned, commenters). The most seen are vetted
+        with one profile read and scored for Iraqi signals; public ones at ig.discovery.threshold or above are
+        registered for the schedule (status registered). signals holds the score's parts.
+      parameters:
+        - {in: query, name: status, schema: {type: string}, description: 'comma separated: new, vetting, registered, below, private, gone, failed, rejected'}
+        - {in: query, name: min_score, schema: {type: number}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates: {type: array, items: {$ref: '#/components/schemas/Candidate'}}
+        "400": {$ref: '#/components/responses/Problem'}
+  /discovery/candidates/{username}/reject:
+    parameters:
+      - {in: path, name: username, required: true, schema: {type: string}}
+    post:
+      summary: Remove a discovered profile from the schedule and never discover it again (admin)
+      description: The schedule stays when an API client registered the profile too.
+      responses:
+        "204": {description: Rejected}
+  /discovery/candidates/{username}/accept:
+    parameters:
+      - {in: path, name: username, required: true, schema: {type: string}}
+    post:
+      summary: Register a candidate now, whatever its score (admin)
+      responses:
+        "200": {description: Registered; its backfill started}
   /admin/queries:
     get:
       summary: The query registry (doc_ids)
@@ -343,6 +379,23 @@ components:
         pending_tasks: {type: integer}
         created_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time}
+    Candidate:
+      type: object
+      properties:
+        username: {type: string}
+        user_pk: {type: integer, format: int64}
+        status: {type: string, enum: [new, vetting, registered, below, private, gone, failed, rejected]}
+        score: {type: number}
+        signals: {type: object, additionalProperties: {type: number}, description: 'the score''s parts, e.g. iraq_city: 2'}
+        tags: {type: integer}
+        coauthors: {type: integer}
+        mentions: {type: integer}
+        comments: {type: integer}
+        iraq_context: {type: integer, description: sightings on posts located in Iraq}
+        priority: {type: number}
+        first_seen_at: {type: string, format: date-time}
+        last_seen_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
     Schedule:
       type: object
       properties:

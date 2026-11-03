@@ -22,6 +22,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/checkpoint"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
@@ -47,7 +48,9 @@ type Deps struct {
 	Ckpt        *checkpoint.Store
 	DB          *pgxpool.Pool // schema ig: crawl_cursors; nil disables watermarks
 	Suppression *suppress.Suppression
-	Now         func() time.Time
+	// Discovery counts the accounts met in posts (M11); nil when off.
+	Discovery *discovery.Collector
+	Now       func() time.Time
 }
 
 func (d *Deps) now() time.Time {

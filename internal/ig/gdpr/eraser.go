@@ -134,6 +134,11 @@ func (e *Eraser) eraseAuthor(ctx context.Context, key []byte, stats map[string]i
 		if comments, err = pgx.CollectRows(rows, pgx.RowTo[int64]); err != nil {
 			return err
 		}
+		// Profile discovery forgets the person too.
+		if _, err := tx.Exec(ctx, `DELETE FROM discovery_candidates WHERE user_pk IN
+			(SELECT author_pk FROM comment_authors WHERE author_key = $1 AND author_pk IS NOT NULL)`, key); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `DELETE FROM comment_authors WHERE author_key = $1`, key)
 		stats["authors_deleted"] += tag.RowsAffected()
 		return err
@@ -172,6 +177,7 @@ func (e *Eraser) eraseProfile(ctx context.Context, pk int64, stats map[string]in
 			{"profile_snapshots", `DELETE FROM profile_snapshots WHERE user_pk = $1`},
 			{"crawl_cursors", `DELETE FROM crawl_cursors WHERE scope_id = $1 AND scope_type IN ('profile_grid','profile_reels')`},
 			{"schedule", `UPDATE profile_schedule SET enabled = false WHERE user_pk = $1`},
+			{"discovery_candidates", `DELETE FROM discovery_candidates WHERE user_pk = $1`},
 			{"profiles", `UPDATE profiles SET status = 'suppressed', username = NULL, full_name = NULL, biography = NULL,
 				bio_links = NULL, follower_count = NULL, following_count = NULL, media_count = NULL, profile_pic_url = NULL,
 				linked_facebook_page = NULL, category = NULL, highlights_hash = NULL, extra = NULL WHERE user_pk = $1`},

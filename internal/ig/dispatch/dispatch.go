@@ -33,6 +33,9 @@ const (
 	KindOnDemand  = "on_demand"
 	KindScheduled = "scheduled"
 	KindBackfill  = "backfill"
+	// KindDiscovery vets a discovery candidate (M11): a profile read that
+	// publishes nothing.
+	KindDiscovery = "discovery"
 )
 
 var (
@@ -66,6 +69,8 @@ type Request struct {
 	// MaxRunningPerClient caps the client's (0: none).
 	MaxRunningInLane    int
 	MaxRunningPerClient int
+	// Vet makes the profile task a discovery vet (KindDiscovery).
+	Vet bool
 }
 
 // PostRoot is a post task started with a job.
@@ -233,7 +238,7 @@ func (d *Dispatcher) Create(ctx context.Context, r Request) (*Job, bool, error) 
 		}
 		return nil, false, fmt.Errorf("dispatch: insert job: %w", err)
 	}
-	sc := &igstaskv1.ProfileScope{Username: k.username, HighlightsHash: k.highlightsHash, RefreshProfile: r.RefreshProfile}
+	sc := &igstaskv1.ProfileScope{Username: k.username, HighlightsHash: k.highlightsHash, RefreshProfile: r.RefreshProfile, Vet: r.Vet}
 	if cm == commonv1.CrawlMode_CRAWL_MODE_INCREMENTAL && k.watermark != nil {
 		sc.Watermark = timestamppb.New(*k.watermark)
 	}

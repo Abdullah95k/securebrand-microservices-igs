@@ -349,6 +349,7 @@ func (s *PostStage) publish(ctx context.Context, t *igstaskv1.Task, sc *igstaskv
 	if err := b.Wait(ctx); err != nil {
 		return retry(t, "", "30s", "produce: "+err.Error(), c), true
 	}
+	d.Discovery.Post(p)
 	c["posts_detailed"]++
 	c["media"] += int64(len(res.Media))
 	c["media_queued"] += n
@@ -381,6 +382,10 @@ func (s *PostStage) unavailable(ctx context.Context, t *igstaskv1.Task, sc *igst
 func (s *PostStage) emitComments(ctx context.Context, b *kafka.Batch, t *igstaskv1.Task, src emit.Source, res parse.CommentsResult,
 	watermark time.Time, maxC int64, st *checkpoint.State, c map[string]int64) (int, int, error) {
 	older := 0
+	var emitted []*igv1.Comment
+	// Discovery counts the commenters once emitted: an erased or
+	// pseudonymized author has no username left by then.
+	defer func() { s.D.Discovery.Comments(t.GetPost().GetOwnerPk(), emitted) }()
 	for _, cm := range res.Comments {
 		if maxC > 0 && t.ItemsSeen+st.ItemsSeen >= maxC {
 			break
@@ -397,6 +402,7 @@ func (s *PostStage) emitComments(ctx context.Context, b *kafka.Batch, t *igstask
 		if err != nil {
 			return 0, 0, err
 		}
+		emitted = append(emitted, cm)
 		st.ItemsSeen++
 		c["comments"]++
 		if !keep {

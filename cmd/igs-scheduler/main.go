@@ -17,6 +17,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/clients"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
@@ -94,6 +95,12 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	if cfg.IG.AIMD.Enabled {
 		aimd := ratelimit.NewController(rdb, cfg.Kafka.TopicPrefix, cfg.IG.AIMD, cfg.IG.GlobalRPS)
 		loops = append(loops, func(ctx context.Context) error { return scheduler.Every(ctx, "aimd", cfg.IG.AIMD.Interval, aimd.Tick) })
+	}
+	if cfg.IG.Discovery.Enabled {
+		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg}
+		loops = append(loops, func(ctx context.Context) error {
+			return scheduler.Every(ctx, "discovery", cfg.IG.Discovery.Interval, vetter.Tick)
+		})
 	}
 	if cfg.IG.BudgetOn() {
 		budget := ratelimit.NewBudgetController(rdb, cfg.Kafka.TopicPrefix, cfg.IG.Budget)
