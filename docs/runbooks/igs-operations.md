@@ -127,11 +127,9 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
 
 `ig.discovery` (M11; on in the chart's values) grows the registered set without a cap. It adds profiles that are Iraqi, or that address an Iraqi audience, found from the profiles already registered.
 
-1. **Sightings.** Crawlers count the accounts they meet in the posts they read: tagged accounts, co-authors, mentions, and commenters (commenters only with `pii_mode: full`). Erased people are never counted. Each sighting adds to the account's priority:
-   - a co-author 3;
-   - a tag or a mention 2;
-   - a comment 1;
-   - a sighting on a post located in Iraq 2 more.
+1. **Sightings.** Crawlers count the accounts they meet in the posts they read: tagged accounts, co-authors, mentions, and commenters (commenters only with `pii_mode: full`). Erased people are never counted.
+   - They also record which registered accounts each one was met in (`ig.discovery_sources`). How many different registered accounts link to an account is its Iraqi audience (`sources`).
+   - Each sighting adds to the account's priority: a co-author 3, a tag or a mention 2, a comment 1, a sighting on a post located in Iraq 2 more, and each new registered account it is met in 3.
 2. **Vetting.** Every `interval`, the leader scheduler vets the highest-priority accounts at `min_priority` (2) or above, up to `vet_in_flight` (50) at once. A vet is a backfill-lane (p2) job of kind `discovery`:
    - it reads the profile and its newest 12 posts' captions, 2 or 3 requests;
    - it writes them to `ig.discovery_candidates`;
@@ -149,13 +147,22 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
    | Iraqi dialect | 1; 2 for three or more markers |
    | Mostly Arabic script | 1 |
    | Another country named without any of the above | −2 |
-   | How the account was met | up to 3 |
+   | **Iraqi audience:** different registered accounts linking to it | 1 for one; 1.5 for two; 2 for three; 2.5 for five; 3 for ten or more |
+   | Seen on posts located in Iraq | 1.5 |
+   | A co-author of a registered account | 0.5 |
 
-   With the default `threshold` (4), how the account was met is never enough on its own.
+   - **Network cap:** the last three rows (network evidence) add up to at most 4. That is enough alone only with ten or more registered accounts linking to the account from posts located in Iraq. So an Iraqi influencer whose profile says nothing of Iraq is added once a real Iraqi audience surrounds them. The same goes for a foreign account that targets Iraqis.
+   - **World stars:** an account with a million followers or more and nothing of Iraq of its own gets at most 2 from the network. A world star Iraqi fans tag is not added.
+   - **Examples** (`TestInfluencers`):
+     - an Iraqi influencer with Baghdad, 🇮🇶 or an 07xx number in the bio is added at the first link;
+     - one writing Iraqi dialect is added at the first link too;
+     - a Kurdish one writing Sorani, one with an Arabic bio and no place, one writing only in English, and an Arabic-language foreigner are added once ten Iraqi accounts link to them from Iraq;
+     - a Gulf account naming Dubai and a global English star are not added.
 4. **Decision.**
    - Public and at the threshold or above: registered for the 3-hourly schedule under the API client `discovery`, and backfilled.
    - Otherwise: `below`, `private` or `gone` (no such account). These are vetted again if seen again after `revet_after` (30 days).
    - Every vet is kept: the latest read on the candidate (shown as `read` in the API), and each one with its score, signals and decision in `ig.discovery_vets`. Erasure requests delete a person's rows.
+   - A `below` candidate whose audience grows is scored again from its stored read, with no new read of Instagram (`igs_discovery_vets_total{outcome="rescored_registered"}`).
 
 Operations:
 - `GET /v1/discovery/candidates?status=registered` (admin) lists candidates with their scores and parts.

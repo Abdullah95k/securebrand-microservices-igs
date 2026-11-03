@@ -39,8 +39,16 @@ func TestScoreSignals(t *testing.T) {
 		{"nothing", Vet{Biography: "Coffee lover in London"}, Sightings{}, Signals{}},
 		{"word inside a word is not a city", Vet{Biography: "رحلة جميلة الى البحر مع الاصدقاء دائما"}, Sightings{},
 			Signals{"arabic_script": 1}},
-		{"how it was met", Vet{}, Sightings{Coauthors: 1, Tags: 2, Mentions: 1, Comments: 5, IraqContext: 1}, Signals{"met_in_registered": 3}},
-		{"a tag", Vet{}, Sightings{Tags: 1}, Signals{"met_in_registered": 1}},
+		{"one registered account, many kinds of link", Vet{}, Sightings{Coauthors: 1, Tags: 2, Mentions: 1, Comments: 5, Sources: 1},
+			Signals{"iraqi_audience": 1, "coauthor": 0.5}},
+		{"a tag, before sources were counted", Vet{}, Sightings{Tags: 1}, Signals{"iraqi_audience": 1}},
+		{"three registered accounts", Vet{}, Sightings{Comments: 3, Sources: 3}, Signals{"iraqi_audience": 2}},
+		{"ten registered accounts, posts located in Iraq", Vet{}, Sightings{Tags: 10, IraqContext: 2, Sources: 10},
+			Signals{"iraqi_audience": 3, "seen_in_iraq": 1.5, "network_capped": -0.5}},
+		{"network evidence is capped at 4", Vet{}, Sightings{Coauthors: 3, Tags: 10, IraqContext: 2, Sources: 12},
+			Signals{"iraqi_audience": 3, "seen_in_iraq": 1.5, "coauthor": 0.5, "network_capped": -1}},
+		{"a world star Iraqi fans tag", Vet{Biography: "Athlete", Followers: 50_000_000}, Sightings{Tags: 40, IraqContext: 5, Sources: 30},
+			Signals{"iraqi_audience": 3, "seen_in_iraq": 1.5, "network_capped": -2.5}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Score(tc.vet, tc.s)
@@ -66,9 +74,9 @@ func TestScoreSignals(t *testing.T) {
 
 // At the default threshold (4): an Iraqi photographer, shop and Kurdish
 // account pass; an Arabic account elsewhere, an English one, and an account
-// known only by how it was met do not.
+// known only by one tag do not.
 func TestScoreAtTheDefaultThreshold(t *testing.T) {
-	met := Sightings{Tags: 1}
+	met := Sightings{Tags: 1, Sources: 1}
 	for _, tc := range []struct {
 		name string
 		vet  Vet
@@ -77,7 +85,7 @@ func TestScoreAtTheDefaultThreshold(t *testing.T) {
 		{"photographer in Baghdad", Vet{FullName: "علي", Biography: "مصور فوتوغرافي | بغداد"}, true},
 		{"shop with a phone", Vet{Biography: "ملابس اطفال توصيل لكل المحافظات 07701234567"}, true},
 		{"Kurdish in Sulaymaniyah", Vet{Biography: "خۆشەویستی و ژیان لە سلێمانی"}, true},
-		{"dialect in captions", Vet{Captions: []string{"شلونكم حبايب", "هسه نزلت الفيديو", "ماكو مثلكم"}}, true},
+		{"dialect in captions", Vet{Captions: []string{"شلونكم حبايب", "هسه نزلت الفيديو", "ماكو مثلكم", "كلش حلو"}}, true},
 		{"Arabic in Riyadh", Vet{Biography: "مصورة في الرياض السعودية"}, false},
 		{"English", Vet{Biography: "Travel | Food | London"}, false},
 		{"nothing but how it was met", Vet{}, false},
@@ -90,8 +98,38 @@ func TestScoreAtTheDefaultThreshold(t *testing.T) {
 }
 
 func TestPriority(t *testing.T) {
-	if p := (Sightings{Coauthors: 1, Tags: 1, Mentions: 1, Comments: 2, IraqContext: 1}).Priority(); p != 3+2+2+2+2 {
+	if p := (Sightings{Coauthors: 1, Tags: 1, Mentions: 1, Comments: 2, IraqContext: 1, Sources: 2}).Priority(); p != 3+2+2+2+2+6 {
 		t.Fatalf("priority %v", p)
+	}
+}
+
+// Influencers, as the owner asked (2026-11-03), at the default threshold
+// (4). Linked once: one registered account tags them. Wide audience: ten
+// registered accounts link to them, from posts located in Iraq.
+func TestInfluencers(t *testing.T) {
+	once := Sightings{Tags: 1, Sources: 1}
+	wide := Sightings{Tags: 8, Mentions: 3, Comments: 6, IraqContext: 2, Sources: 10}
+	for _, tc := range []struct {
+		name       string
+		vet        Vet
+		once, wide bool
+	}{
+		{"Iraqi, Iraq in the bio", Vet{Biography: "Lifestyle | Baghdad 🇮🇶 | business 0770 123 4567"}, true, true},
+		{"Iraqi, English bio, Iraqi dialect in captions", Vet{Biography: "content creator ✨",
+			Captions: []string{"شلونكم حبايب", "هسه نزلت الفيديو", "كلش حلو اليوم"}}, true, true},
+		{"Kurdish, Sorani", Vet{Biography: "دروستکەری ناوەڕۆک", Captions: []string{"ئێوارەیەکی جوان"}}, false, true},
+		{"Iraqi, Arabic bio, no place", Vet{Biography: "صانعة محتوى ✨ للتعاون راسلوني"}, false, true},
+		{"Iraqi, English only", Vet{Biography: "content creator ✨ fashion", Captions: []string{"new look", "coffee time"}}, false, true},
+		{"Arab, no country named", Vet{Biography: "مدونة موضة وجمال", Captions: []string{"اطلالة اليوم"}}, false, true},
+		{"Gulf, Dubai in the bio", Vet{Biography: "مدونة موضة | دبي 🇦🇪"}, false, false},
+		{"global English star", Vet{Biography: "Athlete. Entrepreneur.", Followers: 40_000_000}, false, false},
+	} {
+		if got := Score(tc.vet, once).Sum() >= 4; got != tc.once {
+			t.Errorf("%s, linked once: %v (%v)", tc.name, got, Score(tc.vet, once))
+		}
+		if got := Score(tc.vet, wide).Sum() >= 4; got != tc.wide {
+			t.Errorf("%s, wide audience: %v (%v)", tc.name, got, Score(tc.vet, wide))
+		}
 	}
 }
 

@@ -135,6 +135,10 @@ func (e *Eraser) eraseAuthor(ctx context.Context, key []byte, stats map[string]i
 			return err
 		}
 		// Profile discovery forgets the person too.
+		if _, err := tx.Exec(ctx, `DELETE FROM discovery_sources WHERE username IN (SELECT username FROM discovery_candidates WHERE user_pk IN
+			(SELECT author_pk FROM comment_authors WHERE author_key = $1 AND author_pk IS NOT NULL))`, key); err != nil {
+			return err
+		}
 		for _, table := range []string{"discovery_vets", "discovery_candidates"} {
 			if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE user_pk IN
 				(SELECT author_pk FROM comment_authors WHERE author_key = $1 AND author_pk IS NOT NULL)`, key); err != nil {
@@ -179,6 +183,11 @@ func (e *Eraser) eraseProfile(ctx context.Context, pk int64, stats map[string]in
 			{"profile_snapshots", `DELETE FROM profile_snapshots WHERE user_pk = $1`},
 			{"crawl_cursors", `DELETE FROM crawl_cursors WHERE scope_id = $1 AND scope_type IN ('profile_grid','profile_reels')`},
 			{"schedule", `UPDATE profile_schedule SET enabled = false WHERE user_pk = $1`},
+			// As a source, the erased profile no longer counts toward any
+			// candidate's audience; as a candidate, it goes.
+			{"discovery_sources", `WITH d AS (DELETE FROM discovery_sources WHERE source_pk = $1 RETURNING username)
+				UPDATE discovery_candidates c SET sources = greatest(c.sources - 1, 0) FROM d WHERE c.username = d.username`},
+			{"discovery_own_sources", `DELETE FROM discovery_sources WHERE username IN (SELECT username FROM discovery_candidates WHERE user_pk = $1)`},
 			{"discovery_vets", `DELETE FROM discovery_vets WHERE user_pk = $1`},
 			{"discovery_candidates", `DELETE FROM discovery_candidates WHERE user_pk = $1`},
 			{"profiles", `UPDATE profiles SET status = 'suppressed', username = NULL, full_name = NULL, biography = NULL,

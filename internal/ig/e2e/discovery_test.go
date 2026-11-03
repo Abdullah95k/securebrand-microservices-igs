@@ -36,6 +36,10 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 	s.World.AddProfile(fakeig.ProfileSpec{Username: "tagged_01_0", FullName: "Coffee Lab", Bio: "Specialty coffee in London",
 		Followers: 800, Captions: []string{"new beans", "latte art"}})
 	s.World.AddProfile(fakeig.ProfileSpec{Username: "tagged_01_3", FullName: "سارة", Bio: "من البصرة", Private: true})
+	// An Iraqi creator whose profile says nothing of Iraq: below the
+	// threshold until more registered accounts link to it.
+	s.World.AddProfile(fakeig.ProfileSpec{Username: "tagged_02_0", FullName: "نور", Bio: "صانعة محتوى للتعاون راسلوني", Followers: 90000,
+		Captions: []string{"اطلالة اليوم", "يوم جميل"}})
 	s.StartScheduler()
 	ctx := context.Background()
 
@@ -46,7 +50,7 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 		}
 	}
 	want := map[string]string{"collab_01": "registered", "collab_02": "registered", "tagged_01_0": "below",
-		"tagged_01_3": "private", "tagged_01_6": "gone"}
+		"tagged_01_3": "private", "tagged_01_6": "gone", "tagged_02_0": "below"}
 	status := func(u string) string {
 		var st string
 		_ = s.DB.QueryRow(ctx, `SELECT status FROM discovery_candidates WHERE username = $1`, u).Scan(&st)
@@ -75,6 +79,16 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE comments > 0`); n == 0 {
 		t.Error("no commenter was counted")
 	}
+	// Each candidate's audience is the registered accounts it was met in:
+	// collab_01 co-authors with profile_01 alone; commenters seen on both
+	// profiles count two.
+	if n := count(t, s, `SELECT sources FROM discovery_candidates WHERE username = 'collab_01'`); n != 1 {
+		t.Errorf("collab_01 met in %d registered accounts, want 1", n)
+	}
+	if n := count(t, s, `SELECT count(*) FROM discovery_candidates c WHERE sources >= 2
+		AND sources = (SELECT count(*) FROM discovery_sources d WHERE d.username = c.username)`); n == 0 {
+		t.Error("no candidate counted two registered accounts")
+	}
 	if n := count(t, s, `SELECT count(*) FROM discovery_candidates c JOIN profile_schedule p ON p.user_pk = c.user_pk
 		WHERE p.profile_ref IN ('u:profile_01', 'u:profile_02')`); n != 0 {
 		t.Errorf("%d registered profiles counted as candidates of their own posts", n)
@@ -92,6 +106,25 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 	}
 	if n := count(t, s, `SELECT count(*) FROM profiles WHERE username IN ('tagged_01_0', 'tagged_01_3', 'tagged_01_6')`); n != 0 {
 		t.Errorf("a vet published %d profiles of accounts not registered", n)
+	}
+
+	// tagged_02_0's audience grows (twelve registered accounts, posts
+	// located in Iraq): scored again from its stored read, with no new read
+	// of Instagram, it is registered.
+	vets := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'discovery' AND profile_ref = 'u:tagged_02_0'`)
+	if _, err := s.DB.Exec(ctx, `UPDATE discovery_candidates SET sources = 12, iraq_context = 2 WHERE username = 'tagged_02_0'`); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(time.Minute); status("tagged_02_0") != "registered"; time.Sleep(200 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("tagged_02_0 not registered on a grown audience: %s", status("tagged_02_0"))
+		}
+	}
+	if n := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'discovery' AND profile_ref = 'u:tagged_02_0'`); n != vets {
+		t.Errorf("the rescore read Instagram again: %d vet jobs, was %d", n, vets)
+	}
+	if n := count(t, s, `SELECT count(*) FROM discovery_vets WHERE username = 'tagged_02_0'`); n != 2 {
+		t.Errorf("tagged_02_0 has %d kept decisions, want 2 (below, then registered)", n)
 	}
 
 	// The discovered profiles are on the schedule and backfilled.
@@ -116,7 +149,7 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 	if code := s.Do(t, admin, "GET", "/v1/discovery/candidates?status=registered", nil, &list); code != http.StatusOK {
 		t.Fatalf("list: %d", code)
 	}
-	if len(list.Candidates) != 2 || list.Candidates[0].Score == nil || *list.Candidates[0].Score < 4 || len(list.Candidates[0].Signals) == 0 ||
+	if len(list.Candidates) != 3 || list.Candidates[0].Score == nil || *list.Candidates[0].Score < 4 || len(list.Candidates[0].Signals) == 0 ||
 		len(list.Candidates[0].Read) == 0 {
 		t.Fatalf("registered candidates %+v", list.Candidates)
 	}

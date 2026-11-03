@@ -2,12 +2,14 @@ package store_test
 
 import (
 	"context"
+	"io/fs"
 	"testing"
 	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
+	igmigrations "github.com/abdullah95k/securebrand-microservices-igs/migrations/ig"
 )
 
 // igs's migrations go up, down and up again in schema ig, with goose's
@@ -42,12 +44,14 @@ func TestIGMigrationsAndPartitions(t *testing.T) {
 	}
 	var version int64
 	must(pub.QueryRow(ctx, `SELECT max(version_id) FROM ig.goose_db_version`).Scan(&version))
-	if version != 3 {
-		t.Fatalf("ig version %d", version)
+	files, err := fs.Glob(igmigrations.FS, "*.sql")
+	must(err)
+	if version != int64(len(files)) {
+		t.Fatalf("ig version %d, want %d (one per migration)", version, len(files))
 	}
-	// Each down undoes one migration and its table: 00003 (discovery
-	// history), 00002 (discovery), then 00001.
-	for i := 1; i <= 2; i++ {
+	// Each down undoes one migration; every migration after 00001 adds one
+	// table (discovery, its history, its sources).
+	for i := 1; i < len(files); i++ {
 		must(store.MigrateIGDown(ctx, pub))
 		if n := tables("ig"); n != up-i {
 			t.Fatalf("schema ig has %d tables after %d downs, want %d", n, i, up-i)
