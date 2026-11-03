@@ -67,7 +67,13 @@ type IG struct {
 	// comments, reels and highlights.
 	RegistrySync RegistrySync `koanf:"registry_sync"`
 	Schedule     IGSchedule   `koanf:"schedule"`
-	Privacy      IGPrivacy    `koanf:"privacy"`
+	// Budget is the daily request and byte budget, fleet-wide (D9): when
+	// the day's projected traffic exceeds it, backfill (p2) pauses; when
+	// scheduled and on-demand traffic alone would, every scheduled run's
+	// interval is stretched by Budget.Stretch. On-demand (p0) work is never
+	// held. Both limits 0: no budget. StretchTiers is not used by igs.
+	Budget  Budget    `koanf:"budget"`
+	Privacy IGPrivacy `koanf:"privacy"`
 }
 
 // IGLimits are the defaults applied to jobs that do not override them.
@@ -126,6 +132,9 @@ func (c *Config) validateIG() []error {
 	if g.IdentityRPS <= 0 || g.IdentityBurst <= 0 {
 		errs = append(errs, errors.New("ig.identity_rps and ig.identity_burst must be > 0"))
 	}
+	if g.Budget.RequestsPerDay < 0 || g.Budget.BytesPerDay < 0 || (g.Budget.Enabled && g.Budget.Interval <= 0) {
+		errs = append(errs, errors.New("ig.budget: requests_per_day and bytes_per_day must not be negative, and interval must be > 0"))
+	}
 	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 {
 		errs = append(errs, errors.New("ig.exit_rps, ig.rate_limit_rest, ig.checkpoint_rest, ig.page_wall_rest and ig.block_hops must not be negative"))
 	}
@@ -169,4 +178,9 @@ func (c *Config) validateIG() []error {
 		errs = append(errs, fmt.Errorf("ig.detect: %w", err))
 	}
 	return errs
+}
+
+// BudgetOn reports whether a daily budget is set.
+func (g IG) BudgetOn() bool {
+	return g.Budget.Enabled && (g.Budget.RequestsPerDay > 0 || g.Budget.BytesPerDay > 0)
 }

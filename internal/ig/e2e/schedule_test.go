@@ -7,9 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 )
 
 // A registered profile is backfilled; the finalizer completes the job and
@@ -109,5 +113,103 @@ func TestScheduledRuns(t *testing.T) {
 	var reads int
 	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM profile_schedule WHERE next_profile_read_at > now() + interval '23 hours'`).Scan(&reads); err != nil || reads != 1 {
 		t.Errorf("next profile read not moved a day ahead: %d %v", reads, err)
+	}
+}
+
+// One planner tick starts every due profile's run, however many batches
+// that takes: scheduler.planner_batch is a batch size, not a cap on how
+// many profiles the schedule can hold.
+func TestPlannerTakesEveryDueProfile(t *testing.T) {
+	s := Start(t, Options{Spec: spec(), Config: func(c *config.Config) { c.Scheduler.PlannerBatch = 2 }})
+	s.StartScheduler() // the finalizer completes the backfills
+	ctx := context.Background()
+	key := s.Key(t, api.ScopeProfilesWrite, httpapi.ScopeDataRead)
+	var backfills []string
+	for _, p := range s.World.Profiles() {
+		var reg struct {
+			BackfillJob *dispatch.Job `json:"backfill_job"`
+		}
+		if code := s.Do(t, key, "POST", "/v1/profiles", map[string]any{"profile": p.Username}, &reg); code != http.StatusCreated {
+			t.Fatalf("register %s: %d", p.Username, code)
+		}
+		backfills = append(backfills, reg.BackfillJob.ID.String())
+	}
+	for _, j := range backfills {
+		if st := s.WaitStatus(t, j, 3*time.Minute); st != "completed" {
+			t.Fatalf("backfill %s", st)
+		}
+	}
+	s.stop("scheduler") // one tick, by hand
+	if _, err := s.DB.Exec(ctx, `UPDATE profile_schedule SET next_run_at = now() - interval '1 minute'`); err != nil {
+		t.Fatal(err)
+	}
+	planner := &scheduler.Planner{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg, Redis: s.Redis}
+	if err := planner.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	n := len(s.World.Profiles())
+	if got := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'scheduled'`); got != n || n <= 2 {
+		t.Fatalf("one tick with batches of 2 started %d scheduled runs, want %d", got, n)
+	}
+	if due := count(t, s, `SELECT count(*) FROM profile_schedule WHERE next_run_at <= now()`); due != 0 {
+		t.Fatalf("%d profiles still due", due)
+	}
+}
+
+// While the daily budget holds backfill (p2), a new profile's backfill
+// waits and an on-demand read (p0) still runs; when the budget lets go,
+// the backfill completes. With a stretch, the planner spaces the next
+// scheduled run that much further.
+func TestBudgetHoldsBackfill(t *testing.T) {
+	s := Start(t, Options{Spec: spec(), Config: func(c *config.Config) {
+		c.IG.Budget = config.Budget{Enabled: true, RequestsPerDay: 1_000_000, Interval: 200 * time.Millisecond, Stretch: 2, ProjectionSpan: time.Hour}
+	}})
+	ctx := context.Background()
+	stateKey := redisx.KeyPrefix + s.Cfg.Kafka.TopicPrefix + "budget:state"
+	hold := func(st ratelimit.BudgetState) {
+		b, _ := json.Marshal(st)
+		if err := s.Redis.Set(ctx, stateKey, b, time.Minute).Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hold(ratelimit.BudgetState{PauseP2: true, Stretch: 1, Explanation: "test"})
+	time.Sleep(time.Second) // the crawler's gate reads it (every 200ms here)
+	s.StartScheduler()      // the finalizer completes jobs
+
+	key := s.Key(t, api.ScopeProfilesWrite, httpapi.ScopeDataRead, httpapi.ScopeJobsWrite)
+	profiles := s.World.Profiles()
+	var reg struct {
+		BackfillJob *dispatch.Job `json:"backfill_job"`
+	}
+	if code := s.Do(t, key, "POST", "/v1/profiles", map[string]any{"profile": profiles[0].Username}, &reg); code != http.StatusCreated {
+		t.Fatalf("register: %d", code)
+	}
+	onDemand := s.Crawl(t, profiles[1].Username, full, s.Limits(), nil)
+	s.Wait(t, 2*time.Minute, onDemand)
+	if posts := count(t, s, `SELECT count(*) FROM posts WHERE owner_pk = $1`, profiles[0].PK); posts != 0 {
+		t.Fatalf("the held backfill stored %d posts", posts)
+	}
+	if st, _ := s.Jobs.Status(ctx, reg.BackfillJob.ID.String()); st.Pending == 0 {
+		t.Fatalf("the held backfill has no pending task: %+v", st)
+	}
+
+	hold(ratelimit.BudgetState{Stretch: 2})
+	if st := s.WaitStatus(t, reg.BackfillJob.ID.String(), 2*time.Minute); st != "completed" {
+		t.Fatalf("backfill after the budget let go: %s", st)
+	}
+	s.stop("scheduler") // one tick, by hand
+	if _, err := s.DB.Exec(ctx, `UPDATE profile_schedule SET next_run_at = now() - interval '1 minute'`); err != nil {
+		t.Fatal(err)
+	}
+	planner := &scheduler.Planner{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg, Redis: s.Redis}
+	if err := planner.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var gap float64
+	if err := s.DB.QueryRow(ctx, `SELECT extract(epoch FROM next_run_at - now()) / interval_seconds FROM profile_schedule`).Scan(&gap); err != nil {
+		t.Fatal(err)
+	}
+	if j := s.Cfg.IG.Schedule.Jitter; gap < 2*(1-j)-0.01 || gap > 2*(1+j)+0.01 {
+		t.Fatalf("next run in %.2f intervals, want about 2 (the budget's stretch)", gap)
 	}
 }

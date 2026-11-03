@@ -68,7 +68,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	defer producer.Close()
 	tracker := jobs.New(rdb)
 	disp := &dispatch.Dispatcher{DB: db, Jobs: tracker, Producer: producer}
-	planner := &scheduler.Planner{DB: db, Dispatch: disp, Cfg: cfg}
+	planner := &scheduler.Planner{DB: db, Dispatch: disp, Cfg: cfg, Redis: rdb}
 	fin := &scheduler.Finalizer{DB: db, Jobs: tracker, Producer: producer, Cfg: cfg, Timeout: cfg.Scheduler.FinalizeTimeout}
 	reaper := &scheduler.Reaper{DB: db, Jobs: tracker, After: cfg.Scheduler.ReaperAfter}
 	maint := &scheduler.Maintenance{DB: db, Cfg: cfg}
@@ -94,6 +94,12 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	if cfg.IG.AIMD.Enabled {
 		aimd := ratelimit.NewController(rdb, cfg.Kafka.TopicPrefix, cfg.IG.AIMD, cfg.IG.GlobalRPS)
 		loops = append(loops, func(ctx context.Context) error { return scheduler.Every(ctx, "aimd", cfg.IG.AIMD.Interval, aimd.Tick) })
+	}
+	if cfg.IG.BudgetOn() {
+		budget := ratelimit.NewBudgetController(rdb, cfg.Kafka.TopicPrefix, cfg.IG.Budget)
+		loops = append(loops, func(ctx context.Context) error {
+			return scheduler.Every(ctx, "budget", cfg.IG.Budget.Interval, budget.Tick)
+		})
 	}
 	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("postgres", db.Ping)

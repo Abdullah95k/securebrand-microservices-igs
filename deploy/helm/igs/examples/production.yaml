@@ -1,0 +1,97 @@
+# Production values: a starting point for go-live
+# (docs/runbooks/igs-go-live.md). Replace every <...>, and keep secrets out
+# of this file: they go in the Secrets named below.
+#
+#   helm upgrade --install igs oci://ghcr.io/abdullah95k/charts/igs --version <x.y.z> \
+#     -n igs -f production.yaml
+#
+# Expects, in the release namespace:
+#   - Secret igs-env: IGS_POSTGRES__DSN (database igs, schema ig),
+#     IGS_REDIS__PASSWORD, IGS_S3__ACCESS_KEY, IGS_S3__SECRET_KEY,
+#     IGS_IG__PRIVACY__AUTHOR_HMAC_KEY (32+ random bytes; never fbs's key),
+#     and IGS_KAFKA__SCHEMA_REGISTRY__PASSWORD if the registry needs one;
+#   - Secret igs-proxies, key proxies.yaml: the ISP exits, as in
+#     phase0/proxies.example.yaml (ig.proxy.tiers, tier name isp);
+#   - Secret igs-keda-kafka when the brokers need SASL (keda.authSecret).
+config:
+  service: {name: igs, env: prod}
+  log: {level: info, format: json}
+  kafka:
+    brokers: ["<kafka-bootstrap>:9092"]
+    schema_registry:
+      url: "<http://schema-registry:8081>"
+  redis:
+    addr: "<valkey-host>:6379"
+  s3:
+    endpoint: "s3.amazonaws.com"
+    use_ssl: true
+    region: "<region>"
+    media_bucket: "<igs-media-bucket>"
+    raw_bucket: "<igs-raw-bucket>"
+  media:
+    ttl: 72h
+    required_consumers: ["analysis"]
+  ig:
+    # Throughput is exits x exit_rps: 0.25 a second is 900 requests an
+    # hour per exit, 270 to 540 profiles on the 3-hour schedule. Add exits
+    # to the igs-proxies Secret to grow; lower exit_rps if exits keep
+    # resting on rate limits (igs_exit_rests_total{reason="rate_limited"}).
+    exit_rps: 0.25
+    rate_limit_rest: 10m
+    checkpoint_rest: 30m
+    page_wall_rest: 30m
+    block_hops: 2
+    identity_rps: 0.33
+    proxy:
+      routing:
+        default: [isp]
+    privacy:
+      # pseudonymized replaces commenters' identities with keyed hashes;
+      # full keeps them (legal signed off on what the analysis needs).
+      pii_mode: full
+    # A byte budget suits a proxy plan billed per GB (0: none).
+    budget:
+      bytes_per_day: 0
+    # igs-registry-sync follows doc_id rotations on these: three or more
+    # public profiles that post often and get comments.
+    registry_sync:
+      canary_pages: ["<canary-1>", "<canary-2>", "<canary-3>"]
+
+hooks:
+  topicReplicas: 3
+  schemas: true
+
+keda:
+  kafkaBootstrap: "<kafka-bootstrap>:9092"
+  # authSecret: igs-keda-kafka
+
+alerts:
+  enabled: true
+  labels: {release: prometheus}
+dashboards:
+  enabled: true
+serviceMonitor:
+  enabled: true
+
+api:
+  ingress:
+    enabled: true
+    className: nginx
+    host: "<igs.example.com>"
+    tls:
+      - secretName: igs-tls
+        hosts: ["<igs.example.com>"]
+
+networkPolicy:
+  enabled: true
+
+# Exits, not pods, bound the crawl: each crawler pod runs 240 tasks, which
+# keeps up to about 200 exits busy, so more pods than this only wait on
+# exit pacing. Raise the maxima when the exits pass a few hundred.
+components:
+  crawler-profile:
+    replicas: 2
+    autoscale: {min: 2, max: 4}
+  crawler-post:
+    replicas: 2
+    autoscale: {min: 2, max: 6}

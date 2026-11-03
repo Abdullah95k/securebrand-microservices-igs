@@ -15,12 +15,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 )
 
 // Every runs fn every interval until ctx is done, logging errors.
@@ -40,11 +42,13 @@ func Every(ctx context.Context, name string, interval time.Duration, fn func(con
 }
 
 // Planner starts the scheduled runs of registered profiles. DB is a pool on
-// schema ig.
+// schema ig. With Redis set, it reads the daily budget's state and
+// stretches every run's interval as it says.
 type Planner struct {
 	DB       *pgxpool.Pool
 	Dispatch *dispatch.Dispatcher
 	Cfg      *config.Config
+	Redis    *redis.Client
 }
 
 type due struct {
@@ -58,9 +62,39 @@ type due struct {
 	interval int
 }
 
-// Tick takes the due profiles (a failing profile backs off: its interval
-// doubles per consecutive failure, up to 30 days) and starts their runs.
+// Tick takes every due profile, scheduler.planner_batch at a time, and
+// starts its run, until none is due or the tick has run for
+// scheduler.planner_interval: no number of profiles is too many for one
+// tick to keep up with, short of the database. A failing profile backs
+// off: its interval doubles per consecutive failure, up to 30 days.
 func (p *Planner) Tick(ctx context.Context) error {
+	stretch := 1.0
+	if p.Redis != nil && p.Cfg.IG.BudgetOn() {
+		if st, err := ratelimit.LoadBudgetState(ctx, p.Redis, p.Cfg.Kafka.TopicPrefix); err == nil && st.Stretch > 1 {
+			stretch = st.Stretch
+		}
+	}
+	batch := max(p.Cfg.Scheduler.PlannerBatch, 1)
+	start := time.Now()
+	for {
+		n, err := p.batch(ctx, batch, stretch)
+		if err != nil {
+			return err
+		}
+		if n < batch || ctx.Err() != nil || time.Since(start) > p.Cfg.Scheduler.PlannerInterval {
+			break
+		}
+	}
+	var lag float64
+	_ = p.DB.QueryRow(ctx, `SELECT coalesce(extract(epoch FROM now() - min(next_run_at)), 0) FROM profile_schedule
+		WHERE enabled AND next_run_at <= now()`).Scan(&lag)
+	metrics.ScheduleLag.WithLabelValues("ig").Set(math.Max(lag, 0))
+	return nil
+}
+
+// batch starts the runs of up to n due profiles and returns how many were
+// due. stretch multiplies each one's next interval (the budget's).
+func (p *Planner) batch(ctx context.Context, n int, stretch float64) (int, error) {
 	g := p.Cfg.IG.Schedule
 	rows, err := p.DB.Query(ctx, `
 		WITH d AS (
@@ -69,23 +103,23 @@ func (p *Planner) Tick(ctx context.Context) error {
 			ORDER BY next_run_at LIMIT $1 FOR UPDATE SKIP LOCKED
 		)
 		UPDATE profile_schedule s SET
-			next_run_at = now() + make_interval(secs => s.interval_seconds
+			next_run_at = now() + make_interval(secs => s.interval_seconds * $3::float8
 				* least(power(2, s.consecutive_failures), 2592000.0 / s.interval_seconds)
 				* (1 + (random() * 2 - 1) * $2)),
 			last_run_at = now()
 		FROM d WHERE s.profile_ref = d.profile_ref
 		RETURNING s.profile_ref, s.user_pk, s.options, s.max_age_days, s.max_posts, s.last_job_id,
 			coalesce(s.next_profile_read_at <= now(), true), s.interval_seconds`,
-		max(p.Cfg.Scheduler.PlannerBatch, 1), g.Jitter)
+		n, g.Jitter, stretch)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (due, error) {
 		var d due
 		return d, r.Scan(&d.ref, &d.userPK, &d.options, &d.maxAge, &d.maxPosts, &d.lastJob, &d.refresh, &d.interval)
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, d := range list {
 		if d.lastJob != nil {
@@ -127,7 +161,7 @@ func (p *Planner) Tick(ctx context.Context) error {
 		if _, err := p.DB.Exec(ctx, `UPDATE profile_schedule SET last_job_id = $2,
 				next_profile_read_at = CASE WHEN $3 THEN now() + $4::int * interval '1 second' ELSE next_profile_read_at END
 			WHERE profile_ref = $1`, d.ref, j.ID, d.refresh, int(g.ProfileRefresh.Seconds())); err != nil {
-			return err
+			return 0, err
 		}
 		if len(refreshed) > 0 {
 			// The next refresh waits twice as long as the last: comments come
@@ -135,15 +169,11 @@ func (p *Planner) Tick(ctx context.Context) error {
 			if _, err := p.DB.Exec(ctx, `UPDATE post_refresh SET refreshes = refreshes + 1, last_refresh_at = now(),
 					next_refresh_at = now() + make_interval(secs => $2::int * power(2, least(refreshes, 10)))
 				WHERE media_pk = ANY($1)`, refreshed, d.interval); err != nil {
-				return err
+				return 0, err
 			}
 		}
 	}
-	var lag float64
-	_ = p.DB.QueryRow(ctx, `SELECT coalesce(extract(epoch FROM now() - min(next_run_at)), 0) FROM profile_schedule
-		WHERE enabled AND next_run_at <= now()`).Scan(&lag)
-	metrics.ScheduleLag.WithLabelValues("ig").Set(math.Max(lag, 0))
-	return nil
+	return len(list), nil
 }
 
 // dueRefreshes returns the profile's posts due a comment refresh (newest

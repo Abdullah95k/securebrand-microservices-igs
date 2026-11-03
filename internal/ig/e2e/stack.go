@@ -244,7 +244,7 @@ func Start(t *testing.T, o Options) *Stack {
 // StartScheduler runs the planner and the finalizer, as igs-scheduler's
 // leader does, with short intervals.
 func (s *Stack) StartScheduler() {
-	planner := &scheduler.Planner{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
+	planner := &scheduler.Planner{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg, Redis: s.Redis}
 	fin := &scheduler.Finalizer{DB: s.DB, Jobs: s.Jobs, Producer: s.Producer, Cfg: s.Cfg, Timeout: 30 * time.Second}
 	s.start("scheduler",
 		func(ctx context.Context) error {

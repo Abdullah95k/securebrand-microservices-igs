@@ -323,7 +323,7 @@ type RefreshWindow struct {
 	Tiers    []string      `koanf:"tiers"`
 }
 
-// Budget bounds daily Facebook traffic fleet-wide. When the day's
+// Budget bounds daily platform traffic fleet-wide. When the day's
 // projected use exceeds it, backfill (p2) pauses first; if scheduled and
 // on-demand work alone would still exceed it, the slower tiers' intervals
 // are stretched. On-demand (p0) work is never held back.
@@ -413,9 +413,9 @@ func (c *Config) Validate() error {
 	default:
 		errs = append(errs, fmt.Errorf("privacy.pii_mode %q must be full or pseudonymized", c.Privacy.PIIMode))
 	}
-	if c.Service.Env == "prod" && c.Privacy.AuthorHMACKey == "dev-only-change-me" {
-		errs = append(errs, errors.New("privacy.author_hmac_key must be set in prod"))
-	}
+	// privacy.author_hmac_key was fbs's; igs keys authors with
+	// ig.privacy.author_hmac_key alone (validateIG), so a production
+	// install must not have to set the other.
 	if c.Media.TTL <= 0 {
 		errs = append(errs, errors.New("media.ttl must be > 0"))
 	}

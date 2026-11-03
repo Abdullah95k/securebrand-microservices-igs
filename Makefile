@@ -84,6 +84,8 @@ igs-chart-check:
 	set -o pipefail; $(HELM) template igs deploy/helm/igs --set keda.authSecret=igs-keda-kafka,tlsFiles.existingSecret=igs-tls,alerts.enabled=true,dashboards.enabled=true,serviceMonitor.enabled=true,api.ingress.enabled=true,networkPolicy.enabled=true,hooks.schemas=true \
 	  | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/fakeig.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	$(HELM) lint deploy/helm/igs -f deploy/helm/igs/examples/production.yaml
+	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/production.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 
 ## Run the chart's hooks and Deployments in Docker exactly as rendered
 ## (igsctl hooks, every Deployment), then three registered profiles'

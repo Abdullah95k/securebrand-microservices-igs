@@ -167,12 +167,37 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		func(ctx context.Context) error { return reg.Run(ctx, g.RegistryRefresh) },
 		func(ctx context.Context) error { return supp.Run(ctx, cfg.Crawler.SuppressionRefresh) },
 	}
-	if g.AIMD.Enabled {
+	if g.AIMD.Enabled || g.BudgetOn() {
+		// Outcomes feed AIMD's block rate and the budget's daily use.
 		rep := ratelimit.NewReporter(rdb, cfg.Kafka.TopicPrefix)
 		gql.Outcomes = rep
+		c.Components = append(c.Components, rep.Run)
+	}
+	if g.AIMD.Enabled {
 		ceil := ratelimit.NewCeiling(rdb, cfg.Kafka.TopicPrefix, g.GlobalRPS)
 		gql.Ceiling = ceil
-		c.Components = append(c.Components, rep.Run, ceil.Run)
+		c.Components = append(c.Components, ceil.Run)
+	}
+	// The budget pauses backfill (p2) by taking its shared slots away;
+	// tasks already running finish.
+	var scheds []*lanes.Scheduler
+	if g.BudgetOn() {
+		gate := ratelimit.NewBudgetGate(rdb, cfg.Kafka.TopicPrefix)
+		gate.Every = min(15*time.Second, g.Budget.Interval)
+		gate.OnChange = func(st ratelimit.BudgetState) {
+			n := cfg.Crawler.Lanes["p2"]
+			if st.PauseP2 {
+				n = 0
+			}
+			for _, s := range scheds {
+				s.SetMax(2, n)
+			}
+			slog.Warn("igs budget: backfill", "paused", st.PauseP2, "why", st.Explanation)
+		}
+		c.Components = append(c.Components, gate.Run)
+		if cfg.Crawler.Slots <= 0 {
+			slog.Warn("ig.budget is set but crawler.slots is 0 (fixed slots per lane): the budget cannot pause backfill")
+		}
 	}
 	if o.RawS3 != nil && g.CaptureRaw != "none" {
 		sink := rawsink.New(o.RawS3, cfg.S3.RawBucket)
@@ -204,6 +229,9 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 			return nil, fmt.Errorf("unknown igs stage %q", s)
 		}
 		sched := laneScheduler(cfg.Crawler, s)
+		if sched != nil {
+			scheds = append(scheds, sched)
+		}
 		for i, lane := range topics.Lanes {
 			n := cfg.Crawler.Lanes[topics.LaneName(lane)]
 			if n <= 0 {
