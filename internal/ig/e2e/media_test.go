@@ -136,6 +136,23 @@ func TestErasure(t *testing.T) {
 		WHERE c.owner_pk = $1 GROUP BY a.username, a.author_pk ORDER BY count(*) DESC LIMIT 1`, p.PK).Scan(&name, &authorPK); err != nil {
 		t.Fatal(err)
 	}
+	// Profile discovery met both: the erasures must forget them there too.
+	for _, x := range []struct {
+		u  string
+		pk int64
+	}{{name, authorPK}, {p.Username, p.PK}} {
+		if _, err := s.DB.Exec(ctx, `INSERT INTO discovery_candidates (username, user_pk, status, vet) VALUES ($1, $2, 'below', '{"found":true}')`,
+			x.u, x.pk); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.Exec(ctx, `INSERT INTO discovery_vets (username, vetted_at, user_pk, status, sightings, vet)
+			VALUES ($1, now(), $2, 'below', '{}', '{"found":true}')`, x.u, x.pk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	discovered := func(pk int64) int {
+		return count(t, s, `SELECT (SELECT count(*) FROM discovery_candidates WHERE user_pk = $1) + (SELECT count(*) FROM discovery_vets WHERE user_pk = $1)`, pk)
+	}
 	var e api.Erasure
 	if code := s.Do(t, admin, "POST", "/v1/erasure-requests", map[string]any{"subject_type": "author", "username": name}, &e); code != http.StatusAccepted {
 		t.Fatalf("author erasure: %d", code)
@@ -153,6 +170,9 @@ func TestErasure(t *testing.T) {
 	_ = s.DB.QueryRow(ctx, `SELECT count(*) FROM comment_authors WHERE author_pk = $1`, authorPK).Scan(&authors)
 	if authors != 0 {
 		t.Fatalf("the author's row survived")
+	}
+	if n := discovered(authorPK); n != 0 {
+		t.Fatalf("%d discovery rows of the erased author left", n)
 	}
 	// Seen again: stored redacted.
 	s.Wait(t, 3*time.Minute, s.Crawl(t, p.Username, full, lim, nil))
@@ -178,6 +198,9 @@ func TestErasure(t *testing.T) {
 	}
 	if count(`SELECT count(*) FROM profiles WHERE user_pk = $1 AND status = 'suppressed' AND username IS NULL`) != 1 {
 		t.Fatal("the profile row is not suppressed")
+	}
+	if n := discovered(p.PK); n != 0 {
+		t.Fatalf("%d discovery rows of the erased profile left", n)
 	}
 	if count(`SELECT count(*) FROM posts WHERE owner_pk = $1`) != 0 {
 		t.Fatal("posts left")

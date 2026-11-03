@@ -5,7 +5,7 @@
 // captions, which a crawler records in ig.discovery_candidates and
 // publishes nowhere), scores them for Iraqi signals (Score) and registers
 // the public ones at ig.discovery.threshold or above for the schedule
-// (Vetter).
+// (Vetter). Every read is kept (ig.discovery_vets).
 package discovery
 
 import (
@@ -34,7 +34,11 @@ type Vet struct {
 
 // Sightings is how often, and how, the crawl met a candidate.
 type Sightings struct {
-	Tags, Coauthors, Mentions, Comments, IraqContext int
+	Tags        int `json:"tags"`
+	Coauthors   int `json:"coauthors"`
+	Mentions    int `json:"mentions"`
+	Comments    int `json:"comments"`
+	IraqContext int `json:"iraq_context"`
 }
 
 // Priority weighs sightings for the vetting queue (ig.discovery.min_priority).

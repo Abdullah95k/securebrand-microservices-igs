@@ -141,9 +141,19 @@ func (v *Vetter) decide(ctx context.Context) error {
 		}
 		metrics.DiscoveryVets.WithLabelValues(status).Inc()
 		sb, _ := json.Marshal(sig)
-		// What the vet read goes once decided: only the score's parts stay.
+		seen, _ := json.Marshal(x.s)
+		var upk *int64
+		if pk != 0 {
+			upk = &pk
+		}
+		// Data is kept forever: the read stays on the candidate (the latest)
+		// and in discovery_vets (every one).
+		if _, err := v.DB.Exec(ctx, `INSERT INTO discovery_vets (username, vetted_at, user_pk, status, score, signals, sightings, vet)
+			VALUES ($1, now(), $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`, x.username, upk, status, score, sb, seen, x.vet); err != nil {
+			return err
+		}
 		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = $2, score = $3, signals = $4,
-				user_pk = COALESCE(NULLIF($5::bigint, 0), user_pk), vet = NULL, decided_at = now()
+				user_pk = COALESCE(NULLIF($5::bigint, 0), user_pk), decided_at = now()
 			WHERE username = $1`, x.username, status, score, sb, pk); err != nil {
 			return err
 		}
@@ -211,6 +221,8 @@ func (v *Vetter) start(ctx context.Context) error {
 			slog.Warn("discovery: vet not started", "candidate", c.username, "err", err)
 			continue
 		}
+		// The previous read is in discovery_vets; the candidate's vet column
+		// clears so the new read can be told apart.
 		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = 'vetting', vet_job_id = $2, vet = NULL,
 				attempts = attempts + 1 WHERE username = $1`, c.username, j.ID); err != nil {
 			return err
@@ -219,8 +231,9 @@ func (v *Vetter) start(ctx context.Context) error {
 	return nil
 }
 
-// forgetSuppressed deletes the candidate when its account was erased (as a
-// profile or as a commenter): it is never vetted, registered or kept.
+// forgetSuppressed deletes the candidate and its vets when its account was
+// erased (as a profile or as a commenter): it is never vetted, registered
+// or kept.
 func (v *Vetter) forgetSuppressed(ctx context.Context, username string, pk int64) (bool, error) {
 	if pk == 0 {
 		return false, nil
@@ -231,6 +244,9 @@ func (v *Vetter) forgetSuppressed(ctx context.Context, username string, pk int64
 		strconv.FormatInt(pk, 10), hex.EncodeToString(emit.AuthorKey([]byte(v.Cfg.IG.Privacy.AuthorHMACKey), pk))).Scan(&suppressed)
 	if err != nil || !suppressed {
 		return false, err
+	}
+	if _, err = v.DB.Exec(ctx, `DELETE FROM discovery_vets WHERE username = $1 OR user_pk = $2`, username, pk); err != nil {
+		return true, err
 	}
 	_, err = v.DB.Exec(ctx, `DELETE FROM discovery_candidates WHERE username = $1`, username)
 	return true, err

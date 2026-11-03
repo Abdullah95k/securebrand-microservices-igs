@@ -110,6 +110,19 @@ What to do when exits keep resting:
 - Watch `igs_budget_used{kind,lane}`, `igs_budget_projected{kind}`, `igs_budget_limit{kind}`, `igs_budget_backfill_paused` and `igs_budget_stretch`.
 - `IgsIgBudgetHoldingBackfill` fires after 2 hours of held backfill.
 
+## Data retention
+
+igs keeps what it collects forever (the owner, 2026-11-03): profiles and their snapshots, posts, comments and their authors, post metrics, highlights, and discovery candidates with every vet. `privacy.retention.comments_days` and `metrics_days` are 0: no partition is dropped by age.
+
+These still expire, being operational:
+- finished jobs after `jobs_days` (90);
+- raw failure captures after `raw_payload_days` (7);
+- media rows after `media_rows_days` (30) once their files are deleted.
+
+Media files themselves expire after `media.ttl`, once the analysis service has them.
+
+An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, including discovery rows, and suppresses them from later crawls.
+
 ## Profile discovery
 
 `ig.discovery` (M11; on in the chart's values) grows the registered set without a cap. It adds profiles that are Iraqi, or that address an Iraqi audience, found from the profiles already registered.
@@ -142,7 +155,7 @@ What to do when exits keep resting:
 4. **Decision.**
    - Public and at the threshold or above: registered for the 3-hourly schedule under the API client `discovery`, and backfilled.
    - Otherwise: `below`, `private` or `gone` (no such account). These are vetted again if seen again after `revet_after` (30 days).
-   - What the vet read is deleted once decided; the score and its parts stay.
+   - Every vet is kept: the latest read on the candidate (shown as `read` in the API), and each one with its score, signals and decision in `ig.discovery_vets`. Erasure requests delete a person's rows.
 
 Operations:
 - `GET /v1/discovery/candidates?status=registered` (admin) lists candidates with their scores and parts.

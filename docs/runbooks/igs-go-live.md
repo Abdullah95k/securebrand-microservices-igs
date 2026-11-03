@@ -26,7 +26,7 @@ Buy exits for where you want to be in a month. Phase 0 found 3 of 10 exits flagg
 | Component | Needs |
 |---|---|
 | Kubernetes | 1.30 (what `make chart-check` validates against), with [KEDA](https://keda.sh) (crawlers and the persister scale on Kafka lag); the Prometheus Operator and Grafana sidecar for alerts and the dashboard |
-| Postgres 18 | a database `igs` (schema `ig` is created by the install hook); daily partitions and partition-drop retention run from `igs-scheduler` |
+| Postgres 18 | a database `igs` (schema `ig` is created by the install hook). Partitions are created by `igs-scheduler`. Data is kept forever, so plan storage to grow with the number of profiles ([retention](igs-operations.md#data-retention)) |
 | Kafka | 3 brokers; topics are created by the install hook (`configs/ig/topics.yaml`, sized for 300k profiles; `hooks.topicPartitionsCap` lowers them) |
 | Schema registry | optional (`config.kafka.schema_registry.url`, `hooks.schemas: true`) |
 | Valkey (or Redis) 7+ | job accounting, leases, checkpoints, rate limits. Plan about 5 GB at 300k profiles ([sizing](igs-operations.md#capacity-and-sizing)) |

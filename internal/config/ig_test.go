@@ -30,6 +30,10 @@ func TestIGDefaults(t *testing.T) {
 	if g.ExitRPS != 0.25 || g.RateLimitRest != 10*time.Minute || g.CheckpointRest != 30*time.Minute || g.BlockHops != 2 {
 		t.Fatalf("exits: %v rps, rests %s %s, hops %d", g.ExitRPS, g.RateLimitRest, g.CheckpointRest, g.BlockHops)
 	}
+	// Collected data is kept forever (the owner, 2026-11-03).
+	if r := c.Privacy.Retention; r.CommentsDays != 0 || r.MetricsDays != 0 || r.AuthorsInactiveDays != 0 {
+		t.Fatalf("retention %+v: comments, metrics and authors are kept forever", r)
+	}
 	if len(g.FingerprintProfiles) == 0 || g.FingerprintProfile != "chrome_152" {
 		t.Fatalf("fingerprints: %s %v", g.FingerprintProfile, g.FingerprintProfiles)
 	}
