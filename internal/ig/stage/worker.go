@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math/rand/v2"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -126,11 +127,9 @@ func (w *Worker) Run(ctx context.Context, t *igstaskv1.Task) error {
 		return w.finish(ctx, t, out.Counters)
 	case Retry:
 		next := out.Next
-		next.Stalls = t.Stalls + 1
 		after, _, afterErr := d.Ckpt.Load(ctx, t.LineageId, t.Seq)
-		if beforeErr == nil && afterErr == nil && (after.Cursor != before.Cursor || after.Pages > before.Pages) {
-			next.Stalls = 0
-		}
+		progressed := beforeErr == nil && afterErr == nil && (after.Cursor != before.Cursor || after.Pages > before.Pages)
+		delay := retryPlan(t, next, out, progressed)
 		if reason := w.exhausted(next); reason != "" {
 			metrics.Tasks.WithLabelValues(name, lane, "failed").Inc()
 			slog.Warn("task failed after retries", "stage", name, "job", t.JobId, "task", t.TaskId,
@@ -144,18 +143,42 @@ func (w *Worker) Run(ctx context.Context, t *igstaskv1.Task) error {
 				}
 			}
 		}
-		metrics.Tasks.WithLabelValues(name, lane, "retry").Inc()
-		metrics.Retries.WithLabelValues(name, out.Delay).Inc()
+		outcome := "retry"
+		if out.Park {
+			outcome = "parked"
+		}
+		metrics.Tasks.WithLabelValues(name, lane, outcome).Inc()
+		metrics.Retries.WithLabelValues(name, delay).Inc()
 		slog.Debug("task retry", "stage", name, "task", t.TaskId, "attempt", next.Attempt, "stalls", next.Stalls,
-			"delay", out.Delay, "reason", out.Reason)
-		return w.toRetry(ctx, next, out.Delay)
+			"delay", delay, "parked", out.Park, "reason", out.Reason)
+		return w.toRetry(ctx, next, delay)
 	default:
 		metrics.Tasks.WithLabelValues(name, lane, "failed").Inc()
 		return w.deadLetter(ctx, t, "permanent", out.Reason, out.Counters)
 	}
 }
 
-var costKeys = []string{"requests", "wire_bytes", "blocked", "soft_errors", "transport_errors", "drift"}
+var costKeys = []string{"requests", "wire_bytes", "blocked", "soft_errors", "transport_errors", "drift", "identity_hops"}
+
+// retryPlan counts next's stalls and picks its retry topic. A run that
+// moved its checkpoint forward starts counting again; a park (every exit
+// resting) counts nothing. The first retry without progress waits 30
+// seconds, later ones 5 minutes: with ig's default max_attempts of 5, a task
+// that gets nowhere is dead-lettered after about 15 minutes, not 2.
+func retryPlan(t, next *igstaskv1.Task, out Outcome, progressed bool) string {
+	switch {
+	case out.Park:
+		next.Stalls = t.Stalls
+	case progressed:
+		next.Stalls = 0
+	default:
+		next.Stalls = t.Stalls + 1
+	}
+	if out.Delay == "5m" || next.Stalls >= 2 {
+		return "5m"
+	}
+	return "30s"
+}
 
 func unsaved(c, saved map[string]int64) map[string]int64 {
 	out := map[string]int64{}
@@ -222,6 +245,9 @@ func (w *Worker) toRetry(ctx context.Context, t *igstaskv1.Task, delay string) e
 	if w.RetryScale > 0 {
 		wait = time.Duration(float64(wait) * w.RetryScale)
 	}
+	// Up to a quarter more, so tasks blocked together do not all come back
+	// together.
+	wait += rand.N(wait/4 + 1)
 	orig, _ := topics.TaskTopic(t.Kind, t.Lane)
 	notBefore := time.Now().Add(wait).UnixMilli()
 	rec, err := w.D.Producer.Record(topic, task.ScopeKey(t), t,

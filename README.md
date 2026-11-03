@@ -24,8 +24,9 @@ comments and counts of the last 7 days' posts.
 
 | Proven | Not yet proven |
 |---|---|
-| The whole pipeline (API → crawler → Kafka → persister → Postgres, finalizer, schedules, post refresh, media download and expiry, erasure) end to end against **fakeig**, a synthetic logged-out Instagram, compared field by field with its ground truth, also under crashes, rate limits and restarts (`make e2e`, `make soak`) | Behaviour against **real Instagram** at volume. The owner's probe (C2) passed on ISP proxies; Phase 0 (C3, [`igs-phase0.md`](docs/runbooks/igs-phase0.md)) measures requests per profile and block rates per tier before go-live |
-| The Helm chart's hooks and workloads in Docker (`make chart-smoke`), Kubernetes schemas (`make chart-check`) | Production sizing of ISP exits: Phase 0's numbers decide it |
+| The whole pipeline (API → crawler → Kafka → persister → Postgres, finalizer, schedules, post refresh, media download and expiry, erasure) end to end against **fakeig**, a synthetic logged-out Instagram, compared field by field with its ground truth, also under crashes, rate limits and restarts (`make e2e`, `make soak`) | Behaviour against **real Instagram** at volume. The owner's probe (C2) and Phase 0 (C3, [`igs-phase0.md`](docs/runbooks/igs-phase0.md)) ran on ISP proxies: 348 profiles, 37.6 requests a profile, 0.62% blocks |
+| The Helm chart's hooks and workloads in Docker (`make chart-smoke`), Kubernetes schemas (`make chart-check`) | Production sizing of ISP exits: igs reads at most exits × `ig.exit_rps` ([sizing](docs/runbooks/igs-operations.md#capacity-and-sizing)) |
+| Rotation and failover under per-exit rate limits and flagged exits (`TestExitFailoverEqualsTruth`) | How long Instagram's per-IP limit lasts; `ig.rate_limit_rest` and `ig.exit_rps` are tuned in production |
 
 ## Components
 

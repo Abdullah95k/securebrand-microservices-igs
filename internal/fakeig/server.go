@@ -65,6 +65,13 @@ type Faults struct {
 	// ten in the details run). The exit is the ExitHeader a test transport
 	// sets.
 	WallExits []string
+	// ExitRateLimit limits each exit (ExitHeader) the way Instagram limits
+	// an IP (U4: one exit met its limit after 1,100 to 1,300 requests):
+	// after this many GraphQL requests through an exit, everything through
+	// it gets HTTP 429 for ExitRateLimitFor (default 2s), then it counts
+	// again. ExitStats reports what each exit saw.
+	ExitRateLimit    int
+	ExitRateLimitFor time.Duration
 	// GridWallAfter walls grid pages that start at or past this many posts
 	// (U1: the browser stopped at 24).
 	GridWallAfter int
@@ -114,9 +121,74 @@ type Server struct {
 	minted uint64
 	// pageLoads counts page loads, for PageWallFirst.
 	pageLoads int
+	exits     map[string]*ExitStat
 	gql       atomic.Int64
 	// Requests counts GraphQL requests by friendly name.
 	Requests sync.Map
+}
+
+// ExitStat is what one exit (ExitHeader) sent fakeig.
+type ExitStat struct {
+	Requests int // GraphQL requests and page loads
+	// Limits counts the exit's rate limits, and Limited the requests it
+	// sent while limited (each answered 429).
+	Limits, Limited int
+	count           int
+	until           time.Time
+}
+
+// ExitStats returns a copy of each exit's counts.
+func (s *Server) ExitStats() map[string]ExitStat {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]ExitStat{}
+	for k, v := range s.exits {
+		out[k] = *v
+	}
+	return out
+}
+
+// exitLimited counts a request through r's exit and reports whether the
+// exit is rate-limited (ExitRateLimit).
+func (s *Server) exitLimited(r *http.Request, query bool) bool {
+	exit := r.Header.Get(ExitHeader)
+	if exit == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.exits == nil {
+		s.exits = map[string]*ExitStat{}
+	}
+	st := s.exits[exit]
+	if st == nil {
+		st = &ExitStat{}
+		s.exits[exit] = st
+	}
+	st.Requests++
+	k := s.opts.Faults.ExitRateLimit
+	if k <= 0 {
+		return false
+	}
+	now := time.Now()
+	if now.Before(st.until) {
+		st.Limited++
+		return true
+	}
+	if !query {
+		return false
+	}
+	if st.count++; st.count > k {
+		d := s.opts.Faults.ExitRateLimitFor
+		if d <= 0 {
+			d = 2 * time.Second
+		}
+		st.count, st.until = 0, now.Add(d)
+		st.Limits++
+		st.Limited++
+		return true
+	}
+	return false
 }
 
 type ident struct {
@@ -159,6 +231,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Faults.Challenge {
 		http.Redirect(w, r, "/challenge/?next="+r.URL.Path, http.StatusFound)
+		return
+	}
+	if s.exitLimited(r, false) {
+		w.WriteHeader(http.StatusTooManyRequests)
 		return
 	}
 	s.mu.Lock()
@@ -292,6 +368,10 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	friendly := f.Get("fb_api_req_friendly_name")
 	n, _ := s.Requests.LoadOrStore(friendly, new(atomic.Int64))
 	n.(*atomic.Int64).Add(1)
+	if s.exitLimited(r, true) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
 	if k := s.opts.Faults.RateLimitEvery; k > 0 && s.gql.Add(1)%int64(k) == 0 {
 		w.WriteHeader(http.StatusTooManyRequests)
 		return

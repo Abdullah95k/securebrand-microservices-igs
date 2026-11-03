@@ -36,6 +36,13 @@ config:
     # The owner's probe pace (C2): 0.3 requests a second per identity,
     # identities retired after 500 to 750 requests.
     identity_rps: 0.33
+    # Instagram limits per IP: each exit sends at most exit_rps across the
+    # fleet, so throughput is exits x exit_rps. Add exits to go faster.
+    exit_rps: 0.25
+    rate_limit_rest: 10m
+    checkpoint_rest: 30m
+    page_wall_rest: 30m
+    block_hops: 2
     profile_rps: 3
     global_rps: 50      # AIMD's starting ceiling; ig.aimd.max_rps caps how far it grows
     capture_raw: failures

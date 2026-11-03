@@ -25,6 +25,8 @@ Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and
 | Block rate | classes `rate_limited`, `login_wall`, `checkpoint`; `igs:ig_block_ratio:rate5m`; `igs_fleet_block_rate` | < 5% (Phase 0's threshold) |
 | Fleet ceiling | `igs:ig_leader:aimd_ceiling_rps`, `igs:ig_leader:fleet_rps` | ceiling stable or rising; fleet rate close to it while there is backlog |
 | Identity churn | `igs_identity_retired_total{tier,reason}` | mostly `max_requests` (identities retire after 500 to 750 requests by design) |
+| Exits | `igs_exits_resting{tier}` against `igs_exits{tier}`; `igs_exit_rests_total{tier,reason}`; `igs_identity_hops_total{stage,class}` | few exits resting; rests and failovers flat |
+| Parked tasks | `igs_tasks_total{outcome="parked"}` | 0: a task parks only while every exit rests |
 | Breakers | `igs_breaker_state{name="proxy:..."}`, `{name="query:..."}` (2 = open) | all 0 |
 | Parser health | `igs_parse_total{outcome="drift"}`, `igs:ig_parse_missing_per_response:rate1h` against 7 days ago | drift ≈ 0; optional fields as last week |
 | Registry | `igs_registry_query_healthy{query}`, `igs_registry_sync_last_success_timestamp_seconds` | all 1; last success < 1 h ago |
@@ -49,6 +51,51 @@ The leader scheduler alone publishes the AIMD, schedule-lag and consumer-lag val
   - every alert links to a heading of this page;
   - the dashboard's uid differs from the fbs chart's.
 
+## Rotation, retries and failover
+
+Instagram limits each IP, not each identity: the owner's probe met error 1675004 after 1,100 to 1,300 requests on one exit at 0.3 a second, and the next exit read normally (U4). The crawler is built around that.
+
+**Pacing.** Every request waits on three limits:
+- its identity's (`ig.identity_rps`, 0.33 a second, with jitter);
+- its exit's, fleet-wide in Valkey however many identities and pods share the exit (`ig.exit_rps`, 0.25 a second: one request every 4 seconds);
+- the fleet ceiling (`ig.global_rps`, moved by AIMD).
+
+The fleet therefore reads at most exits × `ig.exit_rps`: 2.5 requests a second on 10 exits. Adding exits is how igs scales; adding crawler pods is not.
+
+**Rotation.**
+- Identities spread over the exits. A task gets an idle identity on an exit no other task uses; failing that, a new identity on such an exit; failing that, the idle identity on the least used exit.
+- An identity retires after 500 to 750 requests (`ig.identity_max_requests_min`/`_max`), at its fifth rate limit in a row, at once on a login wall or a checkpoint, and when its exit starts resting.
+- A static exit is one IP: its host and port (Decodo names its exits by port). A gateway session is its own exit.
+
+**Exit rests.** One answer is enough to rest an exit, since the limit is per IP:
+
+| Answer | Rest | Setting |
+|---|---|---|
+| rate limit (429, 1675004) | 10 min | `ig.rate_limit_rest` |
+| checkpoint (challenge) | 30 min | `ig.checkpoint_rest` |
+| a fresh visitor's page load sent to the login page | 30 min | `ig.page_wall_rest` |
+
+- While an exit rests, its identities send nothing more. A request already waiting on the exit's pacing is dropped unsent and counts as the exit's rate limit, so a limited IP sees one 429, not one per identity queued on it. `TestExitFailoverEqualsTruth` checks this.
+- After the rest, one identity probes the exit. If the probe is blocked again, the exit rests twice as long, up to `ig.proxy.breaker.max_cooldown` (30 min). Three good answers put it back in use.
+- Separately, the exit's bucket (its /24, or its host and port) opens its breaker at a 15% failure rate over a minute.
+- Rests are per crawler pod: each pod learns of a limited exit from its own first 429.
+
+**In-task failover.** When a request is blocked (rate limit, checkpoint, login wall), the task takes an identity on another exit, bootstraps it if new, and carries on from the same page. It does this up to `ig.block_hops` (2) times a run before it waits for a retry. A login wall at the same grid or comment cursor on three fresh identities still ends that stream as truncated (U1), whether the three came in one run or across retries.
+
+**Retries.** A task that could not finish goes to a retry topic with its checkpoint:
+- The first retry without progress waits 30 s; later ones wait 5 min. Each delay gets up to 25% added, so tasks blocked together do not return together.
+- A run that saved a new page starts the count again.
+- After `crawler.max_attempts` (5) retries without progress, about 15 minutes, or `crawler.max_total_attempts` (50) in all, the task goes to the DLQ (`igs_dlq_total{reason}`). [Replay it](#stuck-jobs) with `igsctl dlq replay` once the cause is gone.
+- Proxy tiers escalate on retries without progress, cheapest first, skipping tiers whose exits all rest. igs routes everything to `isp`, so this matters only if more tiers are added.
+
+**Every exit resting.** A task that finds no usable exit parks: it waits 5 minutes, without counting toward `max_attempts`, and tries again. `max_total_attempts` bounds parking at about 4 hours. Parked tasks show as `igs_tasks_total{outcome="parked"}`. `IgsIgExitsMostlyResting` and `IgsIgTasksParked` fire before tasks start reaching the DLQ.
+
+What to do when exits keep resting:
+1. Compare `igs_exit_rests_total` by reason with `igs_exits_resting` and `igs_exits`.
+2. **Rate limits:** a steady stream of `rate_limited` rests means `ig.exit_rps` is above what Instagram tolerates per IP. Lower it, or add exits to keep the throughput.
+3. **Checkpoints and page walls:** these mean the provider's IPs are flagged. Replace those endpoints in the `igs-proxies` Secret.
+4. **Every exit resting:** the crawl stops until rests end. If it lasts, add exits from another provider or subnet.
+
 ## Block storm (block rate > 10%)
 
 The fleet reacts on its own at four levels:
@@ -57,7 +104,7 @@ The fleet reacts on its own at four levels:
   - A rate-limited identity cools down, then retires at the fifth limit in a row (`reason="blocked"`).
   - A login wall or a checkpoint retires it at once.
   - Otherwise it retires after 500 to 750 requests (`ig.identity_max_requests_min`/`_max`). The owner's probe met a limit after 1,100 to 1,300 requests on one exit.
-- **Exit:** an exit that sends a fresh page load to the login page rests for `ig.page_wall_rest` (30 min).
+- **Exit:** a rate limit rests the exit for `ig.rate_limit_rest` (10 min), a checkpoint for `ig.checkpoint_rest` (30 min), and a fresh visitor's page load sent to the login page for `ig.page_wall_rest` (30 min). The blocked task fails over to another exit. See [Rotation, retries and failover](#rotation-retries-and-failover).
 - **Exit bucket:** a bucket opens its breaker at `ig.proxy.breaker.open_rate` (15%) over `window` (1 min). It gets no new identities until a probe passes after `cooldown`.
 - **Fleet:** every `ig.aimd.interval`, AIMD on the leader scheduler reads the fleet's block rate:
   - above `ig.aimd.high_block_rate` (6%) the ceiling drops to 70% of the rate actually sent;
@@ -67,7 +114,7 @@ What to check:
 
 1. `igs:ig_leader:fleet_block_rate` and `igs:ig_leader:aimd_ceiling_rps`. The ceiling should be falling while blocks are high.
 2. `igs_breaker_state{name=~"proxy:.*"}` and `igs:ig_requests_by_class:rate5m` by tier. igs runs on ISP proxies only, so a provider-wide problem is one for the provider. Remove dead endpoints from the `igs-proxies` Secret.
-3. `igs_identity_retired_total` by reason. `IgsIgIdentitiesRetiringFast` fires when most identities retire on blocks rather than at their budget. If it does, lower `ig.identity_rps` or add exits.
+3. `igs_identity_retired_total` by reason. `IgsIgIdentitiesRetiringFast` fires when most identities retire on blocks rather than at their budget. If it does, lower `ig.exit_rps` or add exits.
 4. Login walls on page loads mean exits are resting: watch `class="login_wall"` on the `page` queries. A wall at the same grid depth everywhere is coverage, not blocking (U1): jobs end `partial` (see [Partial jobs](#partial-jobs)).
 5. If Instagram answers with a code or page the rules do not know, responses show as `soft_error`. Add the marker under `ig.detect` (appended to the built-in rules) and roll the crawlers.
 
@@ -191,10 +238,11 @@ The janitor deletes a file once every `media.required_consumers` acknowledged it
 The persister is the first stage to back up: its backlog peaked at 136,716 records in the 150-profile run, while the crawl stages' stayed near 0. KEDA scales it on `ig.comment.v1`, `ig.post.v1` and `ig.post_metrics.v1` lag.
 
 **What bounds production.** Production's pace is set by Instagram, not by these ceilings:
-- `ig.identity_rps` (0.33 per identity) times the ISP exits sets the fleet's request rate.
-- 300k profiles every 3 hours is about 28 profile runs a second.
-- At 5 to 10 requests a run, that is roughly 150 to 300 requests a second.
-- Phase 0 (C3) measures the requests per profile and the block rate per tier that size the exit pool.
+- Each exit sends at most `ig.exit_rps` (0.25 a second, 900 an hour), so the fleet reads at most exits × `ig.exit_rps`.
+- A scheduled run is 5 to 10 requests, so one exit carries roughly 90 to 180 profile runs an hour, or 270 to 540 profiles on the 3-hour schedule.
+- Phase 0's full backfill took 37.6 requests a profile: each profile added costs about 150 s of one exit's time once.
+- 300k profiles every 3 hours (about 28 runs a second, 150 to 300 requests a second) needs 600 to 1,200 exits at 0.25 a second each.
+- Size the exit pool from `igs_exits`, `igs_exits_resting` and the schedule lag: when `igs:ig_leader:schedule_lag_seconds` grows while few exits rest, add exits.
 
 **Valkey.** Most keys are per task:
 - **Done marker:** 88 B, kept `stage.DoneTTL` (96 h, longer than the task topics' 72 h retention).

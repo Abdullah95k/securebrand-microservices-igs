@@ -161,3 +161,43 @@ func TestTripOpensForTheGivenTime(t *testing.T) {
 		t.Fatal("a good probe closes it")
 	}
 }
+
+// A failed probe after a trip rests the key twice as long as the trip, up
+// to MaxCooldown; a good probe closes it and the cooldown starts over.
+func TestFailedProbeAfterTripDoublesTheTrip(t *testing.T) {
+	s, c := testSet(Config{Cooldown: time.Minute, MaxCooldown: 30 * time.Minute, ProbeSuccesses: 1})
+	s.Trip("a", 10*time.Minute)
+	for _, wait := range []time.Duration{10 * time.Minute, 20 * time.Minute, 30 * time.Minute, 30 * time.Minute} {
+		c.add(wait - time.Second)
+		if s.Allow("a") {
+			t.Fatalf("open until %v", wait)
+		}
+		c.add(time.Second)
+		if !s.Allow("a") {
+			t.Fatalf("probe after %v", wait)
+		}
+		s.Observe("a", true)
+	}
+	c.add(30 * time.Minute)
+	if !s.Allow("a") {
+		t.Fatal("probe")
+	}
+	s.Observe("a", false)
+	if s.State("a") != Closed {
+		t.Fatal("a good probe closes it")
+	}
+	s.Trip("a", 2*time.Minute)
+	c.add(2 * time.Minute)
+	if !s.Allow("a") {
+		t.Fatal("probe after the second trip")
+	}
+	s.Observe("a", true)
+	c.add(4*time.Minute - time.Second)
+	if s.Allow("a") {
+		t.Fatal("a closed key starts its cooldown over: 2 x 2m, not 30m")
+	}
+	c.add(time.Second)
+	if !s.Allow("a") {
+		t.Fatal("probe after 4m")
+	}
+}

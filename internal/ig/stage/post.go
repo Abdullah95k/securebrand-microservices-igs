@@ -44,11 +44,12 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	if sc.Permalink == "" {
 		sc.Permalink = permalink(d.base(), sc.Shortcode, "")
 	}
-	id, err := d.identity(ctx, "post", t.Attempt)
+	id, err := d.identity(ctx, "post", t.Stalls)
 	if err != nil {
-		return retry(t, t.Cursor, "30s", "no identity: "+err.Error(), c)
+		return noIdentity(t, t.Cursor, err, c)
 	}
-	defer d.Pool.Release(id)
+	defer func() { d.Pool.Release(id) }() // id changes on a failover
+	hops := 0
 
 	st, _, err := d.Ckpt.Load(ctx, t.LineageId, t.Seq)
 	if err != nil {
@@ -66,7 +67,10 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 
 	var embedded parse.CommentsResult
 	var watermark time.Time
-	if first || !id.Bootstrapped() {
+	// The post page bootstraps a fresh identity and, on the first segment,
+	// is the post's detail. A blocked load, or a page gated for this
+	// identity, fails over to another exit.
+	for first || !id.Bootstrapped() {
 		pl, err := d.load(ctx, id, sc.Permalink, t.Lane)
 		c["page_loads"]++
 		if pl != nil {
@@ -78,7 +82,11 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		case pl.Class == detect.ContentUnavailable:
 			return s.unavailable(ctx, t, sc, c)
 		case pl.Class != detect.OK || err != nil:
-			return classOutcome(t, pl.Class, pl.Reason, st.Cursor, c)
+			o := classOutcome(t, pl.Class, pl.Reason, st.Cursor, c)
+			if d.failover(ctx, "post", &id, o, &hops) {
+				continue
+			}
+			return o
 		}
 		if first {
 			res, rep := parse.PostPage(pl.HTML, sc.Shortcode, d.base())
@@ -97,7 +105,11 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 					return done(c)
 				}
 				_ = d.saveCkpt(ctx, t, st, c)
-				return classOutcome(t, detect.LoginWall, "post page gated", st.Cursor, c)
+				o := classOutcome(t, detect.LoginWall, "post page gated", st.Cursor, c)
+				if d.failover(ctx, "post", &id, o, &hops) {
+					continue
+				}
+				return o
 			}
 			if !rep.OK() {
 				metrics.ParseTotal.WithLabelValues("post", "1", "drift").Inc()
@@ -114,6 +126,29 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 			}
 			sc.DetailKnown = true
 		}
+		break
+	}
+	// boot bootstraps the identity a failover brought, on the post page.
+	boot := func() *Outcome {
+		for !id.Bootstrapped() {
+			pl, err := d.load(ctx, id, sc.Permalink, t.Lane)
+			c["page_loads"]++
+			if pl != nil {
+				c["wire_bytes"] += pl.Bytes
+			}
+			switch {
+			case pl == nil:
+				o := retry(t, st.Cursor, "30s", "post page: "+err.Error(), c)
+				return &o
+			case pl.Class != detect.OK || err != nil:
+				o := classOutcome(t, pl.Class, pl.Reason, st.Cursor, c)
+				if d.failover(ctx, "post", &id, o, &hops) {
+					continue
+				}
+				return &o
+			}
+		}
+		return nil
 	}
 
 	if !t.Limits.GetIncludeComments() || (first && sc.ReportedCommentCount == 0 && len(embedded.Comments) == 0) {
@@ -220,7 +255,14 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 			_ = d.saveCkpt(ctx, t, st, c)
 		}
 		if resp.Class != detect.OK {
-			return classOutcome(t, resp.Class, resp.Reason, st.Cursor, c)
+			o := classOutcome(t, resp.Class, resp.Reason, st.Cursor, c)
+			if d.failover(ctx, "post", &id, o, &hops) {
+				if o := boot(); o != nil {
+					return *o
+				}
+				continue // the same page, on another exit
+			}
+			return o
 		}
 		res, rep := parse.Comments(resp.Parts, cc)
 		d.GQL.Parsed(resp, rep.OK())

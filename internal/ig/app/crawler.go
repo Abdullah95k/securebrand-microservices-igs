@@ -33,6 +33,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/browser"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
@@ -120,6 +121,8 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		IdentityRPS: g.IdentityRPS, IdentityBurst: g.IdentityBurst,
 		MaxRequestsMin: g.IdentityMaxRequestsMin, MaxRequestsMax: g.IdentityMaxRequestsMax,
 		MaxPerTier: max(16, slots*len(stages)*13/10),
+		ExitRPS:    g.ExitRPS, ExitPacer: ratelimit.NewRedis(rdb),
+		Rest: map[detect.Class]time.Duration{detect.RateLimited: g.RateLimitRest, detect.Checkpoint: g.CheckpointRest},
 	}, proxies, fps, o.DoerFactory)
 	if err != nil {
 		return nil, err

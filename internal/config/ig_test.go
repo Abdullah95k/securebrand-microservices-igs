@@ -27,6 +27,9 @@ func TestIGDefaults(t *testing.T) {
 	if g.IdentityMaxRequestsMin != 500 || g.IdentityMaxRequestsMax != 750 || g.PageWallRest != 30*time.Minute {
 		t.Fatalf("identities: %d..%d rest %s", g.IdentityMaxRequestsMin, g.IdentityMaxRequestsMax, g.PageWallRest)
 	}
+	if g.ExitRPS != 0.25 || g.RateLimitRest != 10*time.Minute || g.CheckpointRest != 30*time.Minute || g.BlockHops != 2 {
+		t.Fatalf("exits: %v rps, rests %s %s, hops %d", g.ExitRPS, g.RateLimitRest, g.CheckpointRest, g.BlockHops)
+	}
 	if len(g.FingerprintProfiles) == 0 || g.FingerprintProfile != "chrome_152" {
 		t.Fatalf("fingerprints: %s %v", g.FingerprintProfile, g.FingerprintProfiles)
 	}
@@ -55,6 +58,8 @@ func TestIGValidate(t *testing.T) {
 		want string
 	}{
 		{"base url", func(c *Config) { c.IG.BaseURL = "instagram.com" }, "ig.base_url"},
+		{"exit rps", func(c *Config) { c.IG.ExitRPS = -1 }, "ig.exit_rps"},
+		{"hops", func(c *Config) { c.IG.BlockHops = -1 }, "ig.block_hops"},
 		{"age", func(c *Config) { c.IG.Limits.MaxAgeDays = 400 }, "ig.limits.max_age_days"},
 		{"interval", func(c *Config) { c.IG.Schedule.Interval = 10 * time.Minute }, "ig.schedule.interval"},
 		{"refresh", func(c *Config) { c.IG.Schedule.ProfileRefresh = time.Hour }, "ig.schedule.profile_refresh"},

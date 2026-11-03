@@ -117,6 +117,13 @@ func (s *Set) notify(ch []change) {
 	}
 }
 
+// SetClock replaces the clock (tests of packages that use a Set).
+func (s *Set) SetClock(now func() time.Time) {
+	s.mu.Lock()
+	s.now = now
+	s.mu.Unlock()
+}
+
 // advance moves an open breaker whose cooldown ended to half-open.
 func (s *Set) advance(key string, e *entry, now time.Time, ch *[]change) {
 	if e.state == Open && !now.Before(e.openUntil) {
@@ -180,14 +187,17 @@ func (s *Set) open(key string, e *entry, now time.Time, ch *[]change) {
 
 // Trip opens key for d, whatever its recent outcomes: for a signal too rare
 // to reach MinEvents in a window, such as an exit that serves the login
-// page to a fresh visitor. An open key keeps the later end. Afterwards it
-// goes half-open as usual.
+// page to a fresh visitor, or one Instagram rate-limits. An open key keeps
+// the later end. Afterwards it goes half-open as usual, and a failed probe
+// opens it again for twice d (up to MaxCooldown), not twice Cooldown: a
+// limit that outlasts the rest is not probed more often than it was.
 func (s *Set) Trip(key string, d time.Duration) {
 	var ch []change
 	s.mu.Lock()
 	now := s.now()
 	e := s.entry(key)
 	s.advance(key, e, now, &ch)
+	e.cooldown = max(e.cooldown, min(d, s.cfg.MaxCooldown))
 	until := now.Add(d)
 	if e.state != Open {
 		ch = append(ch, change{key, e.state, Open})

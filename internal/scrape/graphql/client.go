@@ -160,6 +160,12 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 		return nil, err
 	}
 	if err := c.pace(ctx, id, req); err != nil {
+		if errors.Is(err, session.ErrExitResting) {
+			// Not sent: the exit was limited meanwhile. The caller fails
+			// over as it would on the limit itself.
+			metrics.Requests.WithLabelValues(q.Name, "exit_resting", id.Endpoint.Tier).Inc()
+			return &Response{Query: q, Class: detect.RateLimited, Reason: err.Error(), Vars: req.Vars}, nil
+		}
 		return nil, err
 	}
 	referer := req.Referer
