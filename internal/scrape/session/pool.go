@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -29,6 +30,20 @@ type PoolConfig struct {
 	MaxRequestsMax int
 	// MaxPerTier caps live identities per tier; Acquire waits at the cap.
 	MaxPerTier int
+	// ExitRPS paces each proxy exit through ExitPacer, fleet-wide: the
+	// platform limits per IP (Instagram, U4), however many identities and
+	// pods share the exit. 0 or a nil pacer leaves it to identity pacing.
+	ExitRPS   float64
+	ExitPacer ExitPacer
+	// Rest rests an exit for the duration when one of its responses has
+	// the class (ig.rate_limit_rest, ig.checkpoint_rest).
+	Rest map[detect.Class]time.Duration
+}
+
+// ExitPacer paces a key fleet-wide at a rate below one a second
+// (ratelimit.Redis).
+type ExitPacer interface {
+	WaitRate(ctx context.Context, key string, perSecond float64) error
 }
 
 // DoerFactory builds a transport for an identity (swappable in tests).
@@ -46,6 +61,9 @@ type Pool struct {
 	cond *sync.Cond
 	idle map[string][]*Identity
 	live map[string]int
+	// leased counts the identities in use per exit (Endpoint.Exit), so
+	// tasks spread over the exits rather than queue on one exit's pacing.
+	leased map[string]int
 }
 
 func NewPool(cfg PoolConfig, proxies *proxy.Pool, fps map[string]Fingerprint, f DoerFactory) (*Pool, error) {
@@ -68,7 +86,7 @@ func NewPool(cfg PoolConfig, proxies *proxy.Pool, fps map[string]Fingerprint, f 
 		cfg.MaxPerTier = 512
 	}
 	p := &Pool{cfg: cfg, base: base, proxies: proxies, fps: fps, newDoer: f,
-		idle: map[string][]*Identity{}, live: map[string]int{}}
+		idle: map[string][]*Identity{}, live: map[string]int{}, leased: map[string]int{}}
 	p.cond = sync.NewCond(&p.mu)
 	return p, nil
 }
@@ -78,7 +96,23 @@ func (p *Pool) Base() *url.URL { return p.base }
 
 // Acquire returns an identity on tier for exclusive use. Fresh identities
 // are not bootstrapped yet; the caller bootstraps them on first use.
+//
+// Identities spread over the exits: an idle identity on an exit no task
+// is using comes first, then a new identity on such an exit, then the idle
+// identity on the least used exit, then a new one on any exit. It returns
+// proxy.ErrTierOpen when every exit of the tier cools down.
 func (p *Pool) Acquire(ctx context.Context, tier string) (*Identity, error) {
+	return p.acquire(ctx, tier, "")
+}
+
+// AcquireElsewhere is Acquire on any exit but avoid (an Endpoint.Exit):
+// the failover of a task whose identity was just blocked there. It returns
+// proxy.ErrNoFreeExit when no other exit of the tier is usable.
+func (p *Pool) AcquireElsewhere(ctx context.Context, tier, avoid string) (*Identity, error) {
+	return p.acquire(ctx, tier, avoid)
+}
+
+func (p *Pool) acquire(ctx context.Context, tier, avoid string) (*Identity, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for {
@@ -86,34 +120,70 @@ func (p *Pool) Acquire(ctx context.Context, tier string) (*Identity, error) {
 			return nil, err
 		}
 		list := p.idle[tier]
+		best, bestLoad := -1, 0
 		for i := len(list) - 1; i >= 0; i-- {
 			id := list[i]
 			if p.proxies.IsOpen(id.Endpoint) {
-				// Its exit bucket is cooling down: retire rather than reuse.
+				// Its exit rests or its bucket cools down: retire rather
+				// than reuse.
 				list = append(list[:i], list[i+1:]...)
 				p.idle[tier] = list
 				p.live[tier]--
+				if best > i {
+					best--
+				}
 				metrics.IdentityRetired.WithLabelValues(tier, "breaker").Inc()
 				go id.Doer.Close()
 				continue
 			}
-			if id.coolingDown() {
+			x := id.Endpoint.Exit()
+			if id.coolingDown() || (avoid != "" && x == avoid) {
 				continue
 			}
-			p.idle[tier] = append(list[:i], list[i+1:]...)
-			return id, nil
+			load := 0
+			if x != "" {
+				load = p.leased[x]
+			}
+			if best < 0 || load < bestLoad {
+				best, bestLoad = i, load
+			}
+			if load == 0 {
+				break
+			}
+		}
+		take := func(i int) *Identity {
+			id := p.idle[tier][i]
+			p.idle[tier] = append(p.idle[tier][:i], p.idle[tier][i+1:]...)
+			p.lease(id)
+			return id
+		}
+		if best >= 0 && bestLoad == 0 {
+			return take(best), nil
 		}
 		if p.live[tier] < p.cfg.MaxPerTier {
-			p.live[tier]++
-			p.mu.Unlock()
-			id, err := p.create(tier)
-			p.mu.Lock()
+			// A new identity on an exit no task uses; failing that, the
+			// least used idle identity; failing that, a new one anywhere.
+			busy := map[string]bool{}
+			for x, n := range p.leased {
+				busy[x] = n > 0
+			}
+			id, err := p.createLocked(tier, func(ep proxy.Endpoint) bool {
+				x := ep.Exit()
+				return x != "" && (x == avoid || busy[x])
+			})
+			if errors.Is(err, proxy.ErrNoFreeExit) {
+				if best >= 0 {
+					return take(best), nil
+				}
+				id, err = p.createLocked(tier, func(ep proxy.Endpoint) bool { return avoid != "" && ep.Exit() == avoid })
+			}
 			if err != nil {
-				p.live[tier]--
 				return nil, err
 			}
-			metrics.IdentityActive.WithLabelValues(tier).Set(float64(p.live[tier]))
 			return id, nil
+		}
+		if best >= 0 {
+			return take(best), nil
 		}
 		// At the cap: wait for a release (or a cooldown to end).
 		stop := context.AfterFunc(ctx, func() { p.mu.Lock(); p.cond.Broadcast(); p.mu.Unlock() })
@@ -124,12 +194,24 @@ func (p *Pool) Acquire(ctx context.Context, tier string) (*Identity, error) {
 	}
 }
 
+// lease counts id as in use on its exit. Callers hold p.mu.
+func (p *Pool) lease(id *Identity) {
+	if x := id.Endpoint.Exit(); x != "" {
+		p.leased[x]++
+	}
+}
+
 // Release returns id to the pool, or retires it.
 func (p *Pool) Release(id *Identity) {
 	tier := id.Endpoint.Tier
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	defer p.cond.Broadcast()
+	if x := id.Endpoint.Exit(); x != "" {
+		if p.leased[x]--; p.leased[x] <= 0 {
+			delete(p.leased, x)
+		}
+	}
 	if reason := id.RetireReason(); reason != "" {
 		p.live[tier]--
 		metrics.IdentityActive.WithLabelValues(tier).Set(float64(p.live[tier]))
@@ -143,8 +225,13 @@ func (p *Pool) Release(id *Identity) {
 
 // RestExit takes id's exit out of use for d: no new identity gets it and
 // idle identities on it are retired, until d has passed.
-func (p *Pool) RestExit(id *Identity, d time.Duration) {
+func (p *Pool) RestExit(id *Identity, d time.Duration, reason string) {
+	if id.Endpoint.Exit() == "" || d <= 0 {
+		return
+	}
 	p.proxies.Rest(id.Endpoint, d)
+	metrics.ExitRests.WithLabelValues(id.Endpoint.Tier, reason).Inc()
+	slog.Info("session: exit rests", "exit", id.Endpoint.Exit(), "for", d, "reason", reason)
 }
 
 // Retire marks id as unusable and releases it.
@@ -157,11 +244,27 @@ func (p *Pool) Retire(id *Identity, reason string) {
 	p.Release(id)
 }
 
-func (p *Pool) create(tier string) (*Identity, error) {
-	ep, err := p.proxies.Next(tier)
+// createLocked creates and leases an identity on tier, on an exit skip
+// allows. Callers hold p.mu; it is released while the transport is built.
+func (p *Pool) createLocked(tier string, skip func(proxy.Endpoint) bool) (*Identity, error) {
+	ep, err := p.proxies.NextWhere(tier, skip)
 	if err != nil {
 		return nil, err
 	}
+	p.live[tier]++
+	p.mu.Unlock()
+	id, err := p.create(ep)
+	p.mu.Lock()
+	if err != nil {
+		p.live[tier]--
+		return nil, err
+	}
+	p.lease(id)
+	metrics.IdentityActive.WithLabelValues(tier).Set(float64(p.live[tier]))
+	return id, nil
+}
+
+func (p *Pool) create(ep proxy.Endpoint) (*Identity, error) {
 	fp := p.fps[p.cfg.Profiles[randRange(0, len(p.cfg.Profiles))]]
 	d, err := p.newDoer(transport.Options{Profile: fp.Profile, ProxyURL: ep.URL, Timeout: p.cfg.Timeout})
 	if err != nil {
@@ -169,7 +272,21 @@ func (p *Pool) create(tier string) (*Identity, error) {
 	}
 	maxReq := randRange(p.cfg.MaxRequestsMin, p.cfg.MaxRequestsMax)
 	id := newIdentity(newID(), ep, fp, d, p.base, p.cfg.IdentityRPS, p.cfg.IdentityBurst, maxReq)
-	id.observe = func(c detect.Class) { p.proxies.Observe(ep, c) }
+	id.observe = func(c detect.Class) {
+		p.proxies.Observe(ep, c)
+		if rest := p.cfg.Rest[c]; rest > 0 {
+			// Instagram limits per IP: other identities on the exit would
+			// meet the same answer.
+			p.RestExit(id, rest, c.String())
+		}
+	}
+	if ep.Exit() != "" || ep.Bucket != "" {
+		id.resting = func() bool { return p.proxies.IsOpen(ep) }
+	}
+	if x := ep.Exit(); x != "" && p.cfg.ExitRPS > 0 && p.cfg.ExitPacer != nil {
+		key, rps := "exit:"+x, p.cfg.ExitRPS
+		id.exitWait = func(ctx context.Context) error { return p.cfg.ExitPacer.WaitRate(ctx, key, rps) }
+	}
 	return id, nil
 }
 

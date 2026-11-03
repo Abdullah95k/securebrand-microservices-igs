@@ -341,8 +341,21 @@ ig:
   profile_rps: 3
   profile_rps_p0: 6
   global_rps: 50
-  # Rest an exit that sends fresh page loads to the login page.
+  # Instagram limits per IP, so each proxy exit is paced fleet-wide, however
+  # many identities and pods share it: the fleet reads at most
+  # exits x exit_rps (10 exits: 2.5 requests a second). 0 = identity pacing
+  # alone.
+  exit_rps: 0.25
+  # Rest an exit Instagram rate-limits, sends a checkpoint, or that sends
+  # fresh page loads to the login page. After a rest one identity probes
+  # it; a probe blocked again rests it twice as long, up to
+  # proxy.breaker.max_cooldown.
+  rate_limit_rest: 10m
+  checkpoint_rest: 30m
   page_wall_rest: 30m
+  # A task whose identity is blocked moves to a fresh identity on another
+  # exit and carries on, this many times a run, before it waits for a retry.
+  block_hops: 2
   capture_raw: failures    # all | failures | none
   proxy:
     tiers: []

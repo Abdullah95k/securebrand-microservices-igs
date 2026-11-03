@@ -57,6 +57,10 @@ var (
 	// Identities.
 	IdentityActive  = gaugeVec("identity_active", "Live identities in this pod.", "tier")
 	IdentityRetired = counterVec("identity_retired_total", "Retired identities by reason.", "tier", "reason")
+	IdentityHops    = counterVec("identity_hops_total", "Blocked identities a task replaced with one on another exit and carried on, by stage and block class.", "stage", "class")
+	Exits           = gaugeVec("exits", "Proxy exits configured, by static tier.", "tier")
+	ExitsResting    = gaugeVec("exits_resting", "Proxy exits resting after a rate limit, checkpoint or login page, by tier.", "tier")
+	ExitRests       = counterVec("exit_rests_total", "Times an exit was rested, by tier and reason (rate_limited, checkpoint, page_wall).", "tier", "reason")
 	Bootstraps      = counterVec("bootstrap_total", "Identity bootstraps.", "method", "outcome")
 
 	// Tasks.

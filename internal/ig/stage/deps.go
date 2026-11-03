@@ -26,6 +26,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
@@ -79,6 +80,11 @@ type Outcome struct {
 	Delay    string // retry topic: "30s" | "5m"
 	Reason   string
 	Counters map[string]int64
+	// Class is the response class a Retry is for (detect.OK when none).
+	Class detect.Class
+	// Park: a Retry that is no fault of the task (every exit rests). It
+	// waits without counting a stall toward ig's max_attempts.
+	Park bool
 	// FollowUps are new streams to start once this task released its lease.
 	FollowUps []*igstaskv1.Task
 }
@@ -95,10 +101,11 @@ type Stage interface {
 }
 
 // identity acquires an identity for a query class, escalating tiers on
-// retries (cheapest first) and skipping tiers whose exits all cool down.
-func (d *Deps) identity(ctx context.Context, class string, attempt uint32) (*session.Identity, error) {
+// retries that made no progress (cheapest first) and skipping tiers whose
+// exits all cool down.
+func (d *Deps) identity(ctx context.Context, class string, stalls uint32) (*session.Identity, error) {
 	tiers := d.Proxies.TiersFor(class)
-	from := min(int(attempt), len(tiers)-1)
+	from := min(int(stalls), len(tiers)-1)
 	tier := tiers[from]
 	for _, t := range tiers[from:] {
 		if d.Proxies.Available(t) {
@@ -107,6 +114,51 @@ func (d *Deps) identity(ctx context.Context, class string, attempt uint32) (*ses
 		}
 	}
 	return d.Pool.Acquire(ctx, tier)
+}
+
+// noIdentity is the outcome of a task that got no identity. With every
+// exit of its tiers resting (proxy.ErrTierOpen) it parks: it waits 5
+// minutes, then tries again, without counting a stall, since nothing about
+// the task failed. Only max_total_attempts bounds it (50 parks: about 4
+// hours with no usable exit).
+func noIdentity(t *igstaskv1.Task, cursor string, err error, c map[string]int64) Outcome {
+	if errors.Is(err, proxy.ErrTierOpen) {
+		o := retry(t, cursor, "5m", "every exit rests: "+err.Error(), c)
+		o.Park = true
+		return o
+	}
+	return retry(t, cursor, "30s", "no identity: "+err.Error(), c)
+}
+
+// failover replaces *id, just blocked as o says, with an identity on
+// another exit of its tier, so the task carries on at once instead of
+// waiting for a retry: at most ig.block_hops times a run. The blocked exit
+// rests already when the block was a rate limit or a checkpoint (Instagram
+// limits per IP); a login wall retired the identity alone. It returns
+// false, leaving *id as it was, when o is no block, the hops are used up,
+// or no other exit is free; the caller then returns o. The new identity
+// may need bootstrapping.
+func (d *Deps) failover(ctx context.Context, stage string, id **session.Identity, o Outcome, hops *int) bool {
+	if o.Result != Retry || !o.Class.Blocking() || *hops >= d.Cfg.IG.BlockHops {
+		return false
+	}
+	old := *id
+	actx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	nid, err := d.Pool.AcquireElsewhere(actx, old.Endpoint.Tier, old.Endpoint.Exit())
+	if err != nil {
+		slog.Debug("failover: no other exit", "stage", stage, "class", o.Class.String(), "err", err)
+		return false
+	}
+	*hops++
+	d.Pool.Release(old)
+	*id = nid
+	metrics.IdentityHops.WithLabelValues(stage, o.Class.String()).Inc()
+	if o.Counters != nil {
+		o.Counters["identity_hops"]++
+	}
+	slog.Debug("failover", "stage", stage, "class", o.Class.String(), "from", old.Endpoint.Exit(), "to", nid.Endpoint.Exit())
+	return true
 }
 
 // observeLoad reports a page load to the traffic budget and AIMD.
@@ -132,7 +184,7 @@ func (d *Deps) load(ctx context.Context, id *session.Identity, url string, lane 
 	pl, err := d.Loader.Load(ctx, id, url)
 	d.observeLoad(pl, err, lane)
 	if pl != nil && pl.Class == detect.LoginWall && fresh && id.Endpoint.URL != "" && d.Cfg.IG.PageWallRest > 0 {
-		d.Pool.RestExit(id, d.Cfg.IG.PageWallRest)
+		d.Pool.RestExit(id, d.Cfg.IG.PageWallRest, "page_wall")
 	}
 	if err != nil {
 		return pl, err
@@ -158,11 +210,14 @@ func classOutcome(t *igstaskv1.Task, cls detect.Class, reason, cursor string, c 
 	case detect.RegistryStale, detect.SchemaDrift:
 		c["drift"]++
 	}
+	delay := "30s"
 	if cls == detect.RegistryStale || cls == detect.SchemaDrift {
 		// Needs a registry or parser update; wait longer.
-		return retry(t, cursor, "5m", cls.String()+": "+reason, c)
+		delay = "5m"
 	}
-	return retry(t, cursor, "30s", cls.String()+": "+reason, c)
+	o := retry(t, cursor, delay, cls.String()+": "+reason, c)
+	o.Class = cls
+	return o
 }
 
 // spawn registers child tasks with the job and produces them.

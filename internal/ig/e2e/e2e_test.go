@@ -8,6 +8,7 @@ import (
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
 )
 
 const (
@@ -50,6 +51,57 @@ func TestFullCrawlEqualsTruth(t *testing.T) {
 		if c["posts_gated"] != gated || c["profiles"] != 1 {
 			t.Errorf("%s: counters %v, want %d gated", p.Username, c, gated)
 		}
+	}
+}
+
+// Instagram limits each IP. With every exit limited for 2 seconds after 10
+// queries and one exit sending fresh visitors to the login page, a full
+// crawl of every profile still stores exactly the truth, and no task fails:
+// blocked identities fail over to another exit within their task, exits
+// rest and are probed again, and tasks park while every exit rests. A
+// limited exit rests at its first 429 and identities on it send nothing
+// more, so it answers about one 429 a limit; the walled exit gets only
+// its probes.
+func TestExitFailoverEqualsTruth(t *testing.T) {
+	s := Start(t, Options{Spec: spec(), Exits: 4, Faults: fakeig.Faults{ExitRateLimit: 10, ExitRateLimitFor: 2 * time.Second,
+		WallExits: []string{igtest.ExitName(4)}}})
+	lim := s.Limits()
+	var ids []string
+	for _, p := range s.World.Profiles() {
+		ids = append(ids, s.Crawl(t, p.Username, full, lim, nil))
+	}
+	st := s.Wait(t, 4*time.Minute, ids...)
+	since := time.Now().Add(-time.Duration(lim.MaxAgeSeconds) * time.Second)
+	var hops int64
+	for i, p := range s.World.Profiles() {
+		truth, _ := s.World.Truth(p.Username, since)
+		checkTruth(t, s, truth)
+		c := st[ids[i]].Counters
+		if c["tasks_failed"] != 0 {
+			t.Errorf("%s: %d tasks failed: %v", p.Username, c["tasks_failed"], c)
+		}
+		hops += c["identity_hops"]
+	}
+	stats := s.Fake.ExitStats()
+	limits, limited := 0, 0
+	for i := 1; i <= 3; i++ {
+		x := stats[igtest.ExitName(i)]
+		if x.Requests == 0 {
+			t.Errorf("exit %d was never used: %+v", i, stats)
+		}
+		limits += x.Limits
+		limited += x.Limited
+	}
+	wall := stats[igtest.ExitName(4)]
+	t.Logf("exits %+v; failovers %d", stats, hops)
+	if limits == 0 || hops == 0 {
+		t.Fatalf("no exit was rate-limited (%d) or no task failed over (%d): the test proves nothing", limits, hops)
+	}
+	if limited > 2*limits {
+		t.Errorf("limited exits served %d requests in %d limits: they must rest at their first 429", limited, limits)
+	}
+	if wall.Requests > 20 {
+		t.Errorf("the walled exit got %d page loads: it must rest after a walled one", wall.Requests)
 	}
 }
 

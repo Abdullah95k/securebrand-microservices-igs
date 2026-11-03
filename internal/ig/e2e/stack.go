@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
@@ -49,6 +51,18 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
 )
+
+// exitDoer names its exit on every request, for fakeig's per-exit faults.
+type exitDoer struct {
+	transport.Doer
+	exit string
+}
+
+func (d exitDoer) Do(ctx context.Context, req *transport.Request) (*transport.Response, error) {
+	r := *req
+	r.Header = append(slices.Clone(req.Header), [2]string{fakeig.ExitHeader, d.exit})
+	return d.Doer.Do(ctx, &r)
+}
 
 // Stack is a running igs pipeline.
 type Stack struct {
@@ -83,6 +97,12 @@ type Options struct {
 	// CrawlerDrain overrides how long a stopping crawler lets in-flight
 	// tasks run before abandoning them (a short one is a crash).
 	CrawlerDrain time.Duration
+	// Exits, when set, sends every request through that many ISP exits
+	// (igtest.ExitName: exit1.test:10001, ...) of a static_list tier, paced
+	// and rested as in production but in seconds. Requests still go straight
+	// to fakeig, naming their exit (fakeig.ExitHeader) for its per-exit
+	// faults.
+	Exits int
 }
 
 // Start brings up the stack; it stops at test cleanup.
@@ -112,6 +132,17 @@ func Start(t *testing.T, o Options) *Stack {
 	cfg.Crawler.Slots, cfg.Crawler.LaneMin = 24, 2
 	cfg.Crawler.Lanes = map[string]int{"p0": 24, "p1": 16, "p2": 8}
 	cfg.Crawler.SuppressionRefresh = time.Hour
+	if o.Exits > 0 {
+		var eps []string
+		for i := 1; i <= o.Exits; i++ {
+			eps = append(eps, "http://"+igtest.ExitName(i))
+		}
+		cfg.IG.Proxy.Tiers = []config.ProxyTier{{Name: "isp", Kind: "static_list", Endpoints: eps}}
+		cfg.IG.Proxy.Routing = map[string][]string{"default": {"isp"}}
+		cfg.IG.ExitRPS = 200
+		cfg.IG.RateLimitRest, cfg.IG.CheckpointRest, cfg.IG.PageWallRest = time.Second, 2*time.Second, 2*time.Second
+		cfg.IG.Proxy.Breaker.Cooldown, cfg.IG.Proxy.Breaker.MaxCooldown = time.Second, 4*time.Second
+	}
 	if o.Config != nil {
 		o.Config(cfg)
 	}
@@ -186,7 +217,13 @@ func Start(t *testing.T, o Options) *Stack {
 	s := &Stack{Cfg: cfg, DB: db, Redis: rdb, Producer: producer, World: world, Fake: fake, Jobs: jobs.New(rdb), S3: s3,
 		groups: map[string]*group{},
 		copts: igapp.CrawlerOptions{DrainTimeout: o.CrawlerDrain, RetryScale: 0.02,
-			DoerFactory: func(transport.Options) (transport.Doer, error) { return transport.NewStd(10 * time.Second), nil }}}
+			DoerFactory: func(to transport.Options) (transport.Doer, error) {
+				d := transport.NewStd(10 * time.Second)
+				if u, err := url.Parse(to.ProxyURL); err == nil && u.Host != "" {
+					return exitDoer{Doer: d, exit: u.Host}, nil
+				}
+				return d, nil
+			}}}
 	for _, tp := range topics.Entity {
 		s.topics = append(s.topics, prefix+tp)
 	}

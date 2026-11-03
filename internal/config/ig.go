@@ -38,9 +38,23 @@ type IG struct {
 	ProfileRPS   int `koanf:"profile_rps"`
 	ProfileRPSP0 int `koanf:"profile_rps_p0"`
 	GlobalRPS    int `koanf:"global_rps"`
-	// PageWallRest rests an exit that sends fresh page loads to the login
-	// page (three of the owner's ten ISP exits did).
-	PageWallRest time.Duration  `koanf:"page_wall_rest"`
+	// ExitRPS paces each proxy exit fleet-wide, however many identities and
+	// pods share it: Instagram limits per IP (U4: one exit at 0.3 a second
+	// met its limit after about an hour). The fleet reads at most exits ×
+	// exit_rps; 0 leaves exits to identity pacing alone.
+	ExitRPS float64 `koanf:"exit_rps"`
+	// RateLimitRest and CheckpointRest rest an exit Instagram rate-limits
+	// or sends a checkpoint, PageWallRest one that sends fresh page loads
+	// to the login page (three of the owner's ten ISP exits did). After a
+	// rest one identity probes the exit; a probe blocked again rests it
+	// twice as long, up to ig.proxy.breaker.max_cooldown.
+	RateLimitRest  time.Duration `koanf:"rate_limit_rest"`
+	CheckpointRest time.Duration `koanf:"checkpoint_rest"`
+	PageWallRest   time.Duration `koanf:"page_wall_rest"`
+	// BlockHops is how many times a task run replaces a blocked identity
+	// (rate limit, checkpoint, login wall) with a fresh one on another exit
+	// and carries on, before it waits for a retry.
+	BlockHops    int            `koanf:"block_hops"`
 	CaptureRaw   string         `koanf:"capture_raw"`
 	Proxy        Proxy          `koanf:"proxy"`
 	QueryBreaker breaker.Config `koanf:"query_breaker"`
@@ -111,6 +125,9 @@ func (c *Config) validateIG() []error {
 	}
 	if g.IdentityRPS <= 0 || g.IdentityBurst <= 0 {
 		errs = append(errs, errors.New("ig.identity_rps and ig.identity_burst must be > 0"))
+	}
+	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 {
+		errs = append(errs, errors.New("ig.exit_rps, ig.rate_limit_rest, ig.checkpoint_rest, ig.page_wall_rest and ig.block_hops must not be negative"))
 	}
 	if g.IdentityMaxRequestsMin <= 0 || g.IdentityMaxRequestsMax < g.IdentityMaxRequestsMin {
 		errs = append(errs, errors.New("ig.identity_max_requests_min must be > 0 and <= identity_max_requests_max"))

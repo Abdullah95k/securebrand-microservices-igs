@@ -74,27 +74,42 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	if sc.Username == "" {
 		return Outcome{Result: Fail, Reason: "profile task without a username (" + sc.ProfileRef + ")"}
 	}
-	id, err := d.identity(ctx, "profile", t.Attempt)
+	id, err := d.identity(ctx, "profile", t.Stalls)
 	if err != nil {
-		return retry(t, "", "30s", "no identity: "+err.Error(), c)
+		return noIdentity(t, "", err, c)
 	}
-	defer d.Pool.Release(id)
+	defer func() { d.Pool.Release(id) }() // id changes on a failover
+	hops := 0
 	page := strings.TrimRight(d.base(), "/") + "/" + sc.Username + "/"
-	if !id.Bootstrapped() {
-		pl, err := d.load(ctx, id, page, t.Lane)
-		c["page_loads"]++
-		if pl != nil {
-			c["wire_bytes"] += pl.Bytes
+	// boot bootstraps a fresh identity on the profile's page, failing over
+	// to another exit when the page load is blocked.
+	boot := func() *Outcome {
+		for !id.Bootstrapped() {
+			pl, err := d.load(ctx, id, page, t.Lane)
+			c["page_loads"]++
+			if pl != nil {
+				c["wire_bytes"] += pl.Bytes
+			}
+			if err != nil && pl == nil {
+				o := retry(t, t.Cursor, "30s", "page load: "+err.Error(), c)
+				return &o
+			}
+			if pl.Class == detect.ContentUnavailable {
+				o := s.unavailable(ctx, t, sc, c, "page 404")
+				return &o
+			}
+			if pl.Class != detect.OK || err != nil {
+				o := classOutcome(t, pl.Class, pl.Reason, t.Cursor, c)
+				if d.failover(ctx, "profile", &id, o, &hops) {
+					continue
+				}
+				return &o
+			}
 		}
-		if err != nil && pl == nil {
-			return retry(t, t.Cursor, "30s", "page load: "+err.Error(), c)
-		}
-		if pl.Class == detect.ContentUnavailable {
-			return s.unavailable(ctx, t, sc, c, "page 404")
-		}
-		if pl.Class != detect.OK || err != nil {
-			return classOutcome(t, pl.Class, pl.Reason, t.Cursor, c)
-		}
+		return nil
+	}
+	if o := boot(); o != nil {
+		return *o
 	}
 	st, _, err := d.Ckpt.Load(ctx, t.LineageId, t.Seq)
 	if err != nil {
@@ -127,9 +142,17 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		// grid's first page (by username) gives the user id the later pages
 		// and the reels tab need.
 		if t.Seq == 0 && (sc.RefreshProfile || t.Mode == commonv1.CrawlMode_CRAWL_MODE_FULL || sc.UserPk == 0) {
-			out, stop := s.profile(ctx, t, id, sc, &st, c, page)
-			if stop {
-				return out
+			for {
+				out, stop := s.profile(ctx, t, id, sc, &st, c, page)
+				if !stop {
+					break
+				}
+				if !d.failover(ctx, "profile", &id, out, &hops) {
+					return out
+				}
+				if o := boot(); o != nil {
+					return *o
+				}
 			}
 		}
 		st.Cursor = phaseGrid + ":"
@@ -161,6 +184,12 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 			return Outcome{Result: Fail, Reason: "unknown phase " + phase, Counters: c}
 		}
 		if out != nil {
+			if d.failover(ctx, "profile", &id, *out, &hops) {
+				if o := boot(); o != nil {
+					return *o
+				}
+				continue // the same page, on another exit
+			}
 			return *out
 		}
 		st.Pages++

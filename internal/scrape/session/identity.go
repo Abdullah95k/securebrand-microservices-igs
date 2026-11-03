@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math/big"
@@ -55,7 +56,18 @@ type Identity struct {
 
 	// observe reports outcomes to the exit's breaker (set by the pool).
 	observe func(detect.Class)
+	// exitWait paces the identity's exit fleet-wide, and resting reports
+	// whether the exit rests (both set by the pool).
+	exitWait func(context.Context) error
+	resting  func() bool
 }
+
+// ErrExitResting means the identity's exit rests (a rate limit, a
+// checkpoint, a login page for fresh visitors, or its bucket's breaker):
+// the request was not sent, and the caller treats it as that exit's rate
+// limit. Requests queued on a limited exit would otherwise each meet the
+// limit, and could prolong it.
+var ErrExitResting = errors.New("session: the identity's exit rests; request not sent")
 
 func newIdentity(id string, ep proxy.Endpoint, fp Fingerprint, d transport.Doer, base *url.URL, rps float64, burst, maxReq int) *Identity {
 	return &Identity{
@@ -94,10 +106,23 @@ func (id *Identity) NextReq() string { return strconv.FormatUint(id.req.Add(1), 
 // SessionParam is the per-identity __s value.
 func (id *Identity) SessionParam() string { return id.sessionID }
 
-// Wait paces this identity (1 request every few seconds plus jitter).
+// Wait paces this identity (1 request every few seconds plus jitter), and
+// its exit, which other identities and pods share. It returns
+// ErrExitResting, at once or after the wait, when the exit rests.
 func (id *Identity) Wait(ctx context.Context) error {
+	if id.ExitResting() {
+		return ErrExitResting
+	}
 	if err := id.limiter.Wait(ctx); err != nil {
 		return err
+	}
+	if id.exitWait != nil {
+		if err := id.exitWait(ctx); err != nil {
+			return err
+		}
+	}
+	if id.ExitResting() {
+		return ErrExitResting
 	}
 	// ±40% think-time jitter on top of the token bucket.
 	j := jitter(time.Duration(float64(time.Second) / float64(id.limiter.Limit()) * 0.4))
@@ -177,6 +202,9 @@ func (id *Identity) Record(c detect.Class) (retire bool, reason string) {
 	}
 	return id.retired != "", id.retired
 }
+
+// ExitResting reports whether the identity's exit rests.
+func (id *Identity) ExitResting() bool { return id.resting != nil && id.resting() }
 
 // RetireReason is non-empty once the identity must not be reused.
 func (id *Identity) RetireReason() string {

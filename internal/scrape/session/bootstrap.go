@@ -107,6 +107,10 @@ func (l *Loader) Load(ctx context.Context, id *Identity, rawURL string) (*PageLo
 	var total int64
 	for hop := 0; hop < 4; hop++ {
 		if err := id.Wait(ctx); err != nil {
+			if errors.Is(err, ErrExitResting) {
+				metrics.Requests.WithLabelValues("page_html", "exit_resting", id.Endpoint.Tier).Inc()
+				return &PageLoad{URL: target, Class: detect.RateLimited, Reason: err.Error(), Bytes: total}, nil
+			}
 			return nil, err
 		}
 		resp, err := id.Doer.Do(ctx, &transport.Request{Method: "GET", URL: target,

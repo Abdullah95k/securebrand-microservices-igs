@@ -54,8 +54,8 @@ groups:
           description: >-
             Rate limits, login walls and checkpoints are above 10% fleet-wide.
             AIMD should be lowering the ceiling, identities retire early and
-            walled exits rest (ig.page_wall_rest); check which ISP buckets
-            are affected.
+            blocked exits rest (ig.rate_limit_rest, ig.checkpoint_rest,
+            ig.page_wall_rest); check which ISP exits are affected.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#block-storm-block-rate--10
       - alert: IgsIgBlockRateCritical
         expr: igs:ig_block_ratio:rate5m > 0.25
@@ -104,6 +104,33 @@ groups:
             The bucket keeps failing its probes after cooldowns. Check the
             ISP provider; remove the endpoints from the proxies Secret.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#block-storm-block-rate--10
+      - alert: IgsIgExitsMostlyResting
+        # Exits rest after a rate limit, a checkpoint or a login page for
+        # fresh visitors; with most of them resting the crawl slows to the rest.
+        expr: |
+          sum by (tier) (max by (pod, tier) (igs_exits_resting))
+            / clamp_min(sum by (tier) (max by (pod, tier) (igs_exits)), 1) > 0.5
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of the {{ $labels.tier }} exits are resting"
+          description: >-
+            Instagram keeps limiting or flagging the exits. Check
+            igs_exit_rests_total by reason: rate limits mean ig.exit_rps is
+            too high for the exits; checkpoints and page walls mean flagged
+            IPs to replace.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#rotation-retries-and-failover
+      - alert: IgsIgTasksParked
+        expr: sum(rate(igs_tasks_total{outcome="parked"}[10m])) > 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: Crawl tasks are parked because every exit is resting
+          description: >-
+            Tasks find no usable exit and wait 5 minutes at a time; after
+            about 4 hours they go to the DLQ. Add exits, or lower
+            ig.exit_rps if the rests are rate limits.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#rotation-retries-and-failover
       - alert: IgsIgIdentitiesRetiringFast
         # Identities retire after 500 to 750 requests by design; retiring on
         # blocks instead means the pool is burning out.
@@ -115,7 +142,7 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "{{ $value | humanizePercentage }} of identities retire on blocks rather than at their request budget"
-          description: Exits meet Instagram's limits before their budget runs out. Lower ig.identity_rps or add ISP exits.
+          description: Exits meet Instagram's limits before their budget runs out. Lower ig.exit_rps or add ISP exits.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#block-storm-block-rate--10
       - alert: IgsIgBrowserFallbackSaturated
         expr: sum(rate(igs_bootstrap_total{method="browser", outcome=~"capped|busy"}[15m])) > 0.05

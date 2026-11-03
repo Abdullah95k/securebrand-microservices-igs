@@ -813,7 +813,7 @@ func (r *runner) profile(ctx context.Context, index int, username string) Profil
 				r.sum.PageWallExits[exit]++
 			}
 			if r.sh.pageLoad(exit, walled) && r.o.PageWallRest > 0 {
-				r.o.Pool.RestExit(id, r.o.PageWallRest)
+				r.o.Pool.RestExit(id, r.o.PageWallRest, "page_wall")
 				r.sum.ExitsRested++
 				r.o.Progress(fmt.Sprintf("  %s: exit %s sent a fresh visit to the login page; resting it for %s", username, exit, r.o.PageWallRest))
 			}
