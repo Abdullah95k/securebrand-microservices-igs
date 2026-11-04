@@ -60,6 +60,16 @@ jobs:
       valkey:
         image: valkey/valkey:8-alpine
         ports: ["6379:6379"]
+      # The shared content store (architecture §6) for igs-content-writer's
+      # tests.
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env: {CLICKHOUSE_USER: igs, CLICKHOUSE_PASSWORD: igs, CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"}
+        ports: ["9000:9000"]
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "clickhouse-client --user igs --password igs --query 'SELECT 1'"
+          --health-interval 2s --health-retries 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -78,8 +88,11 @@ jobs:
           IGS_TEST_REDIS_ADDR: localhost:6379
           IGS_TEST_KAFKA_BROKERS: localhost:19092
           IGS_TEST_SCHEMA_REGISTRY: http://localhost:18081
+          IGS_TEST_CLICKHOUSE_ADDR: localhost:9000
+          IGS_TEST_CLICKHOUSE_USER: igs
+          IGS_TEST_CLICKHOUSE_PASSWORD: igs
           IGS_BROWSER_NO_SANDBOX: "1"
-        run: go test -count=1 -timeout 20m ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./cmd/igsctl/...
+        run: go test -count=1 -timeout 20m ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./internal/content/... ./cmd/igsctl/...
       - name: igs Phase 0 dry run (fakeig, rotated doc_ids; must say GO)
         run: make igs-phase0-dryrun
 

@@ -307,6 +307,29 @@ The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka 
 
 Every event carries the envelope: `platform` (`instagram`), `native_id`, `observed_at`, `published_at`, `version` (newest wins), `collector`, `collector_version` and `raw_ref`. Records are keyed `instagram:<native_id>`. A redelivered record maps to the same event ids, so consumers stay idempotent.
 
+## The shared content store (ClickHouse)
+
+`igs-content-writer` fills ClickHouse (architecture §6) from the `content.*` topics. It knows no platform, so the other collectors' normalized events land in the same tables. Its schema is `migrations/clickhouse/`:
+
+| Table | One row per | Engine |
+|---|---|---|
+| `posts` (highlight items as `kind = 'highlight'`) | post | ReplacingMergeTree(version, is_deleted), by publication month, ordered by (platform, post_id) |
+| `comments` | comment or reply | the same, ordered by (platform, post_id, comment_id) |
+| `accounts` (bio, website, `link_urls` for the entity layer) | account | ReplacingMergeTree(version, is_deleted) |
+| `authors` | comment author (by id, or keyed hash) | ReplacingMergeTree(version) |
+| `media` | image or video | ReplacingMergeTree(version, is_deleted) |
+| `post_metrics`, `comment_metrics`, `account_snapshots` | observation | ReplacingMergeTree on (id, observed_at), by observation month: a redelivered row collapses |
+| `entities`, `entity_accounts` | entity, and each account linked to it (how, confidence, who confirmed) | ReplacingMergeTree(version, is_deleted); filled by entity linking and the client app |
+
+- Ids are text; `*_key` columns hold `cityHash64(platform, id)` for joins.
+- Read the newest version of an entity with `FINAL` (and `WHERE is_deleted = 0`), or `argMax(..., version)`.
+- **Turning it on:**
+  1. set `config.clickhouse` (addresses, database, user; the password in `IGS_CLICKHOUSE__PASSWORD`);
+  2. on a replicated cluster set `cluster`: every table is created `ON CLUSTER` with `Replicated*` engines (at least two replicas and three Keeper nodes);
+  3. with `storage_policy` and `cold_after`, partitions older than `cold_after` move to the policy's `cold` volume (object storage), still queryable;
+  4. enable `components.content-writer`; the install hook runs `igsctl clickhouse migrate`.
+- **Lag:** `IgsContentWriterLag`; `igs_content_written_total{table}` counts rows written. A failed insert is retried until it succeeds; nothing is committed past unwritten rows.
+
 ## Persister quarantine
 
 The persister quarantines what it cannot write on `igs.persist.dlq`, with `x-reason` and `x-error` headers, instead of stalling: undecodable records, or rows Postgres rejects. That data is missing from Postgres until it is fixed and replayed.

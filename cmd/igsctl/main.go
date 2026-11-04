@@ -38,7 +38,8 @@ commands:
   discovery import --file accounts.txt [--origin google|facebook|youtube|manual]
   profiles import --file accounts.txt [--client NAME] [--tier hot|warm|long_tail|auto | --interval 30m] [--paused] [--no-backfill]
   profiles tier --file accounts.txt (--tier hot|warm|long_tail|auto | --interval 30m)
-  profiles pause --file accounts.txt | profiles resume --file accounts.txt`)
+  profiles pause --file accounts.txt | profiles resume --file accounts.txt
+  clickhouse migrate`)
 	os.Exit(2)
 }
 
@@ -85,6 +86,8 @@ func main() {
 		err = discoveryImport(ctx, cfg, rest)
 	case "profiles import":
 		err = profilesImport(ctx, cfg, rest)
+	case "clickhouse migrate":
+		err = clickhouseMigrate(ctx, cfg)
 	case "profiles tier":
 		err = profilesTier(ctx, cfg, rest)
 	case "profiles pause", "profiles resume":
