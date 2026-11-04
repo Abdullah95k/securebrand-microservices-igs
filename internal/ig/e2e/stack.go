@@ -46,6 +46,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
@@ -188,6 +189,14 @@ func Start(t *testing.T, o Options) *Stack {
 	}
 
 	if err := registry.In(registry.IGTables).ApplySeed(ctx, db, seed); err != nil {
+		t.Fatal(err)
+	}
+	// The place list, as igsctl migrate up loads it.
+	kseed, err := keywords.Seed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keywords.ImportSeed(ctx, db, kseed); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.IGLayout.EnsurePartitions(ctx, db, time.Now(), store.PartitionWindow{MonthsBack: 14, MonthsAhead: 1, DaysBack: 1, DaysAhead: 2}); err != nil {

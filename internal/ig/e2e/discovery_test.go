@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
 )
 
 // Profile discovery (M11): two registered profiles co-author with and tag
@@ -224,5 +227,73 @@ func TestDiscoveryIntakeAndDailyCap(t *testing.T) {
 	}
 	if n := count(t, s, `SELECT count(*) FROM profile_schedule WHERE profile_ref IN ('u:found_one', 'u:found_two')`); n != 2 {
 		t.Fatalf("%d of the 2 found accounts on the schedule", n)
+	}
+}
+
+// The shared place list (M12i) is an editable table: an admin lists it
+// (seeded by the stack as migrate up seeds it), turns a spelling off, adds
+// one and removes it, and discovery's scoring follows the table once it is
+// reloaded (keywords.Watch does every 5 minutes).
+func TestDiscoveryKeywordsEditable(t *testing.T) {
+	s := Start(t, Options{Spec: spec()})
+	admin := s.Key(t, httpapi.ScopeAdmin)
+	t.Cleanup(func() {
+		seed, _ := keywords.Seed()
+		discovery.UseKeywords(keywords.SeedMatcher(seed))
+	})
+	var list struct {
+		Keywords []keywords.Keyword `json:"keywords"`
+	}
+	if code := s.Do(t, admin, http.MethodGet, "/v1/discovery/keywords?group=nineveh&language=en", nil, &list); code != http.StatusOK {
+		t.Fatalf("list: %d", code)
+	}
+	var mosul keywords.Keyword
+	for _, k := range list.Keywords {
+		if k.Term == "Mosul" {
+			mosul = k
+		}
+	}
+	if mosul.ID == 0 || !mosul.Enabled {
+		t.Fatalf("Mosul not listed and enabled: %+v", list.Keywords)
+	}
+	score := func(bio string) float64 {
+		m, ok, err := keywords.Load(context.Background(), s.DB)
+		if err != nil || !ok {
+			t.Fatalf("load: %v %v", ok, err)
+		}
+		discovery.UseKeywords(m)
+		return discovery.Score(discovery.Vet{Biography: bio}, discovery.Sightings{})["iraq_city"]
+	}
+	if got := score("Photographer in Mosul"); got != 2 {
+		t.Fatalf("Mosul scores %v, want 2", got)
+	}
+
+	var k keywords.Keyword
+	if code := s.Do(t, admin, http.MethodPatch, fmt.Sprintf("/v1/discovery/keywords/%d", mosul.ID), map[string]any{"enabled": false}, &k); code != http.StatusOK || k.Enabled {
+		t.Fatalf("disable: %d %+v", code, k)
+	}
+	if got := score("Photographer in Mosul"); got != 0 {
+		t.Fatalf("a disabled spelling still scores %v", got)
+	}
+	if code := s.Do(t, admin, http.MethodPost, "/v1/discovery/keywords", map[string]any{"term": "Al Mawsil", "language": "en", "group": "nineveh"}, &k); code != http.StatusCreated {
+		t.Fatalf("add: %d", code)
+	}
+	if got := score("Photographer in al-Mawsil"); got != 2 {
+		t.Fatalf("an added spelling scores %v, want 2", got)
+	}
+	if code := s.Do(t, admin, http.MethodPost, "/v1/discovery/keywords", map[string]any{"term": "al-mawsil", "language": "en"}, nil); code != http.StatusOK {
+		t.Fatalf("a folded duplicate: %d, want 200 (already listed)", code)
+	}
+	if code := s.Do(t, admin, http.MethodPost, "/v1/discovery/keywords", map[string]any{"term": "Mosul", "language": "fr"}, nil); code != http.StatusBadRequest {
+		t.Fatalf("an unknown language: %d", code)
+	}
+	if code := s.Do(t, admin, http.MethodDelete, fmt.Sprintf("/v1/discovery/keywords/%d", k.ID), nil, nil); code != http.StatusNoContent {
+		t.Fatalf("delete: %d", code)
+	}
+	if code := s.Do(t, admin, http.MethodDelete, fmt.Sprintf("/v1/discovery/keywords/%d", k.ID), nil, nil); code != http.StatusNotFound {
+		t.Fatalf("second delete: %d", code)
+	}
+	if code := s.Do(t, s.Key(t, httpapi.ScopeDataRead), http.MethodGet, "/v1/discovery/keywords", nil, nil); code != http.StatusForbidden {
+		t.Fatalf("a non-admin key lists keywords: %d", code)
 	}
 }

@@ -10,6 +10,7 @@
 //	igsctl registry set --file query.json
 //	igsctl registry import --file phase0/out/registry.yaml   make every query of a registry file active
 //	igsctl dlq replay [--reason R] [--max N] [--persist]
+//	igsctl discovery keywords seed|import --file F|list|enable ID|disable ID   the shared Iraq place list
 package main
 
 import (
@@ -36,6 +37,7 @@ commands:
   registry list | registry set --file query.json | registry import --file registry.yaml [--keep-promoted]
   dlq replay [--reason R] [--max N] [--idle 10s] [--persist]
   discovery import --file accounts.txt [--origin google|facebook|youtube|manual]
+  discovery keywords seed | import --file F.yaml|F.csv | list [--language L] [--group G] | enable ID | disable ID
   profiles import --file accounts.txt [--client NAME] [--tier hot|warm|long_tail|auto | --interval 30m] [--paused] [--no-backfill]
   profiles tier --file accounts.txt (--tier hot|warm|long_tail|auto | --interval 30m)
   profiles pause --file accounts.txt | profiles resume --file accounts.txt
@@ -84,6 +86,8 @@ func main() {
 		err = dlqReplay(ctx, cfg, rest)
 	case "discovery import":
 		err = discoveryImport(ctx, cfg, rest)
+	case "discovery keywords":
+		err = discoveryKeywords(ctx, cfg, rest)
 	case "profiles import":
 		err = profilesImport(ctx, cfg, rest)
 	case "clickhouse migrate":

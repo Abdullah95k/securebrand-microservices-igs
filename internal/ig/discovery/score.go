@@ -12,7 +12,39 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync/atomic"
+	"time"
 	"unicode"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
+)
+
+// places is the shared Iraq place list discovery matches (Iraq, the
+// Kurdistan Region, the governorates and their towns): the embedded seed
+// until UseKeywords swaps in the table's (ig.discovery_keywords).
+var places atomic.Pointer[keywords.Matcher]
+
+func init() {
+	seed, err := keywords.Seed()
+	if err != nil {
+		panic(err) // the embedded seed; its tests parse it
+	}
+	places.Store(keywords.SeedMatcher(seed))
+}
+
+// UseKeywords makes discovery match m's places (keywords.Watch calls it
+// with the table's enabled keywords).
+func UseKeywords(m *keywords.Matcher) { places.Store(m) }
+
+// KeywordsRefresh is how often the crawlers and the scheduler reload the
+// place list, so an operator's change counts within minutes.
+const KeywordsRefresh = 5 * time.Minute
+
+// Place groups with a signal of their own; every other group is a
+// governorate.
+const (
+	groupIraq      = "iraq"
+	groupKurdistan = "kurdistan_region"
 )
 
 // Vet is what a vet read of a candidate found.
@@ -77,8 +109,9 @@ func (s Signals) Sum() float64 {
 // Score rates how Iraqi a candidate is, or how much it addresses an Iraqi
 // audience. Its own words count most:
 //   - Iraq named (any script, 🇮🇶): 3; an Iraqi phone (+964, 07xx) 3; an
-//     .iq link 2; an Iraqi city or province 2, 3 for two or more (1 when
-//     only in captions); Kurdistan 1.5;
+//     .iq link 2; a place in an Iraqi governorate 2, 3 for two or more
+//     governorates (1 when only in captions); Kurdistan 1.5. Places are
+//     the shared keyword list's (places, UseKeywords);
 //   - Sorani Kurdish letters 1.5; Iraqi dialect 1, 2 for three or more
 //     markers; mostly Arabic script 1;
 //   - another country named without Iraq: -2.
@@ -258,20 +291,22 @@ func scan(text string) textSignals {
 			forms = append(forms, variants(w+" "+words[i+1])...)
 		}
 		for _, f := range forms {
-			switch {
-			case iraqTerms[f]:
-				t.iraq = true
-			case kurdistanTerms[f]:
-				t.kurdistan = true
-			case otherCountries[f]:
+			if otherCountries[f] {
 				t.otherCountry = true
-			}
-			if c, ok := cities[f]; ok {
-				t.cities[c] = true
 			}
 			if dialect[f] {
 				t.dialect++
 			}
+		}
+	}
+	for g := range places.Load().Groups(text) {
+		switch g {
+		case groupIraq:
+			t.iraq = true
+		case groupKurdistan:
+			t.kurdistan = true
+		default:
+			t.cities[g] = true
 		}
 	}
 	return t
@@ -328,11 +363,6 @@ func variants(w string) []string {
 // Arabic does not use: ڕ ڵ ێ ۆ ە.
 const soraniLetters = "ڕڵێۆە"
 
-var iraqTerms = set("iraq", "iraqi", "iraqis", "irak", "iraqia", "عراق", "عراقي", "عراقيه", "عراقيين", "العراق", "العراقي", "العراقيه",
-	"عيراق", "عێراق", "عيراقي")
-
-var kurdistanTerms = set("kurdistan", "krg", "كردستان", "کوردستان", "كوردستان", "kurdistanê")
-
 var otherCountries = set("saudi", "ksa", "riyadh", "jeddah", "uae", "dubai", "abudhabi", "abu dhabi", "sharjah", "kuwait", "qatar", "doha",
 	"bahrain", "oman", "muscat", "egypt", "cairo", "jordan", "amman", "syria", "damascus", "lebanon", "beirut", "iran", "tehran", "turkey",
 	"istanbul", "morocco", "algeria", "tunisia", "libya", "yemen", "sudan", "palestine",
@@ -341,52 +371,6 @@ var otherCountries = set("saudi", "ksa", "riyadh", "jeddah", "uae", "dubai", "ab
 	"اليمن", "السودان", "فلسطين")
 
 var otherFlags = []string{"🇸🇦", "🇦🇪", "🇰🇼", "🇶🇦", "🇧🇭", "🇴🇲", "🇪🇬", "🇯🇴", "🇸🇾", "🇱🇧", "🇮🇷", "🇹🇷", "🇲🇦", "🇩🇿", "🇹🇳", "🇱🇾", "🇾🇪", "🇸🇩", "🇵🇸"}
-
-// cities maps the names of Iraq's cities and provinces (Latin, Arabic and
-// Kurdish spellings, folded as tokens are) to one name each.
-var cities = func() map[string]string {
-	m := map[string]string{}
-	for name, forms := range map[string][]string{
-		"baghdad":      {"baghdad", "بغداد"},
-		"basra":        {"basra", "basrah", "بصره", "البصره"},
-		"mosul":        {"mosul", "موصل", "الموصل"},
-		"erbil":        {"erbil", "arbil", "irbil", "hawler", "hewler", "hewlêr", "اربيل", "هەولێر", "ههولێر", "هولير"},
-		"sulaymaniyah": {"sulaymaniyah", "sulaimani", "sulaymani", "slemani", "silemani", "سليمانيه", "السليمانيه", "سلێمانی", "سلێماني", "سليماني"},
-		"duhok":        {"duhok", "dohuk", "dahuk", "دهوك", "دهۆک", "دهۆك"},
-		"kirkuk":       {"kirkuk", "كركوك", "کەرکووک", "كهركووك"},
-		"najaf":        {"najaf", "نجف", "النجف"},
-		"karbala":      {"karbala", "kerbala", "كربلاء", "كربلا"},
-		"nasiriyah":    {"nasiriyah", "nasiriya", "ناصريه", "الناصريه"},
-		"hillah":       {"hillah", "hilla", "حله", "الحله"},
-		"ramadi":       {"ramadi", "رمادي", "الرمادي"},
-		"fallujah":     {"fallujah", "falluja", "فلوجه", "الفلوجه"},
-		"samarra":      {"samarra", "سامراء"},
-		"amarah":       {"amarah", "amara", "العماره"},
-		"diwaniyah":    {"diwaniyah", "diwaniya", "ديوانيه", "الديوانيه"},
-		"kut":          {"kut", "الكوت"},
-		"baqubah":      {"baqubah", "baquba", "بعقوبه"},
-		"tikrit":       {"tikrit", "تكريت"},
-		"halabja":      {"halabja", "حلبجه", "هەڵەبجە", "ههڵهبجه"},
-		"zakho":        {"zakho", "زاخو"},
-		"kufa":         {"kufa", "الكوفه"},
-		"anbar":        {"anbar", "انبار", "الانبار"},
-		"diyala":       {"diyala", "ديالى", "ديالي"},
-		"wasit":        {"wasit", "واسط"},
-		"maysan":       {"maysan", "misan", "ميسان"},
-		"dhi qar":      {"dhi qar", "dhiqar", "ذي قار", "ذيقار"},
-		"muthanna":     {"muthanna", "samawah", "المثني", "السماوه"},
-		"babylon":      {"babylon", "babil", "بابل"},
-		"salahuddin":   {"salahuddin", "salah al din", "صلاح الدين"},
-		"nineveh":      {"nineveh", "ninawa", "نينوي", "نينوى"},
-		"qadisiyah":    {"qadisiyah", "القادسيه"},
-		"zubair":       {"zubair", "الزبير"},
-	} {
-		for _, f := range forms {
-			m[strings.Join(tokens(f), " ")] = name
-		}
-	}
-	return m
-}()
 
 // dialect are words of Iraqi Arabic that other dialects rarely write.
 var dialect = set("شلونك", "شلونكم", "شلونج", "ماكو", "اكو", "هسه", "كلش", "شكو", "اغاتي", "شكد", "وياك", "وياكم", "هواي")

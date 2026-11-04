@@ -71,6 +71,10 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/discovery/candidates", req(httpapi.ScopeAdmin, s.intakeCandidates))
 		r.Post("/discovery/candidates/{username}/reject", req(httpapi.ScopeAdmin, s.rejectCandidate))
 		r.Post("/discovery/candidates/{username}/accept", req(httpapi.ScopeAdmin, s.acceptCandidate))
+		r.Get("/discovery/keywords", req(httpapi.ScopeAdmin, s.listKeywords))
+		r.Post("/discovery/keywords", req(httpapi.ScopeAdmin, s.createKeyword))
+		r.Patch("/discovery/keywords/{id}", req(httpapi.ScopeAdmin, s.updateKeyword))
+		r.Delete("/discovery/keywords/{id}", req(httpapi.ScopeAdmin, s.deleteKeyword))
 
 		r.Get("/admin/queries", req(httpapi.ScopeAdmin, s.listQueries))
 		r.Put("/admin/queries/{name}", req(httpapi.ScopeAdmin, s.putQuery))
