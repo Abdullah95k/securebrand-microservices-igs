@@ -372,6 +372,8 @@ func (s *Stack) stop(name string) {
 func (s *Stack) RestartCrawler(t *testing.T) {
 	t.Helper()
 	s.stop("crawler")
+	// As igs-crawler does once its consumers drained.
+	s.Crawler.Park(context.Background())
 	c, err := igapp.NewCrawler(context.Background(), s.Cfg, s.DB, s.Redis, s.Producer, s.copts)
 	if err != nil {
 		t.Fatal(err)

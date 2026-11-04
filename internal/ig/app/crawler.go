@@ -62,6 +62,12 @@ type Crawler struct {
 	Components  []run.Func
 }
 
+// Park keeps the crawler's idle identities for the next pod on the same
+// exits (ig.keep_identities). Call it once the components have returned.
+func (c *Crawler) Park(ctx context.Context) int {
+	return c.Deps.Pool.Park(ctx)
+}
+
 // CrawlerOptions customise construction (tests).
 type CrawlerOptions struct {
 	Stages      []string
@@ -123,7 +129,8 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		MaxRequestsMin: g.IdentityMaxRequestsMin, MaxRequestsMax: g.IdentityMaxRequestsMax,
 		MaxPerTier: max(16, slots*len(stages)*13/10),
 		ExitRPS:    g.ExitRPS, ExitPacer: ratelimit.NewRedis(rdb),
-		Rest: map[detect.Class]time.Duration{detect.RateLimited: g.RateLimitRest, detect.Checkpoint: g.CheckpointRest},
+		Rest:  map[detect.Class]time.Duration{detect.RateLimited: g.RateLimitRest, detect.Checkpoint: g.CheckpointRest},
+		Store: ratelimit.NewParkedIdentities(rdb, cfg.Kafka.TopicPrefix), KeepFor: g.KeepIdentities,
 	}, proxies, fps, o.DoerFactory)
 	if err != nil {
 		return nil, err
@@ -167,6 +174,10 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 	c.Components = []run.Func{
 		func(ctx context.Context) error { return reg.Run(ctx, g.RegistryRefresh) },
 		func(ctx context.Context) error { return supp.Run(ctx, cfg.Crawler.SuppressionRefresh) },
+	}
+	if g.ShareExitRests {
+		proxies.ShareRests(ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix))
+		c.Components = append(c.Components, func(ctx context.Context) error { return proxies.SyncRests(ctx, g.ExitRestSync) })
 	}
 	if g.Discovery.Enabled && db != nil {
 		deps.Discovery = discovery.NewCollector(db, g.Discovery, g.Privacy.PIIMode == "full")

@@ -81,7 +81,13 @@ The fleet therefore reads at most exits × `ig.exit_rps`: 2.5 requests a second 
 - While an exit rests, its identities send nothing more. A request already waiting on the exit's pacing is dropped unsent and counts as the exit's rate limit, so a limited IP sees one 429, not one per identity queued on it. `TestExitFailoverEqualsTruth` checks this.
 - After the rest, one identity probes the exit. If the probe is blocked again, the exit rests twice as long, up to `ig.proxy.breaker.max_cooldown` (30 min). Three good answers put it back in use.
 - Separately, the exit's bucket (its /24, or its host and port) opens its breaker at a 15% failure rate over a minute.
-- Rests are per crawler pod: each pod learns of a limited exit from its own first 429.
+- **Rests hold for every pod** (`ig.share_exit_rests`): a pod that rests an exit records it in Valkey, and every crawler and registry-sync pod reads the shared rests every `ig.exit_rest_sync` (2 s). So a limited IP sees one 429 for the whole fleet, not one per pod. A failed probe's longer rest is shared the same way. After a rest each pod may probe the exit once, but the exit's fleet-wide pacing spaces those probes 4 s apart, and the first failed one rests it again for all. `TestIdentitiesAndRestsOutliveAPod` checks a rest taken in one crawler holds in another.
+
+**Sessions across restarts.** A crawler pod that stops (a rollout, a scale-down) keeps its idle identities in Valkey for `ig.keep_identities` (1 h): their cookies and tokens, never the proxy credentials. The pods that start next take them up exit by exit (`igs_identity_unparked_total`), so a rolling restart does not load a page on every exit again. A pod that crashes loses its identities; every page load still waits for its exit's pacing, so even then the IPs do not all load pages at once.
+
+**IPs shared with fbs, yts and tks.** igs paces and rests an exit only for its own requests. When the same IPs also carry the other collectors' traffic:
+- Instagram's limit counts only requests to Instagram, so igs's pacing stays right.
+- Meta may judge an IP by its Facebook and Instagram traffic together. A run of Facebook blocks on an IP can show up in igs as page walls or checkpoints on that exit; igs then rests it like any other.
 
 **In-task failover.** When a request is blocked (rate limit, checkpoint, login wall), the task takes an identity on another exit, bootstraps it if new, and carries on from the same page. It does this up to `ig.block_hops` (2) times a run before it waits for a retry. A login wall at the same grid or comment cursor on three fresh identities still ends that stream as truncated (U1), whether the three came in one run or across retries.
 

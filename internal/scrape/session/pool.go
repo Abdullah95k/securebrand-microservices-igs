@@ -38,6 +38,10 @@ type PoolConfig struct {
 	// Rest rests an exit for the duration when one of its responses has
 	// the class (ig.rate_limit_rest, ig.checkpoint_rest).
 	Rest map[detect.Class]time.Duration
+	// Store keeps idle identities across restarts for KeepFor (Park);
+	// a new identity on an exit takes a stored one first. nil or 0: off.
+	Store   IdentityStore
+	KeepFor time.Duration
 }
 
 // ExitPacer paces a key fleet-wide at a rate below one a second
@@ -264,13 +268,21 @@ func (p *Pool) createLocked(tier string, skip func(proxy.Endpoint) bool) (*Ident
 	return id, nil
 }
 
+// create makes an identity on ep: one parked there by a process that
+// stopped, if the store holds one, else a fresh one.
 func (p *Pool) create(ep proxy.Endpoint) (*Identity, error) {
+	if id := p.unpark(ep); id != nil {
+		return id, nil
+	}
 	fp := p.fps[p.cfg.Profiles[randRange(0, len(p.cfg.Profiles))]]
+	return p.build(ep, fp, randRange(p.cfg.MaxRequestsMin, p.cfg.MaxRequestsMax))
+}
+
+func (p *Pool) build(ep proxy.Endpoint, fp Fingerprint, maxReq int) (*Identity, error) {
 	d, err := p.newDoer(transport.Options{Profile: fp.Profile, ProxyURL: ep.URL, Timeout: p.cfg.Timeout})
 	if err != nil {
 		return nil, err
 	}
-	maxReq := randRange(p.cfg.MaxRequestsMin, p.cfg.MaxRequestsMax)
 	id := newIdentity(newID(), ep, fp, d, p.base, p.cfg.IdentityRPS, p.cfg.IdentityBurst, maxReq)
 	id.observe = func(c detect.Class) {
 		p.proxies.Observe(ep, c)
