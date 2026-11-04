@@ -32,6 +32,7 @@ Buy exits for where you want to be in a month. Phase 0 found 3 of 10 exits flagg
 | Valkey (or Redis) 7+ | job accounting, leases, checkpoints, rate limits. Plan about 5 GB at 300k profiles ([sizing](igs-operations.md#capacity-and-sizing)) |
 | S3 | two buckets: media and raw captures. Media files stay off until the analysis service exists (D5) |
 | ISP proxies | the exits from step 1 |
+| Backups | before the canary: Postgres point-in-time recovery on, the daily dump of schema `ig`, ClickHouse backups, and versioning on the buckets ([backups](igs-backups.md)) |
 
 ## 3. Release
 
@@ -204,4 +205,5 @@ igs's migrations only add tables, columns and partitions, so the previous releas
 
 - [`igs-operations.md`](igs-operations.md): alerts, signals, rotation and failover, budget, sizing.
 - [`igs-registry-sync.md`](igs-registry-sync.md): doc_id rotations.
+- [`igs-backups.md`](igs-backups.md): what is backed up, how to restore, and the monthly drill.
 - Releases: tag, then the same `helm upgrade` with the new `--version`.

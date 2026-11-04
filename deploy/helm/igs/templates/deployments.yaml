@@ -10,7 +10,9 @@ metadata:
     {{- include "igs.labels" $root | nindent 4 }}
     app.kubernetes.io/component: {{ $name }}
 spec:
-  {{- if not (and $root.Values.keda.enabled $c.autoscale) }}
+  {{- if $root.Values.paused }}
+  replicas: 0
+  {{- else if not (and $root.Values.keda.enabled $c.autoscale) }}
   replicas: {{ $c.replicas }}
   {{- end }}
   revisionHistoryLimit: 5
@@ -78,6 +80,10 @@ kind: ScaledObject
 metadata:
   name: {{ include "igs.fullname" $root }}-{{ $name }}
   labels: {{- include "igs.labels" $root | nindent 4 }}
+  {{- if $root.Values.paused }}
+  annotations:
+    autoscaling.keda.sh/paused-replicas: "0"
+  {{- end }}
 spec:
   scaleTargetRef:
     name: {{ include "igs.fullname" $root }}-{{ $name }}

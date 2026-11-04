@@ -15,6 +15,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
@@ -31,6 +32,8 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/fixtures"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/probe"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/tagged"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/docids"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
@@ -46,6 +49,8 @@ func main() {
 	switch os.Args[1] {
 	case "probe":
 		os.Exit(runProbe(os.Args[2:]))
+	case "tagged":
+		os.Exit(runTagged(os.Args[2:]))
 	case "fixtures":
 		os.Exit(runFixtures(os.Args[2:]))
 	case "phase0":
@@ -60,6 +65,8 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: igs-spike probe --profiles FILE [--config FILE] [--tier NAME] [--out-dir DIR]
        igs-spike probe --dry-run
+       igs-spike tagged --profiles FILE --config FILE --tier isp [--out-dir DIR]
+       igs-spike tagged --dry-run
        igs-spike fixtures --out testdata/ig --salt S FILE[=CASE]...
        igs-spike phase0 --profiles FILE --config FILE --tiers isp[,residential] [--out-dir DIR] [--from STEP]
 
@@ -68,6 +75,12 @@ pacing like a person (one request every few seconds). It writes report.json,
 profiles.csv, posts.csv, comments.csv and images/ to --out-dir, and the
 same as a .tar.gz beside it. The files hold personal data: keep them off git.
 --dry-run rehearses against a built-in fake Instagram, with no traffic.
+
+tagged tests each profile's tagged tab logged out: whether Instagram
+serves the tab's page, whether the page carries tagged posts, and which
+operation (found in the page's script bundles) pages through them. It
+writes report.json and raw/ to --out-dir; the summary it prints names no
+account and is what to send back. 5 to 10 profiles are enough.
 
 fixtures turns raw responses (the probe's raw/ files, or a HAR's bodies)
 into parser fixtures with no personal data: usernames, names, people's ids
@@ -222,6 +235,83 @@ func runProbe(args []string) int {
 		fmt.Fprintf(os.Stderr, "  stopped early (Ctrl-C): profile %d of %d is the first not read completely (partial profiles count for no question).\n"+
 			"  To continue, run again with --start-at %d and a new output directory.\n", rep.ContinueAt, len(names), rep.ContinueAt)
 	}
+	return 0
+}
+
+func runTagged(args []string) int {
+	fs := flag.NewFlagSet("igs-spike tagged", flag.ExitOnError)
+	profilesFile := fs.String("profiles", "", "file with one public profile per line; profiles tagged by others (brands, public figures) answer best")
+	cfgPath := fs.String("config", os.Getenv("IGS_CONFIG"), "config file with proxy tiers under ig.proxy or fb.proxy (phase0/proxies.yaml)")
+	tier := fs.String("tier", "direct", "proxy tier to use (direct = this machine's own IP)")
+	outDir := fs.String("out-dir", "", "output directory (default phase0/out-tagged/<tier>-<time>)")
+	rps := fs.Float64("rps", 0.3, "requests per second per identity")
+	maxOps := fs.Int("max-ops", 3, "tagged-looking operations to try per profile")
+	maxBundles := fs.Int("max-bundles", 60, "script bundles to scan for the operations (each is fetched once a run)")
+	fingerprint := fs.String("fingerprint", "chrome_146", "browser fingerprint profile (configs/fingerprints.yaml)")
+	base := fs.String("base", igclient.BaseURL, "Instagram base URL")
+	dryRun := fs.Bool("dry-run", false, "rehearse against a built-in fake Instagram whose tagged tab is open (no traffic, no proxies)")
+	_ = fs.Parse(args)
+
+	var names []string
+	cfg := &config.Config{}
+	if *dryRun {
+		w := fakeig.NewWorld(fakeig.DefaultSpec())
+		hs := httptest.NewServer(fakeig.NewServer(w, fakeig.Options{Faults: fakeig.Faults{TaggedTab: fakeig.TaggedOpen}}))
+		defer hs.Close()
+		*base, *tier, *rps = hs.URL, "direct", 1000
+		for _, p := range w.Profiles() {
+			names = append(names, p.Username)
+		}
+		if *outDir == "" {
+			*outDir = "phase0/out-tagged-dryrun"
+		}
+	} else {
+		if *profilesFile == "" {
+			fmt.Fprintln(os.Stderr, "tagged: --profiles is required (or --dry-run)")
+			return 2
+		}
+		var err error
+		if names, err = readProfiles(*profilesFile); err != nil {
+			fmt.Fprintln(os.Stderr, "tagged:", err)
+			return 1
+		}
+		if cfg, err = config.Load(*cfgPath); err != nil {
+			fmt.Fprintln(os.Stderr, "tagged: config:", err)
+			return 1
+		}
+	}
+	stack, err := newStack(cfg, *base, *fingerprint, *rps, 1, 0)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tagged:", err)
+		return 1
+	}
+	seed, err := igclient.Seed()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tagged:", err)
+		return 1
+	}
+	if *outDir == "" {
+		*outDir = filepath.Join("phase0", "out-tagged", *tier+"-"+time.Now().UTC().Format("20060102-150405"))
+	}
+	// Bundles come from Instagram's static CDN, fetched directly as the
+	// phase0 docids step does.
+	hc := &http.Client{Timeout: 30 * time.Second}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintf(os.Stderr, "tagged: %d profiles, tier %s; Ctrl-C stops and keeps what was read\n", len(names), *tier)
+	rep := tagged.Run(ctx, tagged.Options{BaseURL: *base, Profiles: names, Tier: *tier, Pool: stack.pool, Loader: stack.loader,
+		GQL: stack.gql, Seed: seed, Scanner: &docids.Scanner{Fetch: docids.HTTPFetcher(hc), MaxBundles: *maxBundles},
+		MaxOps: *maxOps, RawDir: filepath.Join(*outDir, "raw"),
+		Progress: func(line string) { fmt.Fprintln(os.Stderr, "tagged:", line) }})
+	if err := tagged.Write(*outDir, rep); err != nil {
+		fmt.Fprintln(os.Stderr, "tagged: write:", err)
+		return 1
+	}
+	s := rep.Summary
+	fmt.Fprintf(os.Stderr, "tagged: wrote %s/report.json and raw/ (they hold personal data: keep them off git)\n", *outDir)
+	fmt.Printf("SUMMARY (safe to send back)\n  %s\n  profiles %d; profile page ok %d; tagged page ok %d, login page %d, other %d; embedded posts on %d\n  operations seen %d: %v\n  worked: %v\n  answers: %v\n",
+		s.Verdict(), s.Profiles, s.ProfilePageOK, s.TaggedPageOK, s.TaggedLogin, s.TaggedOther, s.EmbeddedPosts,
+		s.OperationsSeen, rep.Operations, s.Worked, s.Answers)
 	return 0
 }
 

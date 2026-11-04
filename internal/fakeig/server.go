@@ -29,6 +29,18 @@ const (
 	OpComments   = "PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery"
 	OpHighlights = "PolarisStoriesV3HighlightsLoggedOutPageQuery"
 	OpReels      = "PolarisLoggedOutDesktopWWWProfileReelsTabContentQuery_connection"
+	// OpTagged is a stand-in for the tagged tab's query: no recording has
+	// shown its name or variables yet (Faults.TaggedTab).
+	OpTagged = "PolarisProfileTaggedTabContentQuery"
+)
+
+// TaggedDocID is the doc_id the fake's bundle declares for OpTagged.
+const TaggedDocID = "9100000000000001"
+
+// Tagged-tab answers (Faults.TaggedTab).
+const (
+	TaggedOpen   = "open"   // the page embeds the first posts; OpTagged pages on
+	TaggedWalled = "walled" // the page sends logged-out visitors to /accounts/login/
 )
 
 // GridPageSize and CommentPageSize are the recorded page sizes.
@@ -98,6 +110,11 @@ type Faults struct {
 	// with a path, and the real page_info comes last in a deferred part. A
 	// reader of the first part alone sees 0 posts and no next page.
 	StreamGrid bool
+	// TaggedTab serves /<username>/tagged/ and, when TaggedOpen, OpTagged
+	// (by "user_id" with "count", or "id" with "first", as either the
+	// user's pk or id): the posts of other accounts that tag the profile.
+	// Empty serves neither, as before.
+	TaggedTab string
 }
 
 // Options configure a server.
@@ -286,6 +303,18 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		}
 		data = map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID,
 			"polaris_clips_connection": s.reelsPage(p, 0, 12, "")}}
+	case len(parts) == 2 && parts[1] == "tagged" && s.opts.Faults.TaggedTab != "":
+		p := s.World.Profile(parts[0])
+		if p == nil {
+			http.NotFound(w, r)
+			return
+		}
+		if s.opts.Faults.TaggedTab == TaggedWalled {
+			http.Redirect(w, r, "/accounts/login/?next="+r.URL.Path, http.StatusFound)
+			return
+		}
+		data = map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID,
+			taggedConnKey: s.taggedPage(p, 0, GridPageSize, "")}}
 	case len(parts) == 1 && parts[0] != "":
 		p := s.World.Profile(parts[0])
 		if p == nil {
@@ -419,7 +448,8 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 		softError(w, "client state missing")
 		return
 	}
-	if docs, ok := s.opts.Docs[friendly]; s.opts.Docs != nil && (!ok || !slices.Contains(docs, f.Get("doc_id"))) {
+	tagged := friendly == OpTagged && f.Get("doc_id") == TaggedDocID
+	if docs, ok := s.opts.Docs[friendly]; s.opts.Docs != nil && !tagged && (!ok || !slices.Contains(docs, f.Get("doc_id"))) {
 		write(w, map[string]any{"errors": []any{map[string]any{"message": "PersistedQueryNotFound: doc_id " + f.Get("doc_id") + " is not a known persisted query"}}})
 		return
 	}
@@ -525,6 +555,40 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 			"polaris_clips_connection": s.reelsPage(p, offset, s.pageSize(vars, ReelsPageSize), lsd)}}))
 	case OpHighlights:
 		write(w, data(map[string]any{"xdt_api__v1__feed__reels_media__connection": s.highlights(vars["reel_ids"])}))
+	case OpTagged:
+		if s.opts.Faults.TaggedTab != TaggedOpen {
+			write(w, map[string]any{"errors": []any{map[string]any{"message": "unknown persisted query " + friendly}}})
+			return
+		}
+		key, sizeKey := "user_id", "count"
+		if _, ok := vars["id"]; ok {
+			key, sizeKey = "id", "first"
+		}
+		p := s.World.byID[sv(vars[key])]
+		if p == nil {
+			if pk, err := strconv.ParseInt(sv(vars[key]), 10, 64); err == nil {
+				p = s.World.byPK[pk]
+			}
+		}
+		if p == nil {
+			write(w, data(map[string]any{taggedConnKey: nil}))
+			return
+		}
+		offset := 0
+		if c := sv(vars["after"]); c != "" {
+			var ok bool
+			if offset, ok = s.cursor(c, "t", p.PK, id); !ok {
+				softError(w, "invalid cursor")
+				return
+			}
+		}
+		size := GridPageSize
+		if v, ok := vars[sizeKey].(json.Number); ok {
+			if i, err := v.Int64(); err == nil && i > 0 {
+				size = int(i)
+			}
+		}
+		write(w, data(map[string]any{taggedConnKey: s.taggedPage(p, offset, size, "")}))
 	default:
 		write(w, map[string]any{"errors": []any{map[string]any{"message": "unknown persisted query " + friendly}}})
 	}
@@ -607,6 +671,32 @@ func (s *Server) reelsPage(p *Profile, offset, size int, lsd string) map[string]
 	return map[string]any{"edges": edges, "page_info": pi}
 }
 
+const taggedConnKey = "xdt_api__v1__usertags__user_id__feed_connection"
+
+// taggedPage is a page of the profile's tagged tab: a stand-in, every
+// fifth post of the next profile in the world, as if those tagged it.
+func (s *Server) taggedPage(p *Profile, offset, size int, lsd string) map[string]any {
+	var tagged []*Post
+	if ps := s.World.profiles; len(ps) > 1 {
+		next := ps[(slices.Index(ps, p)+1)%len(ps)]
+		for i, x := range next.Posts {
+			if i%5 == 0 && !x.Deleted && !x.Gated {
+				tagged = append(tagged, x)
+			}
+		}
+	}
+	end := min(offset+size, len(tagged))
+	edges := []any{}
+	for _, x := range tagged[min(offset, end):end] {
+		edges = append(edges, map[string]any{"node": mediaJSON(x, false, s.cdn())})
+	}
+	pi := map[string]any{"has_next_page": end < len(tagged), "end_cursor": nil}
+	if end < len(tagged) {
+		pi["end_cursor"] = encodeCursor("t", p.PK, end, lsd)
+	}
+	return map[string]any{"edges": edges, "page_info": pi}
+}
+
 func (s *Server) commentPage(post *Post, offset, size int, lsd string) map[string]any {
 	if !s.opts.Faults.CursorBound {
 		lsd = ""
@@ -665,6 +755,9 @@ func (s *Server) bundle(w http.ResponseWriter) {
 		if ids := s.opts.Docs[n]; len(ids) > 0 {
 			fmt.Fprintf(&b, `__d("%s_instagramRelayOperation",[],(function(a,b,c,d,e,f){e.exports="%s"}),null);`+"\n", n, ids[0])
 		}
+	}
+	if s.opts.Faults.TaggedTab != "" && !s.opts.Faults.NoBundleDocIDs {
+		fmt.Fprintf(&b, `__d("%s_instagramRelayOperation",[],(function(a,b,c,d,e,f){e.exports="%s"}),null);`+"\n", OpTagged, TaggedDocID)
 	}
 	_, _ = w.Write([]byte(b.String()))
 }
