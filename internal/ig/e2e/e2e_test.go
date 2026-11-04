@@ -3,18 +3,22 @@ package e2e
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 	dto "github.com/prometheus/client_model/go"
+	"google.golang.org/protobuf/proto"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
+	contentv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/content/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 )
@@ -206,6 +210,77 @@ func TestRawResponsesKept(t *testing.T) {
 	for _, q := range []string{"profile", "comments", "post_page", "reels"} {
 		if seen[q] == 0 {
 			t.Errorf("no raw %s responses kept: %v", q, seen)
+		}
+	}
+}
+
+// igs-normalizer publishes every entity the persister stores to the shared
+// content contract: each post (highlight items as posts of kind
+// highlight), comment and account, with the envelope.
+func TestContentEventsMatchStore(t *testing.T) {
+	sp := spec()
+	sp.Profiles = 2
+	s := Start(t, Options{Spec: sp})
+	s.StartNormalizer(t)
+	lim := s.Limits()
+	var ids []string
+	for _, p := range s.World.Profiles() {
+		ids = append(ids, s.Crawl(t, p.Username, full, lim, nil))
+	}
+	s.Wait(t, 2*time.Minute, ids...)
+	natives := func(topic string, kind func([]byte) (string, string)) map[string]string {
+		got := map[string]string{}
+		for _, r := range s.ReadTopic(t, topic, 3*time.Second) {
+			id, k := kind(r.Value)
+			got[id] = k
+		}
+		return got
+	}
+	posts := natives(topics.ContentPost, func(b []byte) (string, string) {
+		var p contentv1.Post
+		if err := proto.Unmarshal(b, &p); err != nil || p.Envelope.GetPlatform() != "instagram" || p.Envelope.GetVersion() == 0 ||
+			p.Envelope.GetCollector() != "igs" || p.AccountId == "" {
+			t.Fatalf("content post %+v %v", &p, err)
+		}
+		return p.Envelope.NativeId, p.Kind
+	})
+	comments := natives(topics.ContentComment, func(b []byte) (string, string) {
+		var c contentv1.Comment
+		if err := proto.Unmarshal(b, &c); err != nil || c.PostId == "" {
+			t.Fatalf("content comment %+v %v", &c, err)
+		}
+		return c.Envelope.NativeId, ""
+	})
+	accounts := natives(topics.ContentAccount, func(b []byte) (string, string) {
+		var a contentv1.Account
+		if err := proto.Unmarshal(b, &a); err != nil {
+			t.Fatal(err)
+		}
+		return a.Envelope.NativeId, a.Handle
+	})
+	count := func(q string) int {
+		var n int
+		_ = s.DB.QueryRow(context.Background(), q).Scan(&n)
+		return n
+	}
+	highlights := 0
+	for _, k := range posts {
+		if k == "highlight" {
+			highlights++
+		}
+	}
+	if want := count(`SELECT count(*) FROM posts`); len(posts) != want || want == 0 {
+		t.Errorf("%d content posts, the store has %d", len(posts), want)
+	}
+	if want := count(`SELECT count(*) FROM posts WHERE kind = 'highlight'`); highlights != want || want == 0 {
+		t.Errorf("%d content highlight items, the store has %d", highlights, want)
+	}
+	if want := count(`SELECT count(*) FROM comments`); len(comments) != want || want == 0 {
+		t.Errorf("%d content comments, the store has %d", len(comments), want)
+	}
+	for _, p := range s.World.Profiles() {
+		if accounts[strconv.FormatInt(p.PK, 10)] != p.Username {
+			t.Errorf("no content account for %s: %v", p.Username, accounts)
 		}
 	}
 }

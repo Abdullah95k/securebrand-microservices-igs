@@ -24,6 +24,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/redis/go-redis/v9"
 	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"gopkg.in/yaml.v3"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
@@ -272,6 +273,39 @@ func (s *Stack) StartScheduler() {
 		})
 	}
 	s.start("scheduler", loops...)
+}
+
+// StartNormalizer runs igs-normalizer (ig.* -> content.*).
+func (s *Stack) StartNormalizer(t *testing.T) {
+	t.Helper()
+	c, err := igapp.NewNormalizer(s.Cfg, s.Producer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.start("normalizer", c.Run)
+}
+
+// ReadTopic returns every record of a topic (base name) from its start,
+// once none has arrived for idle.
+func (s *Stack) ReadTopic(t *testing.T, topic string, idle time.Duration) []*kgo.Record {
+	t.Helper()
+	cl, err := kgo.NewClient(kgo.SeedBrokers(s.Cfg.Kafka.Brokers...), kgo.ConsumeTopics(s.Cfg.Kafka.TopicPrefix+topic),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	var out []*kgo.Record
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), idle)
+		fs := cl.PollFetches(ctx)
+		cancel()
+		n := 0
+		fs.EachRecord(func(r *kgo.Record) { out = append(out, r); n++ })
+		if n == 0 {
+			return out
+		}
+	}
 }
 
 // StartMedia runs igs-media's downloader and janitor.

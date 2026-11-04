@@ -287,8 +287,25 @@ When page loads stop carrying the tokens and doc_ids the client needs (JavaScrip
 - **Persister lag (`IgsIgPersisterLag`):** results reach Postgres late.
   - Check `igs_persist_batch_seconds` and the database (locks, I/O).
   - KEDA scales the persister on `ig.comment.v1`, `ig.post.v1` and `ig.post_metrics.v1` lag.
+- **Normalizer lag (`IgsIgNormalizerLag`):** `content.*` events reach ClickHouse, the analysis and the alerts late (the shared contract below).
+  - KEDA scales igs-normalizer on the same topics' lag; check its pods and Kafka.
 
-The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka exporter is needed. The crawler groups are `igs-ig-crawler-<stage>-<lane>`, the persister's is `igs-ig-persister` and the downloader's is `igs-ig-media-downloader`. All of them carry `kafka.topic_prefix`.
+The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka exporter is needed. The crawler groups are `igs-ig-crawler-<stage>-<lane>`, the persister's is `igs-ig-persister`, the normalizer's `igs-ig-normalizer` and the downloader's `igs-ig-media-downloader`. All of them carry `kafka.topic_prefix`.
+
+## The shared content contract
+
+`igs-normalizer` maps igs's own topics to the shared `content.*` contract (architecture §5) that storage (ClickHouse), the analysis and the alerts read. Its schema is `api/proto/securebrand/content/v1/content.proto`, kept in igs until the shared schema repository exists.
+
+| igs topic | content events |
+|---|---|
+| `ig.profile.v1` | `content.account.v1` (handle, name, bio, website, every profile link and the linked Facebook page, for the entity layer) and a `content.metrics.v1` account sample |
+| `ig.post.v1` | `content.post.v1` (kind post, video or reel) |
+| `ig.post_metrics.v1` | `content.metrics.v1` (target post) |
+| `ig.comment.v1` | `content.comment.v1` (keyed by its post) and a `content.metrics.v1` comment sample |
+| `ig.media.v1` | `content.media.v1` |
+| `ig.highlight.v1` | a `content.post.v1` of kind `highlight` per item |
+
+Every event carries the envelope: `platform` (`instagram`), `native_id`, `observed_at`, `published_at`, `version` (newest wins), `collector`, `collector_version` and `raw_ref`. Records are keyed `instagram:<native_id>`. A redelivered record maps to the same event ids, so consumers stay idempotent.
 
 ## Persister quarantine
 

@@ -28,3 +28,11 @@ topics:
   - {name: ig.media.deleted.v1,   partitions: 12, retention: 168h}
   - {name: ig.job.v1,             partitions: 12, retention: 168h}
   - {name: ig.erasure.v1,         partitions: 6,  retention: 720h}
+  # The shared content contract (architecture §5), from igs-normalizer.
+  # Other collectors' normalizers publish to the same topics; whoever runs
+  # first creates them.
+  - {name: content.post.v1,       partitions: 48, retention: 168h}
+  - {name: content.comment.v1,    partitions: 96, retention: 168h}
+  - {name: content.account.v1,    partitions: 24, retention: 168h}
+  - {name: content.metrics.v1,    partitions: 96, retention: 168h}
+  - {name: content.media.v1,      partitions: 24, retention: 168h}

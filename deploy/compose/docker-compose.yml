@@ -109,6 +109,10 @@ services:
     <<: *igs
     entrypoint: ["/usr/local/bin/igs-persister"]
 
+  normalizer:
+    <<: *igs
+    entrypoint: ["/usr/local/bin/igs-normalizer"]
+
   media:
     <<: *igs
     entrypoint: ["/usr/local/bin/igs-media", "--roles", "downloader,janitor"]
