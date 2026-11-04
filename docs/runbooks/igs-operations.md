@@ -216,7 +216,7 @@ The places discovery looks for are fbs's Iraq keyword list, shared rather than k
 - in English, Arabic, Sorani Kurdish and Kurmanji Kurdish;
 - folded the same way fbs folds them, so أربيل and اربيل, هەولێر and هه‌ولێر, and Hewlêr and Hewler are one spelling.
 
-The seed is [`configs/discovery/iraq.yaml`](../../configs/discovery/iraq.yaml), copied unchanged from fbs, plus [`iraq-igs.yaml`](../../configs/discovery/iraq-igs.yaml): the spellings igs used before the lists were shared that fbs's list lacks.
+The seed is [`configs/discovery/iraq.yaml`](../../configs/discovery/iraq.yaml), copied unchanged from fbs, plus [`iraq-igs.yaml`](../../configs/discovery/iraq-igs.yaml): spellings igs matches that fbs's list lacks, while they wait for fbs. It is empty since fbs took igs's earlier additions (fbs PR #49, 5 November 2026), so both services use one list.
 - `igsctl migrate up` loads both into `ig.discovery_keywords`. Loading again adds only new spellings and never undoes an edit.
 - Crawlers (posts located in Iraq) and the scheduler (scores) reload the enabled spellings every 5 minutes.
 - Spellings that are also everyday words or names are loaded off: Hit, حديثة ("modern"), القائم, Kut, Amara, Zubair, حلة ("outfit"), the surname سليماني. Turn one on if it proves useful.
@@ -235,7 +235,7 @@ kubectl -n igs exec deploy/igs-api -- igsctl discovery keywords list --group erb
 
 **Keeping fbs and igs in step:**
 - a change to `iraq.yaml` or to the spelling fold (`internal/keywords/normalize.go`, fbs's `internal/discovery/normalize.go`) belongs in both repositories;
-- propose igs's additions to fbs, and delete them from `iraq-igs.yaml` once fbs has them.
+- a spelling igs needs first goes in `iraq-igs.yaml`; propose it to fbs as a patch ([`UPSTREAM.md`](../../UPSTREAM.md)), and delete it from `iraq-igs.yaml` once fbs has it.
 
 ## Block storm (block rate > 10%)
 

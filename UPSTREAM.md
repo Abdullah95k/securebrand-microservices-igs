@@ -29,7 +29,7 @@ Changes prepared here for fbs's repository, as patch files under [`docs/upstream
 
 | Date | Patch | What | Status |
 |---|---|---|---|
-| 2026-11-05 | [`fbs-0001-iraq-seed-igs-spellings.patch`](docs/upstream/fbs-0001-iraq-seed-igs-spellings.patch) | The Iraq place seed (`configs/discovery/iraq.yaml`) gains the spellings igs matched that it lacked: Irak, Iraqis, Iraqia, عيراق; Kurdistan, كردستان, كوردستان, کوردستان, Kurdistanê; هولير; Sulaymani (سليماني off); انبار (حلة off); Dhiqar, ذيقار; Misan. With it, fbs's seed equals what igs loads (376 keywords). fbs's tests pass | proposed |
+| 2026-11-05 | [`fbs-0001-iraq-seed-igs-spellings.patch`](docs/upstream/fbs-0001-iraq-seed-igs-spellings.patch) | The Iraq place seed (`configs/discovery/iraq.yaml`) gains the spellings igs matched that it lacked: Irak, Iraqis, Iraqia, عيراق; Kurdistan, كردستان, كوردستان, کوردستان, Kurdistanê; هولير; Sulaymani (سليماني off); انبار (حلة off); Dhiqar, ذيقار; Misan. With it, fbs's seed equals what igs loads (376 keywords). fbs's tests pass | **merged** in fbs ([Abdullah95k/securebrand-microservices#49](https://github.com/Abdullah95k/securebrand-microservices/pull/49), 2026-11-05); igs copied the new `iraq.yaml` and emptied `iraq-igs.yaml` |
 
 To apply one, in a clone of fbs's repository (on the Phase 0 droplet: `~/securebrand-microservices`), with this repository next to it:
 
