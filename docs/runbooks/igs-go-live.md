@@ -122,6 +122,24 @@ Register a profile. Its first read (backfill) starts at once:
 curl -H "Authorization: Bearer $KEY" -d '{"profile":"<username>"}' https://<igs.example.com>/v1/profiles
 ```
 
+Register a list (up to 1,000 usernames or profile links a call):
+
+```bash
+curl -H "Authorization: Bearer $KEY" -d '{"profiles":["<username>","https://www.instagram.com/<username>/"]}' https://<igs.example.com>/v1/profiles/bulk
+```
+
+Or from a file, one account a line, without an API key:
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles import --file - < accounts.txt
+```
+
+Each prints how many were registered, already registered, backfills started, and which entries were invalid. Pause or resume a list's scheduled runs (their data stays):
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles pause --file - < accounts.txt
+```
+
 ## 8. Canary: 50 to 100 profiles for a day
 
 Register 50 to 100 profiles, then watch the **igs / Instagram overview** dashboard and these signals:

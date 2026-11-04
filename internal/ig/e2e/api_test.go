@@ -191,3 +191,54 @@ func TestAPIRegistration(t *testing.T) {
 		t.Fatalf("erasure without admin: %d", code)
 	}
 }
+
+// A bulk registration schedules every listed profile (usernames, @names,
+// links; duplicates once), starts their backfills, and reports invalid
+// entries; a second run starts nothing and only updates. A paused list runs
+// nothing until resumed.
+func TestAPIBulkRegistration(t *testing.T) {
+	s := Start(t, Options{Spec: spec()})
+	key := s.Key(t, api.ScopeProfilesWrite, httpapi.ScopeDataRead)
+	ps := s.World.Profiles()
+	entries := []string{ps[0].Username, "@" + ps[1].Username, "https://www.instagram.com/" + ps[2].Username + "/", ps[0].Username, "not a username!"}
+	var res api.BulkResult
+	if code := s.Do(t, key, "POST", "/v1/profiles/bulk", map[string]any{"profiles": entries, "max_age_days": 200}, &res); code != http.StatusOK {
+		t.Fatalf("bulk: %d", code)
+	}
+	if res.Registered != 3 || res.Updated != 0 || res.Backfills != 3 || len(res.Invalid) != 1 || len(res.Failed) != 0 {
+		t.Fatalf("bulk %+v", res)
+	}
+	var ids []string
+	rows, err := s.DB.Query(t.Context(), `SELECT last_job_id::text FROM profile_schedule WHERE last_job_id IS NOT NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		_ = rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) != 3 {
+		t.Fatalf("%d backfills recorded", len(ids))
+	}
+	s.Wait(t, 3*time.Minute, ids...)
+	since := time.Now().Add(-200 * 24 * time.Hour)
+	for _, p := range ps[:3] {
+		truth, _ := s.World.Truth(p.Username, since)
+		checkTruth(t, s, truth)
+	}
+	res = api.BulkResult{}
+	s.Do(t, key, "POST", "/v1/profiles/bulk", map[string]any{"profiles": entries[:3], "schedule": map[string]any{"enabled": false}}, &res)
+	if res.Registered != 0 || res.Updated != 3 || res.Backfills != 0 {
+		t.Fatalf("second bulk %+v", res)
+	}
+	var paused int
+	_ = s.DB.QueryRow(t.Context(), `SELECT count(*) FROM profile_schedule WHERE NOT enabled`).Scan(&paused)
+	if paused != 3 {
+		t.Fatalf("%d profiles paused, want 3", paused)
+	}
+	if code := s.Do(t, key, "POST", "/v1/profiles/bulk", map[string]any{"profiles": make([]string, api.MaxBulkProfiles+1)}, nil); code != http.StatusBadRequest {
+		t.Fatalf("an oversized list: %d", code)
+	}
+}
