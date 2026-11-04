@@ -334,6 +334,71 @@ paths:
       summary: Register a candidate now, whatever its score (admin)
       responses:
         "200": {description: Registered; its backfill started}
+  /discovery/keywords:
+    get:
+      summary: The shared Iraq place list discovery matches (admin)
+      description: >-
+        fbs's Iraq keyword seed (configs/discovery/iraq.yaml, by group: iraq, kurdistan_region and the 19
+        governorates, in en, ar, ckb and kmr) plus igs's additions, loaded by `igsctl migrate up`. Discovery scores
+        candidates on the enabled spellings they name; crawlers and the scheduler reload the list every 5 minutes.
+      parameters:
+        - {in: query, name: language, schema: {type: string, enum: [en, ar, ckb, kmr]}}
+        - {in: query, name: group, schema: {type: string}}
+        - {in: query, name: enabled, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Keywords by id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keywords: {type: array, items: {$ref: '#/components/schemas/Keyword'}}
+        "400": {$ref: '#/components/responses/Problem'}
+    post:
+      summary: Add a spelling (admin)
+      description: A spelling that folds to one already listed in the language returns that keyword (200).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [term, language]
+              properties:
+                term: {type: string, maxLength: 100}
+                language: {type: string, enum: [en, ar, ckb, kmr]}
+                group: {type: string, description: 'iraq, kurdistan_region or a governorate (baghdad, erbil...)'}
+                enabled: {type: boolean, default: true}
+      responses:
+        "201": {description: Added, content: {application/json: {schema: {$ref: '#/components/schemas/Keyword'}}}}
+        "200": {description: Already listed, content: {application/json: {schema: {$ref: '#/components/schemas/Keyword'}}}}
+        "400": {$ref: '#/components/responses/Problem'}
+  /discovery/keywords/{id}:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: integer, format: int64}}
+    patch:
+      summary: Turn a spelling on or off, respell or regroup it (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                term: {type: string, maxLength: 100}
+                group: {type: string}
+                enabled: {type: boolean}
+      responses:
+        "200": {description: The keyword, content: {application/json: {schema: {$ref: '#/components/schemas/Keyword'}}}}
+        "400": {$ref: '#/components/responses/Problem'}
+        "404": {$ref: '#/components/responses/Problem'}
+        "409": {$ref: '#/components/responses/Problem'}
+    delete:
+      summary: Remove a spelling (admin); turning it off keeps it from a later seed load
+      responses:
+        "204": {description: Removed}
+        "404": {$ref: '#/components/responses/Problem'}
   /admin/queries:
     get:
       summary: The query registry (doc_ids)
@@ -449,6 +514,17 @@ components:
         pending_tasks: {type: integer}
         created_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time}
+    Keyword:
+      type: object
+      properties:
+        id: {type: integer, format: int64}
+        term: {type: string}
+        normalized: {type: string, description: the spelling folded for matching (alef forms, ta marbuta, Kurdish yeh and kaf, accents, case)}
+        language: {type: string, enum: [en, ar, ckb, kmr]}
+        group: {type: string}
+        enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     Candidate:
       type: object
       properties:

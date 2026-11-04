@@ -21,6 +21,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/leader"
@@ -102,6 +103,8 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg}
 		loops = append(loops, func(ctx context.Context) error {
 			return scheduler.Every(ctx, "discovery", cfg.IG.Discovery.Interval, vetter.Tick)
+		}, func(ctx context.Context) error {
+			return keywords.Watch(ctx, db, discovery.KeywordsRefresh, discovery.UseKeywords)
 		})
 	}
 	if cfg.IG.BudgetOn() {

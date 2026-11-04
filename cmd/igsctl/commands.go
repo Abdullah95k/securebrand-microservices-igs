@@ -25,6 +25,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dlq"
 	igtopics "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/schemareg"
@@ -84,12 +85,20 @@ func migrate(ctx context.Context, cfg *config.Config, sub string) error {
 	if err := igRegistry.ApplySeed(ctx, db, seed); err != nil {
 		return err
 	}
+	kseed, err := keywords.Seed()
+	if err != nil {
+		return err
+	}
+	added, err := keywords.ImportSeed(ctx, db, kseed)
+	if err != nil {
+		return err
+	}
 	n, err := store.IGLayout.EnsurePartitions(ctx, db, time.Now(), store.PartitionWindow{
 		MonthsBack: cfg.IG.Limits.MaxAgeCapDays/30 + 1, MonthsAhead: max(cfg.Scheduler.PartitionMonthsAhead, 1), DaysBack: 1, DaysAhead: 14})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("schema %s migrated; registry seeded (%d queries); %d partitions created\n", store.IGSchema, len(seed.Queries), n)
+	fmt.Printf("schema %s migrated; registry seeded (%d queries); %d new place keywords; %d partitions created\n", store.IGSchema, len(seed.Queries), added, n)
 	return nil
 }
 

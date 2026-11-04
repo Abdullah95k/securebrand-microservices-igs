@@ -26,7 +26,11 @@ func TestScoreSignals(t *testing.T) {
 			Signals{"iraq_city": 2, "arabic_script": 1, "other_country": 0}},
 		{"two cities", Vet{Biography: "Branches in Basra and Erbil"}, Sightings{}, Signals{"iraq_city": 3}},
 		{"city in captions only", Vet{Captions: []string{"weekend in Najaf"}}, Sightings{}, Signals{"iraq_city": 1}},
-		{"two-word province and a city", Vet{Biography: "من ذي قار والناصرية"}, Sightings{}, Signals{"iraq_city": 3, "arabic_script": 1}},
+		// Places count by governorate (the shared list's groups): Dhi Qar
+		// and its capital Nasiriyah are one, Dhi Qar and Erbil two.
+		{"two-word province and its capital", Vet{Biography: "من ذي قار والناصرية"}, Sightings{}, Signals{"iraq_city": 2, "arabic_script": 1}},
+		{"two-word province and another", Vet{Biography: "من ذي قار وأربيل"}, Sightings{}, Signals{"iraq_city": 3, "arabic_script": 1}},
+		{"one city in two scripts", Vet{Biography: "Baghdad بغداد"}, Sightings{}, Signals{"iraq_city": 2, "arabic_script": 1}},
 		{"two-word province", Vet{Biography: "من محافظة ذي قار"}, Sightings{}, Signals{"iraq_city": 2, "arabic_script": 1}},
 		{"Sorani Kurdish and Erbil", Vet{Biography: "وێنەگر لە هەولێر"}, Sightings{},
 			Signals{"iraq_city": 2, "sorani_kurdish": 1.5, "arabic_script": 1}},

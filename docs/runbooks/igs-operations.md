@@ -153,7 +153,7 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
    | Iraq named, in any script, or 🇮🇶 | 3 |
    | An Iraqi phone number (+964, 07xx) | 3 |
    | An `.iq` link | 2 |
-   | An Iraqi city or province in the name or bio | 2; 3 for two or more; 1 if only in captions |
+   | A place in an Iraqi governorate in the name or bio ([the place list](#the-place-list)) | 2; 3 for two or more governorates; 1 if only in captions |
    | Kurdistan named | 1.5 |
    | Sorani Kurdish letters | 1.5 |
    | Iraqi dialect | 1; 2 for three or more markers |
@@ -208,6 +208,34 @@ Operations:
   - Vets share the exits with crawling (about 10 s of one exit's time each) and wait behind scheduled runs (lane p2). The daily budget holds them with backfill.
   - To slow discovery, lower `vet_in_flight`.
   - **Daily cap:** `max_new_per_day` (0, no cap, by default) is the most profiles discovery registers a day. The day starts at 00:00 UTC, 03:00 Iraq time. Over it, candidates wait as `capped` (`igs_discovery_candidates{status="capped"}`) and are registered on the next days. Profiles registered by hand or with `accept` neither count towards it nor wait for it. Setting the cap back to 0 lets every capped candidate through on the next vetter tick.
+
+### The place list
+
+The places discovery looks for are fbs's Iraq keyword list, shared rather than kept twice (M12i):
+- the country, the Kurdistan Region, the 19 governorates and their cities and towns;
+- in English, Arabic, Sorani Kurdish and Kurmanji Kurdish;
+- folded the same way fbs folds them, so أربيل and اربيل, هەولێر and هه‌ولێر, and Hewlêr and Hewler are one spelling.
+
+The seed is [`configs/discovery/iraq.yaml`](../../configs/discovery/iraq.yaml), copied unchanged from fbs, plus [`iraq-igs.yaml`](../../configs/discovery/iraq-igs.yaml): the spellings igs used before the lists were shared that fbs's list lacks.
+- `igsctl migrate up` loads both into `ig.discovery_keywords`. Loading again adds only new spellings and never undoes an edit.
+- Crawlers (posts located in Iraq) and the scheduler (scores) reload the enabled spellings every 5 minutes.
+- Spellings that are also everyday words or names are loaded off: Hit, حديثة ("modern"), القائم, Kut, Amara, Zubair, حلة ("outfit"), the surname سليماني. Turn one on if it proves useful.
+
+**How igs matches.** igs matches whole words, where fbs's searches match text anywhere in a post. igs scores names and bios, where a place inside a longer word would score wrongly: عراقة ("heritage") holds عراق. Arabic-script spellings may carry an attached prefix (وبغداد, بالبصرة) or a nisba ending (بغدادي, العراقيين).
+
+Editing the list:
+- `GET /v1/discovery/keywords?group=erbil` (admin) lists it. It also filters by `language` and `enabled`.
+- `PATCH /v1/discovery/keywords/{id}` with `{"enabled": false}` turns a spelling off. Prefer this to `DELETE`, which a later seed load would undo.
+- `POST /v1/discovery/keywords` with `{"term": "...", "language": "ar", "group": "erbil"}` adds a spelling.
+- `igsctl discovery keywords list|enable ID|disable ID|import --file F` does the same from the command line. `import` takes a YAML seed or a CSV of `term,language,group,enabled`.
+
+```bash
+kubectl -n igs exec deploy/igs-api -- igsctl discovery keywords list --group erbil
+```
+
+**Keeping fbs and igs in step:**
+- a change to `iraq.yaml` or to the spelling fold (`internal/keywords/normalize.go`, fbs's `internal/discovery/normalize.go`) belongs in both repositories;
+- propose igs's additions to fbs, and delete them from `iraq-igs.yaml` once fbs has them.
 
 ## Block storm (block rate > 10%)
 
