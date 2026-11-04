@@ -52,7 +52,8 @@ func profilesImport(ctx context.Context, cfg *config.Config, args []string) erro
 	fs := flag.NewFlagSet("profiles import", flag.ExitOnError)
 	file := fs.String("file", "", "file of usernames or profile links, one a line (- for standard input)")
 	client := fs.String("client", "igsctl", "API client (key prefix) the profiles are registered under; created revoked if missing")
-	every := fs.Duration("interval", 0, "time between scheduled runs (default: ig.schedule.interval)")
+	tier := fs.String("tier", "auto", "hot, warm, long_tail, or auto (placed by posting rate)")
+	every := fs.Duration("interval", 0, "a custom time between scheduled runs, instead of a tier")
 	paused := fs.Bool("paused", false, "register without scheduling runs (resume with igsctl profiles resume)")
 	noBackfill := fs.Bool("no-backfill", false, "do not start backfills")
 	_ = fs.Parse(args)
@@ -83,7 +84,13 @@ func profilesImport(ctx context.Context, cfg *config.Config, args []string) erro
 	if err != nil {
 		return err
 	}
-	reg := dispatch.Registration{ClientID: id, Interval: *every, Enabled: !*paused}
+	if *every > 0 && *tier == "auto" {
+		*tier = ""
+	}
+	if _, err := dispatch.Place(cfg, *tier, *every); err != nil {
+		return err
+	}
+	reg := dispatch.Registration{ClientID: id, Tier: *tier, Interval: *every, Enabled: !*paused}
 	if *noBackfill {
 		f := false
 		reg.Backfill = &f
@@ -130,5 +137,51 @@ func profilesEnable(ctx context.Context, cfg *config.Config, args []string, enab
 	}
 	printJSON(map[string]any{"changed": tag.RowsAffected(), "not_registered": int64(len(refs)) - tag.RowsAffected(), "invalid": invalid,
 		"at": time.Now().UTC()})
+	return nil
+}
+
+// profilesTier moves the profiles of a file to a tier (hot for a client
+// watchlist's accounts, warm, long_tail, or auto to let the posting rate
+// place them) or a custom interval.
+func profilesTier(ctx context.Context, cfg *config.Config, args []string) error {
+	fs := flag.NewFlagSet("profiles tier", flag.ExitOnError)
+	file := fs.String("file", "", "file of usernames or profile links, one a line (- for standard input)")
+	tier := fs.String("tier", "", "hot, warm, long_tail or auto")
+	every := fs.Duration("interval", 0, "a custom time between scheduled runs, instead of a tier")
+	_ = fs.Parse(args)
+	if *tier == "" && *every == 0 {
+		return errors.New("--tier or --interval is required")
+	}
+	pl, err := dispatch.Place(cfg, *tier, *every)
+	if err != nil {
+		return err
+	}
+	entries, err := readLines(*file)
+	if err != nil {
+		return err
+	}
+	db, err := openDB(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var refs, invalid []string
+	for _, e := range entries {
+		ref, err := task.NormalizeRef(strings.TrimPrefix(e, "@"))
+		if err != nil {
+			invalid = append(invalid, e)
+			continue
+		}
+		refs = append(refs, ref)
+	}
+	var n int64
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM profile_schedule WHERE profile_ref = ANY($1)`, refs).Scan(&n); err != nil {
+		return err
+	}
+	if err := dispatch.SetPlacement(ctx, db, refs, pl); err != nil {
+		return err
+	}
+	printJSON(map[string]any{"tier": pl.Tier, "interval": pl.Interval.String(), "adaptive": pl.Adaptive, "changed": n,
+		"not_registered": int64(len(refs)) - n, "invalid": invalid})
 	return nil
 }

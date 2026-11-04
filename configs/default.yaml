@@ -421,6 +421,21 @@ ig:
     jitter: 0.1
     post_refresh_window: 168h    # posts of the last 7 days: comments and counts refreshed
     post_refresh_per_run: 30
+    # No profile is read more often than this (the hot tier, a custom interval).
+    min_interval: 5m
+    # Tiers (architecture §8). Hot is pinned (API, igsctl profiles tier,
+    # client watchlists); profiles not pinned are warm at warm_posts_per_day
+    # or more over auto_window, else long tail, checked every auto_every.
+    # A run costs 5 to 10 requests: one exit (900 an hour) carries 15 to 30
+    # hot profiles, 90 to 180 warm ones or 270 to 540 long-tail ones.
+    tiers:
+      hot: 10m
+      warm: 1h
+      long_tail: 3h
+      auto: true
+      warm_posts_per_day: 2
+      auto_window: 336h
+      auto_every: 24h
   # Daily traffic budget, fleet-wide (D9; 0 = none). Every interval the
   # leader scheduler projects the day's requests and wire bytes (page loads
   # and queries) from the last projection_span. When the day would exceed

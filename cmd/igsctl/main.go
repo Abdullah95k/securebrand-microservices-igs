@@ -36,7 +36,8 @@ commands:
   registry list | registry set --file query.json | registry import --file registry.yaml [--keep-promoted]
   dlq replay [--reason R] [--max N] [--idle 10s] [--persist]
   discovery import --file accounts.txt [--origin google|facebook|youtube|manual]
-  profiles import --file accounts.txt [--client NAME] [--interval 3h] [--paused] [--no-backfill]
+  profiles import --file accounts.txt [--client NAME] [--tier hot|warm|long_tail|auto | --interval 30m] [--paused] [--no-backfill]
+  profiles tier --file accounts.txt (--tier hot|warm|long_tail|auto | --interval 30m)
   profiles pause --file accounts.txt | profiles resume --file accounts.txt`)
 	os.Exit(2)
 }
@@ -84,6 +85,8 @@ func main() {
 		err = discoveryImport(ctx, cfg, rest)
 	case "profiles import":
 		err = profilesImport(ctx, cfg, rest)
+	case "profiles tier":
+		err = profilesTier(ctx, cfg, rest)
 	case "profiles pause", "profiles resume":
 		err = profilesEnable(ctx, cfg, rest, sub == "resume")
 	default:

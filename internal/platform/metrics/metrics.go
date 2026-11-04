@@ -79,13 +79,16 @@ var (
 	MediaDeleted           = counterVec("media_deleted_total", "Media objects deleted by reason.", "reason")
 
 	// Persistence and jobs.
-	PersistRows          = counterVec("persist_rows_total", "Rows written by the persister.", "entity", "op")
-	PersistQuarantined   = counterVec("persist_quarantined_total", "Records the persister could not write and moved to its DLQ.", "topic", "reason")
-	PersistSuppressed    = counterVec("persist_suppressed_total", "Records the persister dropped or redacted for an erased subject.", "entity", "action")
-	CommentChanges       = counterVec("comment_changes_total", "Stored comments edited, marked deleted or seen again after a deletion, by kind (edited, deleted, restored).", "kind")
-	PersistBatch         = histVec("persist_batch_seconds", "Persister batch flush duration.", prometheus.ExponentialBuckets(0.005, 2, 12), "entity")
-	Jobs                 = counterVec("jobs_total", "Jobs reaching a terminal state.", "status", "lane")
-	ScheduleLag          = gaugeVec("schedule_lag_seconds", "Age of the oldest due profile in the schedule.", "tier")
+	PersistRows        = counterVec("persist_rows_total", "Rows written by the persister.", "entity", "op")
+	PersistQuarantined = counterVec("persist_quarantined_total", "Records the persister could not write and moved to its DLQ.", "topic", "reason")
+	PersistSuppressed  = counterVec("persist_suppressed_total", "Records the persister dropped or redacted for an erased subject.", "entity", "action")
+	CommentChanges     = counterVec("comment_changes_total", "Stored comments edited, marked deleted or seen again after a deletion, by kind (edited, deleted, restored).", "kind")
+	PersistBatch       = histVec("persist_batch_seconds", "Persister batch flush duration.", prometheus.ExponentialBuckets(0.005, 2, 12), "entity")
+	Jobs               = counterVec("jobs_total", "Jobs reaching a terminal state.", "status", "lane")
+	ScheduleLag        = gaugeVec("schedule_lag_seconds", "Age of the oldest due profile in the schedule.", "tier")
+	// ProfilesByTier counts the enabled profiles on the schedule per tier
+	// (hot, warm, long_tail, custom).
+	ProfilesByTier       = gaugeVec("profiles_scheduled", "Enabled profiles on the schedule, by tier.", "tier")
 	BreakerState         = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
 	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")

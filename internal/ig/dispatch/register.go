@@ -23,7 +23,9 @@ type Registration struct {
 	ClientID uuid.UUID
 	// Ref is a normalized profile ref (task.NormalizeRef).
 	Ref string
-	// Interval between scheduled runs; 0 takes ig.schedule.interval.
+	// Tier (hot, warm, long_tail, auto or "") or Interval (custom): where
+	// the profile sits on the schedule (Place). Neither: auto.
+	Tier     string
 	Interval time.Duration
 	Enabled  bool
 	Options  CrawlOptions
@@ -53,10 +55,11 @@ func (d *Dispatcher) Register(ctx context.Context, cfg *config.Config, r Registr
 	if err != nil {
 		return res, err
 	}
-	iv := r.Interval
-	if iv <= 0 {
-		iv = cfg.IG.Schedule.Interval
+	pl, err := Place(cfg, r.Tier, r.Interval)
+	if err != nil {
+		return res, err
 	}
+	iv := pl.Interval
 	var upk *int64
 	if k, found := d.Resolve(ctx, r.Ref); found {
 		pk := k.UserPK()
@@ -64,21 +67,32 @@ func (d *Dispatcher) Register(ctx context.Context, cfg *config.Config, r Registr
 	}
 	opts, _ := json.Marshal(r.Options)
 	next := time.Now().Add(iv + jitter(iv, cfg.IG.Schedule.Jitter))
+	// Registering an adaptive profile again as adaptive keeps the tier its
+	// posting rate gave it; a pin or a custom interval replaces it.
 	onConflict := `DO UPDATE SET user_pk = COALESCE(t.user_pk, EXCLUDED.user_pk), enabled = EXCLUDED.enabled,
-				interval_seconds = EXCLUDED.interval_seconds, options = EXCLUDED.options,
-				max_age_days = EXCLUDED.max_age_days, max_posts = EXCLUDED.max_posts`
+				options = EXCLUDED.options, max_age_days = EXCLUDED.max_age_days, max_posts = EXCLUDED.max_posts,
+				interval_seconds = CASE WHEN t.adaptive AND EXCLUDED.adaptive THEN t.interval_seconds ELSE EXCLUDED.interval_seconds END,
+				tier = CASE WHEN t.adaptive AND EXCLUDED.adaptive THEN t.tier ELSE EXCLUDED.tier END,
+				tier_changed_at = CASE WHEN t.adaptive AND EXCLUDED.adaptive THEN t.tier_changed_at ELSE EXCLUDED.tier_changed_at END,
+				adaptive = EXCLUDED.adaptive,
+				next_run_at = least(t.next_run_at, EXCLUDED.next_run_at)`
 	if r.KeepSchedule {
 		onConflict = `DO UPDATE SET user_pk = COALESCE(t.user_pk, EXCLUDED.user_pk)`
 	}
 	var lastJob *uuid.UUID
 	err = pgx.BeginFunc(ctx, d.DB, func(tx pgx.Tx) error {
+		var changed *time.Time
+		if !pl.Adaptive {
+			now := time.Now()
+			changed = &now
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO profile_schedule AS t (profile_ref, user_pk, enabled, interval_seconds, next_run_at,
-				options, max_age_days, max_posts, next_profile_read_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + $9::int * interval '1 second')
+				options, max_age_days, max_posts, next_profile_read_at, tier, adaptive, tier_changed_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + $9::int * interval '1 second', $10, $11, $12)
 			ON CONFLICT (profile_ref) `+onConflict+`
 			RETURNING xmax = 0, last_job_id`,
 			r.Ref, upk, r.Enabled, int(iv.Seconds()), next, opts, r.Options.MaxAgeDays, r.Options.MaxPosts,
-			int(cfg.IG.Schedule.ProfileRefresh.Seconds())).Scan(&res.Created, &lastJob); err != nil {
+			int(cfg.IG.Schedule.ProfileRefresh.Seconds()), pl.Tier, pl.Adaptive, changed).Scan(&res.Created, &lastJob); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO profile_registrations (api_client_id, profile_ref) VALUES ($1, $2) ON CONFLICT DO NOTHING`,

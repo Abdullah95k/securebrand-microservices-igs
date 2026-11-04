@@ -121,6 +121,43 @@ type IGSchedule struct {
 	PostRefreshWindow time.Duration `koanf:"post_refresh_window"`
 	// PostRefreshPerRun caps the refreshes riding on one scheduled run.
 	PostRefreshPerRun int `koanf:"post_refresh_per_run"`
+	// MinInterval floors any profile's interval (the hot tier, a custom
+	// interval).
+	MinInterval time.Duration `koanf:"min_interval"`
+	// Tiers sets how often each tier is read, and how profiles not pinned
+	// to a tier are placed.
+	Tiers IGTiers `koanf:"tiers"`
+}
+
+// IGTiers are the schedule's tiers (architecture §8): hot (client brands,
+// their competitors, trending accounts: pinned by the API, igsctl or a
+// client watchlist), warm (active accounts) and long tail (the rest).
+// Profiles that are not pinned are placed by their posting rate.
+type IGTiers struct {
+	Hot  time.Duration `koanf:"hot"`
+	Warm time.Duration `koanf:"warm"`
+	// LongTail defaults to ig.schedule.interval.
+	LongTail time.Duration `koanf:"long_tail"`
+	// Auto places profiles that are not pinned: warm at WarmPostsPerDay or
+	// more over AutoWindow, else long tail, checked every AutoEvery.
+	Auto            bool          `koanf:"auto"`
+	WarmPostsPerDay float64       `koanf:"warm_posts_per_day"`
+	AutoWindow      time.Duration `koanf:"auto_window"`
+	AutoEvery       time.Duration `koanf:"auto_every"`
+}
+
+// TierInterval returns tier's interval (hot, warm or long_tail).
+func (s IGSchedule) TierInterval(tier string) time.Duration {
+	switch tier {
+	case "hot":
+		return s.Tiers.Hot
+	case "warm":
+		return s.Tiers.Warm
+	}
+	if s.Tiers.LongTail > 0 {
+		return s.Tiers.LongTail
+	}
+	return s.Interval
 }
 
 // IGDiscovery is profile discovery (M11): the accounts the crawl meets in
@@ -209,6 +246,11 @@ func (c *Config) validateIG() []error {
 	}
 	if g.Schedule.ProfileRefresh < g.Schedule.Interval {
 		errs = append(errs, errors.New("ig.schedule.profile_refresh must not be shorter than ig.schedule.interval"))
+	}
+	if t := g.Schedule.Tiers; g.Schedule.MinInterval <= 0 || t.Hot < g.Schedule.MinInterval || t.Warm < t.Hot ||
+		(t.LongTail != 0 && t.LongTail < t.Warm) || t.WarmPostsPerDay < 0 || (t.Auto && (t.AutoWindow < 24*time.Hour || t.AutoEvery <= 0)) {
+		errs = append(errs, errors.New("ig.schedule: min_interval must be > 0, tiers hot >= min_interval, warm >= hot, long_tail >= warm; "+
+			"with auto, auto_window >= 24h and auto_every > 0"))
 	}
 	if g.Schedule.PostRefreshWindow < 0 || g.Schedule.PostRefreshPerRun < 0 {
 		errs = append(errs, errors.New("ig.schedule.post_refresh_window and post_refresh_per_run must not be negative"))
