@@ -5,7 +5,7 @@ PG_DSN ?= postgres://fbs:fbs@localhost:5432/fbs?sslmode=disable
 TEST_ENV = IGS_TEST_PG_DSN="$(PG_DSN)" IGS_TEST_REDIS_ADDR=localhost:6379 IGS_TEST_KAFKA_BROKERS=localhost:19092 IGS_TEST_SCHEMA_REGISTRY=http://localhost:18081
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 
-.PHONY: all build test lint vet generate golden infra-up infra-down test-integration e2e loadtest soak igs-loadtest igs-soak docker docker-prebuilt compose-up compose-down igs-compose-up igs-compose-down igs-phase0 igs-phase0-dryrun igs-probe igs-probe-dryrun igs-spike-bin chart-check igs-chart-check chart-smoke igs-chart-smoke clean
+.PHONY: all build test lint vet generate golden infra-up infra-down test-integration e2e loadtest soak igs-loadtest igs-soak docker docker-prebuilt compose-up compose-down igs-compose-up igs-compose-down igs-phase0 igs-phase0-dryrun igs-probe igs-probe-dryrun igs-tagged igs-tagged-dryrun igs-spike-bin chart-check igs-chart-check chart-smoke igs-chart-smoke clean
 
 all: generate build test
 
@@ -137,6 +137,17 @@ igs-probe:
 ## Rehearse the probe against a built-in fake Instagram: no traffic, no proxies.
 igs-probe-dryrun:
 	$(GO) run ./cmd/igs-spike probe --dry-run --out-dir $(IGS_PROBE_OUT)-dryrun
+
+## The tagged-tab test (docs/runbooks/igs-probe.md, "The tagged tab"): ISP
+## tier, the same profiles file; writes phase0/out-tagged/.
+IGS_TAGGED_OUT ?= phase0/out-tagged
+igs-tagged:
+	@test -f $(IGS_PROBE_PROFILES) || { echo "missing $(IGS_PROBE_PROFILES): cp phase0/ig-profiles.example.txt $(IGS_PROBE_PROFILES) and fill it in"; exit 2; }
+	$(GO) run ./cmd/igs-spike tagged --profiles $(IGS_PROBE_PROFILES) $(if $(wildcard $(PHASE0_CONFIG)),--config $(PHASE0_CONFIG)) \
+	  --tier isp --out-dir $(IGS_TAGGED_OUT) $(IGS_PROBE_ARGS)
+
+igs-tagged-dryrun:
+	$(GO) run ./cmd/igs-spike tagged --dry-run --out-dir $(IGS_TAGGED_OUT)-dryrun
 
 ## igs probe (checkpoint C2): binaries the owner runs without a Go toolchain.
 igs-spike-bin:

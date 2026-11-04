@@ -229,6 +229,39 @@ make igs-probe IGS_PROBE_PROFILES=phase0/ig-profiles-all.txt IGS_PROBE_OUT=phase
 
 A busy news account posts 30 or more times a day, so it reaches the 1,200-post cap after a few weeks; a quieter one reaches the year first. At one request every 3 seconds, a capped account takes about 6 minutes, so plan on a day or more.
 
+## The tagged tab
+
+**What it answers:** can igs read the posts other accounts tag a profile in (the profile's "Tagged" tab) without logging in? No recording has shown that tab yet, so igs does not read it. The test checks three things:
+
+- whether Instagram serves the tab's page to a visitor who is not logged in, or sends them to the login page;
+- whether that page already carries tagged posts;
+- which GraphQL operation pages through them. It looks in the page's script bundles for operations whose names contain "Tagged" or "Usertag", and tries each with four likely variable shapes.
+
+It reuses the probe's files: `phase0/proxies.yaml` and `phase0/ig-profiles.txt`. 5 to 10 profiles are enough. Choose accounts that others tag often, such as brands and public figures. Each profile takes 2 page loads and at most 13 queries, about a minute at the probe's pace.
+
+1. Rehearse (no traffic to Instagram). The summary must say `readable logged out`:
+
+   ```bash
+   make igs-tagged-dryrun
+   ```
+
+2. Run it on the ISP tier:
+
+   ```bash
+   make igs-tagged
+   ```
+
+3. Send back the lines under `SUMMARY (safe to send back)`. They name no account. The first line is the verdict:
+
+   | Verdict | What happens next |
+   |---|---|
+   | `readable logged out: an operation answered with posts` | igs gains a tagged-tab query. Also send `phase0/out-tagged/raw/` privately: the parser and its fixtures are built from it |
+   | `the tagged tab's page carries posts logged out, but no operation paged on` | igs can read the first page from the page itself. Send `raw/` privately |
+   | `needs a login` | The tab stays out of igs. Logged-out reading cannot reach it |
+   | `gave no posts logged out` | The same, unless `raw/` shows something the test missed |
+
+`phase0/out-tagged/report.json` and `raw/` hold Instagram's answers, with personal data. Keep them off git, like the probe's output.
+
 ## Speed tests (one switch at a time)
 
 Three switches may make comment collection faster. Each is a guess about

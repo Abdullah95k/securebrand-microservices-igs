@@ -156,6 +156,11 @@ api:
     host: igs.example.com
     tls: []
 
+# paused holds every component at 0 replicas (KEDA too) and runs no
+# install hooks: set it before restoring a backup and unset it after
+# (docs/runbooks/igs-backups.md).
+paused: false
+
 # One Deployment per component. "lag" lists consumer groups/topics KEDA
 # watches (group and topic names get config.kafka.topic_prefix prepended).
 # Crawler groups are igs-ig-crawler-<stage>-<lane>.
