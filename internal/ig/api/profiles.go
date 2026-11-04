@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math/rand/v2"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
@@ -134,82 +134,128 @@ func (s *Server) registerProfile(w http.ResponseWriter, r *http.Request) {
 		httpapi.Problem(w, http.StatusBadRequest, "invalid profile", err.Error())
 		return
 	}
-	lim, err := Limits(s.Cfg, req.CrawlOptions)
+	reg, err := s.registration(r, req.Schedule, req.Backfill, req.CrawlOptions)
 	if err != nil {
 		httpapi.Problem(w, http.StatusBadRequest, "invalid options", err.Error())
 		return
 	}
-	iv, err := s.interval(req.Schedule)
-	if err != nil {
-		httpapi.Problem(w, http.StatusBadRequest, "invalid schedule", err.Error())
+	reg.Ref, reg.Params = ref, map[string]any{"profile": req.Profile, "registered_by": reg.ClientID}
+	res, err := s.Dispatch.Register(r.Context(), s.Cfg, reg)
+	switch {
+	case errors.Is(err, dispatch.ErrUnknownProfile):
+		httpapi.Problem(w, http.StatusUnprocessableEntity, "unknown profile", err.Error())
 		return
-	}
-	enabled := true
-	if req.Schedule != nil && req.Schedule.Enabled != nil {
-		enabled = *req.Schedule.Enabled
-	}
-	ctx := r.Context()
-	k, found := s.Dispatch.Resolve(ctx, ref)
-	var upk *int64
-	if found {
-		pk := k.UserPK()
-		upk = &pk
-	}
-	opts, _ := json.Marshal(req.CrawlOptions)
-	next := time.Now().Add(iv + jitter(iv, s.Cfg.IG.Schedule.Jitter))
-	c := httpapi.ClientFrom(ctx)
-	var created bool
-	var lastJob *uuid.UUID
-	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `INSERT INTO profile_schedule AS t (profile_ref, user_pk, enabled, interval_seconds, next_run_at,
-				options, max_age_days, max_posts, next_profile_read_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + $9::int * interval '1 second')
-			ON CONFLICT (profile_ref) DO UPDATE SET user_pk = COALESCE(t.user_pk, EXCLUDED.user_pk), enabled = EXCLUDED.enabled,
-				interval_seconds = EXCLUDED.interval_seconds, options = EXCLUDED.options,
-				max_age_days = EXCLUDED.max_age_days, max_posts = EXCLUDED.max_posts
-			RETURNING xmax = 0, last_job_id`,
-			ref, upk, enabled, int(iv.Seconds()), next, opts, req.MaxAgeDays, req.MaxPosts, int(s.Cfg.IG.Schedule.ProfileRefresh.Seconds())).
-			Scan(&created, &lastJob); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `INSERT INTO profile_registrations (api_client_id, profile_ref) VALUES ($1, $2) ON CONFLICT DO NOTHING`, c.ID, ref)
-		return err
-	})
-	if err != nil {
+	case err != nil:
 		httpapi.ServerError(w, err)
 		return
 	}
-	backfill := lastJob == nil
-	if req.Backfill != nil {
-		backfill = *req.Backfill
-	}
 	out := map[string]any{"profile_ref": ref, "registered": true}
-	if backfill {
-		j, _, err := s.Dispatch.Create(ctx, dispatch.Request{Kind: dispatch.KindBackfill, Lane: igstaskv1.Lane_LANE_P2,
-			Mode: "full", ProfileRef: ref, Limits: lim, RefreshProfile: true, Params: map[string]any{"profile": req.Profile, "registered_by": c.ID}})
-		switch {
-		case errors.Is(err, dispatch.ErrUnknownProfile):
-			httpapi.Problem(w, http.StatusUnprocessableEntity, "unknown profile", err.Error())
-			return
-		case err != nil:
-			httpapi.ServerError(w, err)
-			return
-		}
-		_, _ = s.DB.Exec(ctx, `UPDATE profile_schedule SET last_job_id = $2, last_run_at = now() WHERE profile_ref = $1`, ref, j.ID)
-		out["backfill_job"] = j
+	if res.Backfill != nil {
+		out["backfill_job"] = res.Backfill
 	}
 	code := http.StatusOK
-	if created {
+	if res.Created {
 		code = http.StatusCreated
 	}
 	httpapi.WriteJSON(w, code, out)
 }
 
-func jitter(iv time.Duration, share float64) time.Duration {
-	if share <= 0 {
-		return 0
+// registration is the caller's registration settings, validated.
+func (s *Server) registration(r *http.Request, sc *scheduleReq, backfill *bool, o CrawlOptions) (dispatch.Registration, error) {
+	if _, err := Limits(s.Cfg, o); err != nil {
+		return dispatch.Registration{}, err
 	}
-	return time.Duration(rand.Int64N(int64(float64(iv)*share) + 1))
+	iv, err := s.interval(sc)
+	if err != nil {
+		return dispatch.Registration{}, err
+	}
+	enabled := true
+	if sc != nil && sc.Enabled != nil {
+		enabled = *sc.Enabled
+	}
+	return dispatch.Registration{ClientID: httpapi.ClientFrom(r.Context()).ID, Interval: iv, Enabled: enabled, Options: o,
+		Backfill: backfill}, nil
+}
+
+// MaxBulkProfiles is the most profiles one bulk registration takes.
+const MaxBulkProfiles = 1000
+
+type bulkRegisterReq struct {
+	// Profiles are usernames, @names or profile links.
+	Profiles []string     `json:"profiles"`
+	Schedule *scheduleReq `json:"schedule,omitempty"`
+	Backfill *bool        `json:"backfill,omitempty"`
+	CrawlOptions
+}
+
+// BulkResult says what a bulk registration did.
+type BulkResult struct {
+	Registered int `json:"registered"` // new on the schedule
+	Updated    int `json:"updated"`    // already scheduled: settings updated, the caller registered
+	Backfills  int `json:"backfills"`  // backfill jobs started
+	// Invalid entries are neither usernames nor profile links; Failed ones
+	// could not be registered (with why).
+	Invalid []string          `json:"invalid"`
+	Failed  map[string]string `json:"failed"`
+}
+
+// registerProfiles is registerProfile for a list (up to MaxBulkProfiles):
+// the same schedule and options for each; duplicates count once.
+func (s *Server) registerProfiles(w http.ResponseWriter, r *http.Request) {
+	var req bulkRegisterReq
+	if err := httpapi.Decode(r, &req); err != nil {
+		httpapi.Problem(w, http.StatusBadRequest, "invalid body", err.Error())
+		return
+	}
+	if len(req.Profiles) == 0 || len(req.Profiles) > MaxBulkProfiles {
+		httpapi.Problem(w, http.StatusBadRequest, "invalid profiles", fmt.Sprintf("send 1 to %d profiles", MaxBulkProfiles))
+		return
+	}
+	reg, err := s.registration(r, req.Schedule, req.Backfill, req.CrawlOptions)
+	if err != nil {
+		httpapi.Problem(w, http.StatusBadRequest, "invalid options", err.Error())
+		return
+	}
+	res := RegisterAll(r.Context(), s.Dispatch, s.Cfg, reg, req.Profiles)
+	httpapi.WriteJSON(w, http.StatusOK, res)
+}
+
+// RegisterAll registers each of entries with reg's settings (the bulk API
+// and igsctl profiles import).
+func RegisterAll(ctx context.Context, d *dispatch.Dispatcher, cfg *config.Config, reg dispatch.Registration, entries []string) BulkResult {
+	res := BulkResult{Invalid: []string{}, Failed: map[string]string{}}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		ref, err := task.NormalizeRef(strings.TrimPrefix(e, "@"))
+		if err != nil {
+			res.Invalid = append(res.Invalid, e)
+			continue
+		}
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		r := reg
+		r.Ref, r.Params = ref, map[string]any{"profile": e, "registered_by": reg.ClientID, "bulk": true}
+		out, err := d.Register(ctx, cfg, r)
+		if err != nil {
+			res.Failed[e] = err.Error()
+			continue
+		}
+		if out.Created {
+			res.Registered++
+		} else {
+			res.Updated++
+		}
+		if out.Backfill != nil {
+			res.Backfills++
+		}
+	}
+	return res
 }
 
 func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {

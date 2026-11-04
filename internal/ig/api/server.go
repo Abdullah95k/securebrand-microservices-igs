@@ -50,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/jobs/{id}/cancel", req(httpapi.ScopeJobsWrite, s.cancelJob))
 
 		r.Post("/profiles", req(ScopeProfilesWrite, s.registerProfile))
+		r.Post("/profiles/bulk", req(ScopeProfilesWrite, s.registerProfiles))
 		r.Get("/profiles", req(httpapi.ScopeDataRead, s.listProfiles))
 		r.Get("/profiles/{profile}", req(httpapi.ScopeDataRead, s.getProfile))
 		r.Patch("/profiles/{profile}", req(ScopeProfilesWrite, s.updateProfile))

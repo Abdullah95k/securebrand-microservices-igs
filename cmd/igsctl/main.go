@@ -35,7 +35,9 @@ commands:
   apikey revoke --prefix PREFIX
   registry list | registry set --file query.json | registry import --file registry.yaml [--keep-promoted]
   dlq replay [--reason R] [--max N] [--idle 10s] [--persist]
-  discovery import --file accounts.txt [--origin google|facebook|youtube|manual]`)
+  discovery import --file accounts.txt [--origin google|facebook|youtube|manual]
+  profiles import --file accounts.txt [--client NAME] [--interval 3h] [--paused] [--no-backfill]
+  profiles pause --file accounts.txt | profiles resume --file accounts.txt`)
 	os.Exit(2)
 }
 
@@ -80,6 +82,10 @@ func main() {
 		err = dlqReplay(ctx, cfg, rest)
 	case "discovery import":
 		err = discoveryImport(ctx, cfg, rest)
+	case "profiles import":
+		err = profilesImport(ctx, cfg, rest)
+	case "profiles pause", "profiles resume":
+		err = profilesEnable(ctx, cfg, rest, sub == "resume")
 	default:
 		usage()
 	}

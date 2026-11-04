@@ -2,15 +2,11 @@ package discovery
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	mrand "math/rand/v2"
 	"strconv"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -446,24 +442,7 @@ const ClientName = "discovery"
 
 // Client returns the discovery API client's id, creating it on first use.
 func Client(ctx context.Context, db *pgxpool.Pool) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := db.QueryRow(ctx, `SELECT id FROM api_clients WHERE key_prefix = $1`, ClientName).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return id, err
-	}
-	id = uuid.New()
-	hash := make([]byte, 32)
-	_, _ = rand.Read(hash)
-	// Revoked from birth: no request authenticates as it.
-	if _, err := db.Exec(ctx, `INSERT INTO api_clients (id, name, key_prefix, key_hash, scopes, revoked_at)
-		VALUES ($1, $2, $2, $3, '{}', now()) ON CONFLICT (key_prefix) DO NOTHING`, id, ClientName, hash); err != nil {
-		return id, err
-	}
-	err = db.QueryRow(ctx, `SELECT id FROM api_clients WHERE key_prefix = $1`, ClientName).Scan(&id)
-	return id, err
+	return dispatch.SystemClient(ctx, db, ClientName)
 }
 
 // Register puts username on the schedule under the discovery client and
@@ -474,38 +453,11 @@ func Register(ctx context.Context, db *pgxpool.Pool, d *dispatch.Dispatcher, cfg
 		return err
 	}
 	ref := "u:" + username
-	iv := cfg.IG.Schedule.Interval
-	next := time.Now().Add(iv + time.Duration(mrand.Int64N(int64(float64(iv)*cfg.IG.Schedule.Jitter)+1)))
-	var upk *int64
-	if pk != 0 {
-		upk = &pk
+	_, err = d.Register(ctx, cfg, dispatch.Registration{ClientID: client, Ref: ref, Enabled: true, KeepSchedule: true,
+		BackfillOwner: &client, Params: map[string]any{"profile": username, "discovered": true}})
+	if err == nil && pk != 0 {
+		// A discovered account is known by its pk already.
+		_, err = db.Exec(ctx, `UPDATE profile_schedule SET user_pk = $2 WHERE profile_ref = $1 AND user_pk IS NULL`, ref, pk)
 	}
-	var created bool
-	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `INSERT INTO profile_schedule (profile_ref, user_pk, enabled, interval_seconds, next_run_at, options,
-				next_profile_read_at)
-			VALUES ($1, $2, true, $3, $4, '{}', now() + $5::int * interval '1 second') ON CONFLICT (profile_ref) DO NOTHING`,
-			ref, upk, int(iv.Seconds()), next, int(cfg.IG.Schedule.ProfileRefresh.Seconds()))
-		if err != nil {
-			return err
-		}
-		created = tag.RowsAffected() == 1
-		_, err = tx.Exec(ctx, `INSERT INTO profile_registrations (api_client_id, profile_ref) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-			client, ref)
-		return err
-	})
-	if err != nil || !created {
-		return err
-	}
-	lim, err := dispatch.Limits(cfg, dispatch.CrawlOptions{})
-	if err != nil {
-		return err
-	}
-	j, _, err := d.Create(ctx, dispatch.Request{ClientID: &client, Kind: dispatch.KindBackfill, Lane: igstaskv1.Lane_LANE_P2, Mode: "full",
-		ProfileRef: ref, Limits: lim, RefreshProfile: true, Params: map[string]any{"profile": username, "discovered": true}})
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(ctx, `UPDATE profile_schedule SET last_job_id = $2, last_run_at = now() WHERE profile_ref = $1`, ref, j.ID)
 	return err
 }

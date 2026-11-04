@@ -100,6 +100,40 @@ paths:
                 type: object
                 properties:
                   profiles: {type: array, items: {$ref: '#/components/schemas/Schedule'}}
+  /profiles/bulk:
+    post:
+      summary: Register many profiles at once
+      description: >-
+        Requires `profiles:write`. Up to 1,000 usernames, @names or profile links, each registered as by
+        POST /v1/profiles with the same schedule and options; duplicates count once. A profile with no job yet
+        gets a backfill (lane p2). `igsctl profiles import` does the same from a file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/CrawlOptions'}
+                - type: object
+                  required: [profiles]
+                  properties:
+                    profiles: {type: array, maxItems: 1000, items: {type: string}}
+                    schedule: {$ref: '#/components/schemas/ScheduleSettings'}
+                    backfill: {type: boolean}
+      responses:
+        "200":
+          description: What the registration did
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registered: {type: integer, description: New on the schedule}
+                  updated: {type: integer, description: Already scheduled (settings updated)}
+                  backfills: {type: integer}
+                  invalid: {type: array, items: {type: string}}
+                  failed: {type: object, additionalProperties: {type: string}}
+        "400": {$ref: '#/components/responses/Problem'}
   /profiles/{profile}:
     parameters:
       - {$ref: '#/components/parameters/ProfileRef'}
