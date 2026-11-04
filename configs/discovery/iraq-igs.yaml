@@ -1,55 +1,10 @@
 # igs's additions to the shared Iraq seed (iraq.yaml, fbs's file, copied
-# unchanged). These are spellings igs's discovery matched before the two
-# lists were shared that fbs's seed lacks. igs loads both files into
-# ig.discovery_keywords. They are proposed to fbs in
-# docs/upstream/fbs-0001-iraq-seed-igs-spellings.patch; once fbs merges it,
-# copy fbs's iraq.yaml here and empty this file (groups: []).
+# unchanged): spellings igs's discovery matches that fbs's seed lacks. igs
+# loads both files into ig.discovery_keywords.
 #
-# Same format and languages as iraq.yaml. Group names are iraq.yaml's.
+# Empty since fbs merged igs's earlier additions (Abdullah95k/
+# securebrand-microservices#49, 2026-11-05). Put a new spelling here only
+# while it waits for fbs, and propose it there (UPSTREAM.md).
 #
-# igs scores bios and captions, so it matches whole words (in Arabic script
-# with an attached prefix or nisba ending), not text inside longer words as
-# fbs's searches do; see internal/keywords.Matcher.
-#
-# Kurdistan alone is a weaker signal than Iraq (it also names the Kurdish
-# parts of Turkey, Syria and Iran), and discovery scores it so; for fbs's
-# searches it may be too broad.
-groups:
-  - name: iraq
-    terms:
-      en: [Irak, Iraqis, Iraqia]
-      ar: [عيراق]
-
-  - name: kurdistan_region
-    terms:
-      en: [Kurdistan]
-      ar: [كردستان, كوردستان]
-      ckb: [کوردستان]
-      kmr: [Kurdistanê]
-
-  - name: erbil
-    terms:
-      ar: [هولير]
-
-  - name: sulaymaniyah
-    terms:
-      en: [Sulaymani]
-    off:
-      ar: [سليماني]   # also a common surname
-
-  - name: anbar
-    terms:
-      ar: [انبار]
-
-  - name: babil
-    off:
-      ar: [حلة]       # also "outfit", "a new look"
-
-  - name: dhi_qar
-    terms:
-      en: [Dhiqar]
-      ar: [ذيقار]
-
-  - name: maysan
-    terms:
-      en: [Misan]
+# Same format and languages as iraq.yaml; group names are iraq.yaml's.
+groups: []

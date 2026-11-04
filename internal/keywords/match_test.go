@@ -39,7 +39,7 @@ func TestMatcherFindsPlaces(t *testing.T) {
 		{"صفحة العراقيين في الخارج", []string{"iraq"}},   // العراق + يين
 		{"ئاهەنگ لە هه\u200cولێر", []string{"erbil"}},    // Sorani, ZWNJ
 		{"Kurdistan Region of Iraq", []string{"iraq", "kurdistan_region"}},
-		{"Iraqis in Europe", []string{"iraq"}},      // igs's addition
+		{"Iraqis in Europe", []string{"iraq"}},      // added from igs
 		{"Dhi Qar", []string{"dhi_qar"}},            // two words
 		{"#erbil #iraq", []string{"erbil", "iraq"}}, // hashtags
 		{"مدينة الصدر", []string{"baghdad"}},
