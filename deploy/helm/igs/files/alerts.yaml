@@ -279,6 +279,14 @@ groups:
           summary: "The igs persister is {{ $value }} records behind on {{ $labels.topic }}"
           description: Results reach Postgres late. Check igs_persist_batch_seconds and the database.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
+      - alert: IgsIgNormalizerLag
+        expr: max by (topic) (igs:ig_leader:kafka_consumer_lag{group="igs-ig-normalizer"}) > 50000
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "The igs normalizer is {{ $value }} records behind on {{ $labels.topic }}"
+          description: content.* events reach storage, analysis and alerts late. Scale igs-normalizer, or check Kafka.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
       - alert: IgsIgPersisterQuarantine
         expr: sum by (topic, reason) (increase(igs_persist_quarantined_total{topic=~"ig\\..*"}[15m])) > 0
         for: 5m

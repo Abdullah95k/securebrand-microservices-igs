@@ -136,3 +136,23 @@ func Renditions(m gjson.Result, mc MediaCtx) []*igv1.Media {
 }
 
 func strconvQuote(s string) string { return strconv.Quote(s) }
+
+// Post kinds, as stored and in the shared content contract: a highlight's
+// items are posts too.
+const (
+	KindPost      = "post"
+	KindVideo     = "video"
+	KindReel      = "reel"
+	KindHighlight = "highlight"
+)
+
+// PostKind is a grid or reels-tab post's kind.
+func PostKind(p *igv1.Post) string {
+	switch {
+	case p.ProductType == "clips":
+		return KindReel
+	case p.MediaType == igv1.MediaType_MEDIA_TYPE_VIDEO:
+		return KindVideo
+	}
+	return KindPost
+}

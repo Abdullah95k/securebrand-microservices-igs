@@ -8,5 +8,5 @@ import "embed"
 // FS holds the public .proto files at their import paths. The internal task
 // envelopes are not part of it.
 //
-//go:embed securebrand/common/v1/*.proto securebrand/ig/v1/*.proto
+//go:embed securebrand/common/v1/*.proto securebrand/ig/v1/*.proto securebrand/content/v1/*.proto
 var FS embed.FS

@@ -58,6 +58,7 @@ components:
   crawler-post: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
   crawler-retry: {replicas: 1}
   persister: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
+  normalizer: {replicas: 1, pdb: null, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}}
   media-downloader: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
   media-janitor: {replicas: 1}
   registry-sync: {replicas: 1}

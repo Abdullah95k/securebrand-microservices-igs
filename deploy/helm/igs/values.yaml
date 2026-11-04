@@ -222,6 +222,21 @@ components:
         - {group: igs-ig-persister, topic: ig.comment.v1, threshold: 20000}
         - {group: igs-ig-persister, topic: ig.post.v1, threshold: 5000}
         - {group: igs-ig-persister, topic: ig.post_metrics.v1, threshold: 20000}
+  # Maps the ig.* entity topics to the shared content.* contract that
+  # storage, analysis and alerts read (architecture §5).
+  normalizer:
+    enabled: true
+    command: ["/usr/local/bin/igs-normalizer"]
+    replicas: 2
+    resources: {requests: {cpu: 250m, memory: 128Mi}, limits: {memory: 512Mi}}
+    pdb: {maxUnavailable: 1}
+    autoscale:
+      min: 2
+      max: 8
+      lag:
+        - {group: igs-ig-normalizer, topic: ig.comment.v1, threshold: 20000}
+        - {group: igs-ig-normalizer, topic: ig.post.v1, threshold: 5000}
+        - {group: igs-ig-normalizer, topic: ig.post_metrics.v1, threshold: 20000}
   # Downloads media (ig.limits.include_media) and expires it once the
   # analysis service acknowledged it or its TTL passed.
   media-downloader:

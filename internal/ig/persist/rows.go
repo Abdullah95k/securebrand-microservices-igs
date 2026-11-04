@@ -11,6 +11,7 @@ import (
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 )
 
 func observed(o *commonv1.Observation) time.Time {
@@ -118,22 +119,11 @@ var postCols = []string{"taken_at", "media_pk", "owner_pk", "shortcode", "media_
 
 // Post kinds (posts.kind): a highlight's items are posts too (M12d).
 const (
-	KindPost      = "post"
-	KindVideo     = "video"
-	KindReel      = "reel"
-	KindHighlight = "highlight"
+	KindPost      = parse.KindPost
+	KindVideo     = parse.KindVideo
+	KindReel      = parse.KindReel
+	KindHighlight = parse.KindHighlight
 )
-
-// PostKind is a grid or reels-tab post's kind.
-func PostKind(p *igv1.Post) string {
-	switch {
-	case p.ProductType == "clips":
-		return KindReel
-	case p.MediaType == igv1.MediaType_MEDIA_TYPE_VIDEO:
-		return KindVideo
-	}
-	return KindPost
-}
 
 func postRow(p *igv1.Post) []any {
 	seen := observed(p.Obs)
@@ -157,7 +147,7 @@ func postRow(p *igv1.Post) []any {
 		protoJSON(p.Location), protoJSONList(p.Usertags), protoJSONList(p.Coauthors), protoJSON(p.Music), p.Topics,
 		nilIfEmpty(p.AiLabel), p.LikeCount, p.CountsHidden, p.CommentCount, p.CommentingDisabled, p.PlayCount, p.IsPinned,
 		children, dur, w, h, p.HasAudio, p.MediaIds, discoveredVia(p.DiscoveredVia), nilIfEmpty(p.Permalink), hashOf(p.Obs),
-		"visible", seen, seen, PostKind(p)}
+		"visible", seen, seen, parse.PostKind(p)}
 }
 
 var commentCols = []string{"taken_at", "media_pk", "comment_pk", "owner_pk", "parent_comment_pk", "depth", "author_key",

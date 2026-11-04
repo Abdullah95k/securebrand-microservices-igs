@@ -88,7 +88,10 @@ var (
 	ScheduleLag        = gaugeVec("schedule_lag_seconds", "Age of the oldest due profile in the schedule.", "tier")
 	// ProfilesByTier counts the enabled profiles on the schedule per tier
 	// (hot, warm, long_tail, custom).
-	ProfilesByTier       = gaugeVec("profiles_scheduled", "Enabled profiles on the schedule, by tier.", "tier")
+	ProfilesByTier = gaugeVec("profiles_scheduled", "Enabled profiles on the schedule, by tier.", "tier")
+	// Normalized counts ig.* records mapped to content.* by
+	// igs-normalizer (outcome ok or undecodable).
+	Normalized           = counterVec("normalized_total", "ig.* records mapped to the content contract, by topic and outcome.", "topic", "outcome")
 	BreakerState         = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
 	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")

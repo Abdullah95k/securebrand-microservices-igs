@@ -24,6 +24,20 @@ const (
 	Erasure        = "ig.erasure.v1"
 )
 
+// The shared content contract (architecture §5), produced by
+// igs-normalizer from the ig.* topics. Every collector's normalizer
+// publishes to the same topics; storage and analysis read only these.
+const (
+	ContentPost    = "content.post.v1"
+	ContentComment = "content.comment.v1"
+	ContentAccount = "content.account.v1"
+	ContentMetrics = "content.metrics.v1"
+	ContentMedia   = "content.media.v1"
+)
+
+// Content lists the content topics.
+var Content = []string{ContentPost, ContentComment, ContentAccount, ContentMetrics, ContentMedia}
+
 // Internal work queues.
 const (
 	TaskMedia = "igs.task.media"
@@ -113,4 +127,9 @@ var ValueSchemas = map[string]string{
 	MediaDeleted:   "securebrand/common/v1/media.proto",
 	Job:            "securebrand/common/v1/job.proto",
 	Erasure:        "securebrand/common/v1/erasure.proto",
+	ContentPost:    "securebrand/content/v1/content.proto",
+	ContentComment: "securebrand/content/v1/content.proto",
+	ContentAccount: "securebrand/content/v1/content.proto",
+	ContentMetrics: "securebrand/content/v1/content.proto",
+	ContentMedia:   "securebrand/content/v1/content.proto",
 }
