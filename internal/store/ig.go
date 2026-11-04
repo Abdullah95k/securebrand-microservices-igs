@@ -24,7 +24,7 @@ const igVersionTable = IGSchema + ".goose_db_version"
 // IGLayout is igs's partitioned tables: posts and comments by the post's
 // month, profile snapshots by month, metrics by day.
 var IGLayout = Layout{
-	Monthly:    []string{"posts", "comments", "profile_snapshots"},
+	Monthly:    []string{"posts", "comments", "profile_snapshots", "comment_metrics"},
 	Daily:      []string{"post_metrics"},
 	FillFactor: map[string]bool{"posts": true, "comments": true},
 	LZ4: map[string][]string{

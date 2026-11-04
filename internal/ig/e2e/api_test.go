@@ -60,6 +60,10 @@ func TestAPIJobsAndReads(t *testing.T) {
 			want++
 		}
 	}
+	// A highlight's items are posts too (kind highlight).
+	for _, h := range truth.Highlights {
+		want += h.Items
+	}
 	var posts []api.Post
 	cursor := ""
 	for range 20 {

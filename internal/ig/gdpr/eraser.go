@@ -134,6 +134,10 @@ func (e *Eraser) eraseAuthor(ctx context.Context, key []byte, stats map[string]i
 		if comments, err = pgx.CollectRows(rows, pgx.RowTo[int64]); err != nil {
 			return err
 		}
+		// The texts the person's edits replaced go too.
+		if _, err := tx.Exec(ctx, `DELETE FROM comment_edits WHERE author_key = $1`, key); err != nil {
+			return err
+		}
 		// Profile discovery forgets the person too.
 		if _, err := tx.Exec(ctx, `DELETE FROM discovery_sources WHERE username IN (SELECT username FROM discovery_candidates WHERE user_pk IN
 			(SELECT author_pk FROM comment_authors WHERE author_key = $1 AND author_pk IS NOT NULL))`, key); err != nil {
@@ -174,6 +178,9 @@ func (e *Eraser) eraseProfile(ctx context.Context, pk int64, stats map[string]in
 	return pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
 		for _, q := range []struct{ name, sql string }{
 			{"comments", `DELETE FROM comments WHERE owner_pk = $1`},
+			{"comment_edits", `DELETE FROM comment_edits WHERE owner_pk = $1`},
+			{"comment_metrics", `DELETE FROM comment_metrics WHERE owner_pk = $1`},
+			{"post_edits", `DELETE FROM post_edits WHERE owner_pk = $1`},
 			{"post_metrics", `DELETE FROM post_metrics WHERE owner_pk = $1`},
 			{"post_owners", `DELETE FROM post_owners WHERE media_pk IN (SELECT media_pk FROM post_index WHERE owner_pk = $1)`},
 			{"post_refresh", `DELETE FROM post_refresh WHERE user_pk = $1`},

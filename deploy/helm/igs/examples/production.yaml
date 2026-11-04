@@ -29,7 +29,9 @@ config:
     media_bucket: "<igs-media-bucket>"
     raw_bucket: "<igs-raw-bucket>"
   media:
-    ttl: 72h
+    # Kept until the analysis service acknowledged it (0); a duration
+    # deletes it after that long without an acknowledgement.
+    ttl: 0s
     required_consumers: ["analysis"]
   ig:
     # Throughput is exits x exit_rps: 0.25 a second is 900 requests an

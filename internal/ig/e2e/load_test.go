@@ -217,7 +217,7 @@ func TestLoadPipeline(t *testing.T) {
 	elapsed := time.Since(start)
 	backlog := stopBacklog()
 
-	gotPosts := count(t, s, `SELECT count(*) FROM posts`)
+	gotPosts := count(t, s, `SELECT count(*) FROM posts WHERE kind <> 'highlight'`)
 	gotComments := count(t, s, `SELECT count(*) FROM comments WHERE depth = 0`)
 	reqs := requests(s.Fake) - req0
 	_, bc, bs := sample("igs_persist_batch_seconds", map[string]string{"entity": "comment"})

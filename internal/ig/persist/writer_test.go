@@ -134,7 +134,7 @@ func TestWriter(t *testing.T) {
 		t.Fatalf("comment: replies %v author %v", child, author)
 	}
 	must(db.QueryRow(ctx, `SELECT count(*) FROM comment_authors WHERE username = 'fan'`).Scan(&n))
-	must(db.QueryRow(ctx, `SELECT count(*) FROM highlight_items WHERE highlight_id = 9`).Scan(&n))
+	must(db.QueryRow(ctx, `SELECT count(*) FROM posts WHERE kind = 'highlight' AND highlight_id = 9 AND status = 'visible'`).Scan(&n))
 	if n != 2 {
 		t.Fatalf("highlight items %d", n)
 	}
@@ -150,6 +150,47 @@ func TestWriter(t *testing.T) {
 	must(db.QueryRow(ctx, `SELECT edit_count FROM comments WHERE comment_pk = 1`).Scan(&edits))
 	if edits != 1 {
 		t.Fatalf("edits %d", edits)
+	}
+	// ... and keeps the text it replaced; its likes and replies are a series.
+	var before string
+	must(db.QueryRow(ctx, `SELECT text FROM comment_edits WHERE comment_pk = 1`).Scan(&before))
+	if before != "hello" {
+		t.Fatalf("comment edit kept %q", before)
+	}
+	must(db.QueryRow(ctx, `SELECT count(*) FROM comment_metrics WHERE comment_pk = 1`).Scan(&n))
+	if n != 1 {
+		t.Fatalf("comment metrics %d, want 1 (first sighting; the edit sent no counts)", n)
+	}
+	t4b := t4.Add(time.Second)
+	must(w.Write(ctx, Batch{Comments: []*igv1.Comment{{Obs: obs(t4b, "c3"), CommentPk: 1, MediaPk: reel, OwnerPk: owner,
+		PostTakenAt: timestamppb.New(taken), Text: "hello!", CreatedAt: timestamppb.New(t1), LikeCount: i64(5), ChildCommentCount: i64(2),
+		Author: &igv1.Author{UserPk: 6001, AuthorKey: []byte("a1")}}}}))
+	must(db.QueryRow(ctx, `SELECT count(*) FROM comment_metrics WHERE comment_pk = 1`).Scan(&n))
+	if n != 2 {
+		t.Fatalf("comment metrics %d, want 2 after the likes changed", n)
+	}
+
+	// Kinds, and the caption a post's edit replaced.
+	var kind string
+	must(db.QueryRow(ctx, `SELECT kind FROM posts WHERE media_pk = $1`, reel).Scan(&kind))
+	if kind != KindReel {
+		t.Fatalf("reel kind %q", kind)
+	}
+	must(db.QueryRow(ctx, `SELECT count(*) FROM post_edits WHERE media_pk = $1`, reel).Scan(&n))
+	if n == 0 {
+		t.Fatal("the reel's earlier caption was not kept")
+	}
+
+	// Highlight items are posts of kind highlight; one gone from the
+	// highlight is marked unavailable, not deleted.
+	t4c := t4b.Add(time.Second)
+	must(w.Write(ctx, Batch{Highlights: []*igv1.Highlight{{Obs: obs(t4c, "h2"), HighlightId: 9, UserPk: owner, Title: "Trips",
+		Items: []*igv1.HighlightItem{{ItemPk: 901, TakenAt: timestamppb.New(taken), MediaType: 1}}}}}))
+	var visible, gone int
+	must(db.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status = 'visible'), count(*) FILTER (WHERE status = 'unavailable')
+		FROM posts WHERE kind = 'highlight' AND highlight_id = 9`).Scan(&visible, &gone))
+	if visible != 1 || gone != 2 {
+		t.Fatalf("highlight items: %d visible, %d gone (want 1 and 2)", visible, gone)
 	}
 
 	// A username another account now holds moves to it.

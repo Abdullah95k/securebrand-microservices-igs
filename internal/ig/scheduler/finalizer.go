@@ -184,7 +184,7 @@ func (f *Finalizer) Finalize(ctx context.Context, id string) error {
 		g := f.Cfg.IG.Schedule
 		if _, err := tx.Exec(ctx, `INSERT INTO post_refresh (media_pk, user_pk, taken_at, next_refresh_at, last_comment_count)
 			SELECT p.media_pk, p.owner_pk, p.taken_at, now() + $3::int * interval '1 second', p.comment_count FROM posts p
-			WHERE p.owner_pk = $1 AND p.status = 'visible' AND p.taken_at > now() - $2::int * interval '1 second'
+			WHERE p.owner_pk = $1 AND p.status = 'visible' AND p.kind <> 'highlight' AND p.taken_at > now() - $2::int * interval '1 second'
 			ON CONFLICT (media_pk) DO UPDATE SET last_comment_count = EXCLUDED.last_comment_count`,
 			*userPK, int(g.PostRefreshWindow.Seconds()), int(g.Interval.Seconds())); err != nil {
 			return err

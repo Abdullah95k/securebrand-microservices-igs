@@ -416,8 +416,8 @@ func (c *Config) Validate() error {
 	// privacy.author_hmac_key was fbs's; igs keys authors with
 	// ig.privacy.author_hmac_key alone (validateIG), so a production
 	// install must not have to set the other.
-	if c.Media.TTL <= 0 {
-		errs = append(errs, errors.New("media.ttl must be > 0"))
+	if c.Media.TTL < 0 {
+		errs = append(errs, errors.New("media.ttl must not be negative (0: keep until analysed)"))
 	}
 	if c.Scheduler.DefaultInterval <= 0 {
 		errs = append(errs, errors.New("scheduler.default_interval must be > 0"))

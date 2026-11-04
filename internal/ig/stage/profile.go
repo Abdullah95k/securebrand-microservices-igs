@@ -256,9 +256,11 @@ func (s *ProfileStage) profile(ctx context.Context, t *igstaskv1.Task, id *sessi
 		if cls, err := s.highlights(ctx, t, id, b, res, c, page); err != nil {
 			slog.Debug("profile: highlights", "profile", p.UserPk, "err", err)
 			c["highlights_failed"]++
-			// Two tries that got nowhere, not two attempts: a park (every
-			// exit resting) is no failed try.
-			if t.Stalls < 2 {
+			// Tries that got nowhere, not attempts (a park, every exit
+			// resting, is no failed try), up to one short of the task's
+			// own limit: the 30 s and 5 min retries outlast a rate limit's
+			// rest, and the task never reaches the DLQ for its highlights.
+			if t.Stalls < highlightStalls(d.Cfg.Crawler.MaxAttempts) {
 				if cls.Blocking() {
 					// A block fails over to another identity within the run
 					// (Run), and only then waits for a retry.
@@ -681,3 +683,11 @@ func permalink(base, code, productType string) string {
 }
 
 func atoi64(s string) int64 { return walk.Int64(gjsonString(s)) }
+
+// highlightStalls is how many tries without progress a profile task makes
+// for its highlights before it publishes them without their items (the
+// next profile read tries again): one short of crawler.max_attempts, at
+// least two.
+func highlightStalls(maxAttempts int) uint32 {
+	return uint32(max(2, maxAttempts-1))
+}

@@ -46,19 +46,22 @@ type Post struct {
 	Status               string          `json:"status"`
 	FirstSeenAt          time.Time       `json:"first_seen_at"`
 	LastSeenAt           time.Time       `json:"last_seen_at"`
+	// Kind is post, video, reel or highlight (an item of HighlightID).
+	Kind        string `json:"kind"`
+	HighlightID *int64 `json:"highlight_id,omitempty"`
 }
 
 const selectPost = `SELECT media_pk, shortcode, permalink, owner_pk, taken_at, media_type, product_type, caption, caption_edited,
 	hashtags, mentions, accessibility_caption, location, usertags, coauthors, music, topics, ai_label, like_count, counts_hidden,
 	comment_count, commenting_disabled, play_count, is_pinned, child_count, video_duration_ms, media_ids, status,
-	first_seen_at, last_seen_at FROM posts`
+	first_seen_at, last_seen_at, kind, highlight_id FROM posts`
 
 func scanPost(row pgx.CollectableRow) (*Post, error) {
 	var p Post
 	err := row.Scan(&p.MediaPK, &p.Shortcode, &p.Permalink, &p.OwnerPK, &p.TakenAt, &p.MediaType, &p.ProductType, &p.Caption,
 		&p.CaptionEdited, &p.Hashtags, &p.Mentions, &p.AccessibilityCaption, &p.Location, &p.Usertags, &p.Coauthors, &p.Music,
 		&p.Topics, &p.AILabel, &p.LikeCount, &p.CountsHidden, &p.CommentCount, &p.CommentingDisabled, &p.PlayCount, &p.IsPinned,
-		&p.ChildCount, &p.VideoDurationMS, &p.MediaIDs, &p.Status, &p.FirstSeenAt, &p.LastSeenAt)
+		&p.ChildCount, &p.VideoDurationMS, &p.MediaIDs, &p.Status, &p.FirstSeenAt, &p.LastSeenAt, &p.Kind, &p.HighlightID)
 	return &p, err
 }
 
@@ -85,6 +88,16 @@ func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 	}
 	q := selectPost + ` WHERE owner_pk = $1`
 	args := []any{pk}
+	if k := r.URL.Query().Get("kind"); k != "" {
+		switch k {
+		case "post", "video", "reel", "highlight":
+		default:
+			httpapi.Problem(w, http.StatusBadRequest, "invalid kind", "kind is post, video, reel or highlight")
+			return
+		}
+		args = append(args, k)
+		q += ` AND kind = $` + strconv.Itoa(len(args))
+	}
 	if hasSince {
 		args = append(args, since)
 		q += ` AND taken_at >= $` + strconv.Itoa(len(args))
@@ -359,8 +372,9 @@ func (s *Server) profileHighlights(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.ReadDB.Query(r.Context(), `SELECT h.highlight_id, h.title, h.cover_url, h.item_count, h.status, h.last_seen_at,
-		coalesce((SELECT json_agg(json_build_object('item_pk', i.item_pk, 'taken_at', i.taken_at, 'media_type', i.media_type,
-			'media_ids', i.media_ids) ORDER BY i.item_pk) FROM highlight_items i WHERE i.highlight_id = h.highlight_id), '[]')
+		coalesce((SELECT json_agg(json_build_object('item_pk', i.media_pk, 'taken_at', i.taken_at, 'media_type', i.media_type,
+			'media_ids', i.media_ids) ORDER BY i.media_pk) FROM posts i
+			WHERE i.kind = 'highlight' AND i.highlight_id = h.highlight_id AND i.owner_pk = h.user_pk AND i.status = 'visible'), '[]')
 		FROM highlights h WHERE h.user_pk = $1 ORDER BY h.highlight_id`, pk)
 	if err != nil {
 		httpapi.ServerError(w, err)

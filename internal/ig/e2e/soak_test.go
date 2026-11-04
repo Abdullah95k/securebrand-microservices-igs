@@ -219,7 +219,7 @@ func TestSoak(t *testing.T) {
 		t.Fatalf("goroutines grew from %d to %d", baseGoroutines, g)
 	}
 	jobsRun := count(t, s, `SELECT count(*) FROM jobs`)
-	posts := count(t, s, `SELECT count(*) FROM posts`)
+	posts := count(t, s, `SELECT count(*) FROM posts WHERE kind <> 'highlight'`)
 	comments := count(t, s, `SELECT count(*) FROM comments`)
 	fmt.Fprintf(&report, "\n- jobs: %d; posts stored %d, comments %d\n- mutations: %v\n- restarts: %v\n"+
 		"- goroutines: %d after 2 minutes, %d max, %d at the end; heap in use at most %.0f MB\n",
