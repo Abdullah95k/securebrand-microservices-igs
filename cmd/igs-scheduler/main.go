@@ -73,6 +73,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	fin := &scheduler.Finalizer{DB: db, Jobs: tracker, Producer: producer, Cfg: cfg, Timeout: cfg.Scheduler.FinalizeTimeout}
 	reaper := &scheduler.Reaper{DB: db, Jobs: tracker, After: cfg.Scheduler.ReaperAfter}
 	maint := &scheduler.Maintenance{DB: db, Cfg: cfg}
+	tierer := &scheduler.Tierer{DB: db, Cfg: cfg}
 	lag := &scheduler.LagGauges{Admin: kadm.NewClient(producer.Client()), Prefix: cfg.Kafka.TopicPrefix}
 	eraser := &iggdpr.Eraser{DB: db, Producer: producer}
 	if cfg.S3.Endpoint != "" {
@@ -89,6 +90,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 			return scheduler.Every(ctx, "finalizer", cfg.Scheduler.FinalizerInterval, fin.Tick)
 		},
 		func(ctx context.Context) error { return scheduler.Every(ctx, "reaper", time.Minute, reaper.Tick) },
+		func(ctx context.Context) error { return scheduler.Every(ctx, "tiers", 5*time.Minute, tierer.Tick) },
 		func(ctx context.Context) error { return scheduler.Every(ctx, "consumer-lag", 30*time.Second, lag.Tick) },
 		func(ctx context.Context) error { return scheduler.Every(ctx, "erasure", 10*time.Second, eraser.Tick) },
 	}

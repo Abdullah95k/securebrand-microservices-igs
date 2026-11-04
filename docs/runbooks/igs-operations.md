@@ -319,7 +319,26 @@ A job ends `partial` when posts failed, or when a grid ended before the job's ag
 
 ## Schedule
 
-The planner runs every scheduled profile every `ig.schedule.interval` (3 h, D2), and its profile query every `ig.schedule.profile_refresh` (24 h). The post refresh re-reads the comments and counts of posts from the last `ig.schedule.post_refresh_window` (7 days), `post_refresh_per_run` posts at a time.
+The planner runs each scheduled profile at its tier's interval, and its profile query every `ig.schedule.profile_refresh` (24 h). The post refresh re-reads the comments and counts of posts from the last `ig.schedule.post_refresh_window` (7 days), `post_refresh_per_run` posts at a time; each post's refreshes start at its profile's interval and double.
+
+**Tiers** (`ig.schedule.tiers`, architecture §8):
+
+| Tier | Interval | Who |
+|---|---|---|
+| hot | 10 min | Pinned: client brands, their competitors, trending accounts |
+| warm | 1 h | Not pinned and posting 2 or more times a day over 14 days |
+| long_tail | 3 h | Not pinned, everyone else; the default |
+| custom | its own | A profile given its own interval (at least `min_interval`, 5 min) |
+
+- A profile not pinned is placed by its posting rate as soon as its backfill gives its user pk, then checked daily (`auto_every`). Re-registering it keeps its placement.
+- Pin a client watchlist's accounts to hot, and release them with `auto`:
+
+  ```bash
+  kubectl -n igs exec -i deploy/igs-api -- igsctl profiles tier --tier hot --file - < watchlist.txt
+  ```
+
+  The API does the same per profile (`PATCH /v1/profiles/{profile}` with `{"schedule":{"tier":"hot"}}`) or in bulk (`POST /v1/profiles/bulk` with `"schedule":{"tier":"hot"}`).
+- **Cost:** each run is 5 to 10 requests, and one exit sends 900 an hour. So one exit carries 15 to 30 hot profiles, 90 to 180 warm ones, or 270 to 540 long-tail ones. `igs_profiles_scheduled{tier}` counts the profiles per tier; size the exits from it.
 
 `IgsIgScheduleLag` fires when profiles are a full interval overdue: the fleet does not keep up. Then:
 - add crawler capacity (KEDA max replicas) or ISP exits;

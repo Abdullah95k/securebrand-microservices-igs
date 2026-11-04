@@ -213,3 +213,62 @@ func TestBudgetHoldsBackfill(t *testing.T) {
 		t.Fatalf("next run in %.2f intervals, want about 2 (the budget's stretch)", gap)
 	}
 }
+
+// A profile pinned to the hot tier is read again and again within minutes
+// (here seconds); the API shows and changes its placement: a custom
+// interval in minutes, back to auto; a tier with an interval, or an
+// interval over 30 days, is refused (TestPlace covers min_interval).
+func TestScheduleTiers(t *testing.T) {
+	s := Start(t, Options{Spec: spec(), Config: func(c *config.Config) {
+		c.IG.Schedule.MinInterval = time.Second
+		c.IG.Schedule.Tiers.Hot = 2 * time.Second
+		c.IG.Schedule.Jitter = 0
+	}})
+	s.StartScheduler()
+	ctx := context.Background()
+	key := s.Key(t, api.ScopeProfilesWrite, httpapi.ScopeDataRead)
+	p := s.World.Profiles()[0]
+	var reg struct {
+		BackfillJob *dispatch.Job `json:"backfill_job"`
+	}
+	if code := s.Do(t, key, "POST", "/v1/profiles", map[string]any{"profile": p.Username, "schedule": map[string]any{"tier": "hot"}}, &reg); code != http.StatusCreated {
+		t.Fatalf("register hot: %d", code)
+	}
+	if st := s.WaitStatus(t, reg.BackfillJob.ID.String(), 3*time.Minute); st != "completed" {
+		t.Fatalf("backfill %s", st)
+	}
+	runs := func() int {
+		var n int
+		_ = s.DB.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind = 'scheduled' AND status = 'completed'`).Scan(&n)
+		return n
+	}
+	for deadline := time.Now().Add(time.Minute); runs() < 3; time.Sleep(200 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d scheduled runs of a hot profile in a minute", runs())
+		}
+	}
+	var sc api.Schedule
+	if code := s.Do(t, key, "PATCH", "/v1/profiles/"+p.Username, map[string]any{"schedule": map[string]any{"interval_minutes": 30}}, &sc); code != http.StatusOK ||
+		sc.Tier != dispatch.TierCustom || sc.IntervalSeconds != 1800 || sc.Adaptive {
+		t.Fatalf("custom: %d %+v", code, sc)
+	}
+	if code := s.Do(t, key, "PATCH", "/v1/profiles/"+p.Username, map[string]any{"schedule": map[string]any{"tier": "auto"}}, &sc); code != http.StatusOK ||
+		!sc.Adaptive {
+		t.Fatalf("auto: %d %+v", code, sc)
+	}
+	// The tierer places it by its posting rate at once (its pk is known).
+	for deadline := time.Now().Add(10 * time.Second); sc.Tier != dispatch.TierWarm && sc.Tier != dispatch.TierLongTail; time.Sleep(200 * time.Millisecond) {
+		s.Do(t, key, "GET", "/v1/profiles/"+p.Username, nil, &struct {
+			Schedule *api.Schedule `json:"schedule"`
+		}{&sc})
+		if time.Now().After(deadline) {
+			t.Fatalf("not placed: %+v", sc)
+		}
+	}
+	if code := s.Do(t, key, "PATCH", "/v1/profiles/"+p.Username, map[string]any{"schedule": map[string]any{"interval_hours": 1, "tier": "hot"}}, nil); code != http.StatusBadRequest {
+		t.Fatalf("a tier and an interval: %d", code)
+	}
+	if code := s.Do(t, key, "PATCH", "/v1/profiles/"+p.Username, map[string]any{"schedule": map[string]any{"interval_hours": 721}}, nil); code != http.StatusBadRequest {
+		t.Fatalf("over 30 days: %d", code)
+	}
+}

@@ -254,6 +254,9 @@ func (s *Stack) StartScheduler() {
 		func(ctx context.Context) error {
 			return scheduler.Every(ctx, "finalizer", 200*time.Millisecond, fin.Tick)
 		},
+		func(ctx context.Context) error {
+			return scheduler.Every(ctx, "tiers", 200*time.Millisecond, (&scheduler.Tierer{DB: s.DB, Cfg: s.Cfg}).Tick)
+		},
 	}
 	if s.Cfg.IG.Discovery.Enabled {
 		vetter := &discovery.Vetter{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}

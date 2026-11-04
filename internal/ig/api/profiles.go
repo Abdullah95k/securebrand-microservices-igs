@@ -44,10 +44,13 @@ type Profile struct {
 
 // Schedule is a registered profile's scheduled crawl.
 type Schedule struct {
-	ProfileRef        string          `json:"profile_ref"`
-	UserPK            *int64          `json:"user_pk,omitempty"`
-	Enabled           bool            `json:"enabled"`
-	IntervalSeconds   int             `json:"interval_seconds"`
+	ProfileRef      string `json:"profile_ref"`
+	UserPK          *int64 `json:"user_pk,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	Tier            string `json:"tier"`
+	// Adaptive: placed by its posting rate (not pinned).
+	Adaptive          bool            `json:"adaptive"`
 	NextRunAt         time.Time       `json:"next_run_at"`
 	NextProfileReadAt *time.Time      `json:"next_profile_read_at,omitempty"`
 	LastRunAt         *time.Time      `json:"last_run_at,omitempty"`
@@ -70,12 +73,12 @@ func (s *Server) profileByPK(ctx context.Context, pk int64) (*Profile, error) {
 	return &p, nil
 }
 
-const selectSchedule = `SELECT profile_ref, user_pk, enabled, interval_seconds, next_run_at, next_profile_read_at,
+const selectSchedule = `SELECT profile_ref, user_pk, enabled, interval_seconds, tier, adaptive, next_run_at, next_profile_read_at,
 	last_run_at, last_job_id, consecutive_failures, options FROM profile_schedule`
 
 func scanSchedule(row pgx.CollectableRow) (*Schedule, error) {
 	var sc Schedule
-	err := row.Scan(&sc.ProfileRef, &sc.UserPK, &sc.Enabled, &sc.IntervalSeconds, &sc.NextRunAt, &sc.NextProfileReadAt,
+	err := row.Scan(&sc.ProfileRef, &sc.UserPK, &sc.Enabled, &sc.IntervalSeconds, &sc.Tier, &sc.Adaptive, &sc.NextRunAt, &sc.NextProfileReadAt,
 		&sc.LastRunAt, &sc.LastJobID, &sc.Failures, &sc.Options)
 	return &sc, err
 }
@@ -97,8 +100,13 @@ func (s *Server) resolveProfile(w http.ResponseWriter, r *http.Request) (int64, 
 }
 
 type scheduleReq struct {
-	Enabled       *bool `json:"enabled,omitempty"`
-	IntervalHours *int  `json:"interval_hours,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
+	// Tier pins the profile to hot, warm or long_tail; auto lets its
+	// posting rate place it. An interval (hours or minutes) instead is a
+	// custom placement.
+	Tier            *string `json:"tier,omitempty"`
+	IntervalHours   *int    `json:"interval_hours,omitempty"`
+	IntervalMinutes *int    `json:"interval_minutes,omitempty"`
 }
 
 type registerReq struct {
@@ -110,15 +118,34 @@ type registerReq struct {
 	CrawlOptions
 }
 
-func (s *Server) interval(sr *scheduleReq) (time.Duration, error) {
-	iv := s.Cfg.IG.Schedule.Interval
-	if sr != nil && sr.IntervalHours != nil {
-		if *sr.IntervalHours < 1 || *sr.IntervalHours > 24*30 {
-			return 0, errors.New("interval_hours must be between 1 and 720")
-		}
-		iv = time.Duration(*sr.IntervalHours) * time.Hour
+// placement is the tier and interval sr asks for ("" and 0: auto), or nil
+// when it asks for neither (a PATCH that leaves them).
+func (s *Server) placement(sr *scheduleReq) (*dispatch.Placement, string, time.Duration, error) {
+	if sr == nil || (sr.Tier == nil && sr.IntervalHours == nil && sr.IntervalMinutes == nil) {
+		return nil, "", 0, nil
 	}
-	return iv, nil
+	if sr.IntervalHours != nil && sr.IntervalMinutes != nil {
+		return nil, "", 0, errors.New("give interval_hours or interval_minutes, not both")
+	}
+	var iv time.Duration
+	switch {
+	case sr.IntervalHours != nil:
+		iv = time.Duration(*sr.IntervalHours) * time.Hour
+		if iv <= 0 {
+			return nil, "", 0, errors.New("interval_hours must be positive")
+		}
+	case sr.IntervalMinutes != nil:
+		iv = time.Duration(*sr.IntervalMinutes) * time.Minute
+		if iv <= 0 {
+			return nil, "", 0, errors.New("interval_minutes must be positive")
+		}
+	}
+	tier := ""
+	if sr.Tier != nil {
+		tier = *sr.Tier
+	}
+	pl, err := dispatch.Place(s.Cfg, tier, iv)
+	return &pl, tier, iv, err
 }
 
 // registerProfile adds a profile to the schedule (D2: every 3 hours, the
@@ -165,7 +192,7 @@ func (s *Server) registration(r *http.Request, sc *scheduleReq, backfill *bool, 
 	if _, err := Limits(s.Cfg, o); err != nil {
 		return dispatch.Registration{}, err
 	}
-	iv, err := s.interval(sc)
+	_, tier, iv, err := s.placement(sc)
 	if err != nil {
 		return dispatch.Registration{}, err
 	}
@@ -173,7 +200,7 @@ func (s *Server) registration(r *http.Request, sc *scheduleReq, backfill *bool, 
 	if sc != nil && sc.Enabled != nil {
 		enabled = *sc.Enabled
 	}
-	return dispatch.Registration{ClientID: httpapi.ClientFrom(r.Context()).ID, Interval: iv, Enabled: enabled, Options: o,
+	return dispatch.Registration{ClientID: httpapi.ClientFrom(r.Context()).ID, Tier: tier, Interval: iv, Enabled: enabled, Options: o,
 		Backfill: backfill}, nil
 }
 
@@ -335,14 +362,13 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	if req.Schedule != nil {
-		if req.Schedule.IntervalHours != nil {
-			iv, err := s.interval(req.Schedule)
-			if err != nil {
-				httpapi.Problem(w, http.StatusBadRequest, "invalid schedule", err.Error())
-				return
-			}
-			if _, err := s.DB.Exec(ctx, `UPDATE profile_schedule SET interval_seconds = $2::int,
-				next_run_at = LEAST(next_run_at, now() + $2::int * interval '1 second') WHERE profile_ref = $1`, ref, int(iv.Seconds())); err != nil {
+		pl, _, _, err := s.placement(req.Schedule)
+		if err != nil {
+			httpapi.Problem(w, http.StatusBadRequest, "invalid schedule", err.Error())
+			return
+		}
+		if pl != nil {
+			if err := dispatch.SetPlacement(ctx, s.DB, []string{ref}, *pl); err != nil {
 				httpapi.ServerError(w, err)
 				return
 			}
