@@ -158,6 +158,31 @@ func TestIdentitiesAndRestsOutliveAPod(t *testing.T) {
 	}
 }
 
+// Highlights refused on every identity of several runs in a row, as when
+// retries come back before a rate limit ends, still end with their items:
+// they keep trying until one stall short of crawler.max_attempts. Before,
+// they gave up after two such runs (7 refused queries here);
+// TestExitFailoverEqualsTruth met that in CI.
+func TestHighlightsOutlastRefusedRuns(t *testing.T) {
+	sp := spec()
+	sp.Profiles = 1
+	const refused = 9
+	s := Start(t, Options{Spec: sp, Faults: fakeig.Faults{RateLimitFirst: map[string]int{fakeig.OpHighlights: refused}}})
+	lim := s.Limits()
+	p := s.World.Profiles()[0]
+	st := s.Wait(t, 2*time.Minute, s.Crawl(t, p.Username, full, lim, nil))
+	truth, _ := s.World.Truth(p.Username, time.Now().Add(-time.Duration(lim.MaxAgeSeconds)*time.Second))
+	checkTruth(t, s, truth)
+	if n := s.Fake.QueryCount(fakeig.OpHighlights); n != refused+1 {
+		t.Errorf("%d highlights queries, want %d (%d refused, then the items)", n, refused+1, refused)
+	}
+	for id, j := range st {
+		if j.Counters["tasks_failed"] != 0 {
+			t.Errorf("job %s: %v", id, j.Counters)
+		}
+	}
+}
+
 // A highlights query that keeps meeting rate limits fails over to other
 // identities within the run, then retries: the highlights end with their
 // items rather than published without them. (TestExitFailoverEqualsTruth
