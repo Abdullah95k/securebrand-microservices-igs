@@ -338,6 +338,15 @@ func (d *Deps) saveWatermark(ctx context.Context, userPK int64, newest, oldest t
 
 // storedCommentState is a post's comment count and newest comment time as
 // last stored, for incremental comment reads.
+// keepRaw keeps a page load's HTML with the raw responses when every
+// response is kept (ig.capture_raw: all), and returns its reference.
+func (d *Deps) keepRaw(ctx context.Context, query string, body []byte, vars map[string]any) string {
+	if d.GQL == nil || d.GQL.Raw == nil || !d.GQL.CaptureAll || len(body) == 0 {
+		return ""
+	}
+	return d.GQL.Raw.Capture(ctx, query, detect.OK, body, vars)
+}
+
 func (d *Deps) storedPost(ctx context.Context, mediaPK int64) (count int64, newest time.Time, ok bool) {
 	if d.DB == nil {
 		return 0, time.Time{}, false

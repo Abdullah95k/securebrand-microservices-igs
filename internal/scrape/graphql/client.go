@@ -22,7 +22,8 @@ import (
 // request's template values (page_id, feedback_id, ...) so they can be
 // parsed again with their context.
 type RawSink interface {
-	Capture(ctx context.Context, query string, cls detect.Class, body []byte, vars map[string]any)
+	// Capture keeps one response and returns its reference.
+	Capture(ctx context.Context, query string, cls detect.Class, body []byte, vars map[string]any) string
 }
 
 // Request is one logical GraphQL call.
@@ -52,6 +53,8 @@ type Response struct {
 	// Wire bytes (compressed, as billed by proxies).
 	BytesIn  int64
 	BytesOut int64
+	// RawRef is where the raw response is kept, if it was captured.
+	RawRef string
 }
 
 // Client sends GraphQL requests on behalf of identities.
@@ -215,11 +218,12 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 		c.Outcomes.Observe(cls, req.Lane, tr.BytesIn+tr.BytesOut)
 	}
 	metrics.Requests.WithLabelValues(q.Name, cls.String(), tier).Inc()
+	var ref string
 	if c.Raw != nil && (c.CaptureAll || cls != detect.OK) {
-		c.Raw.Capture(ctx, q.Name, cls, tr.Body, req.Vars)
+		ref = c.Raw.Capture(ctx, q.Name, cls, tr.Body, req.Vars)
 	}
 	return &Response{Query: q, Parts: parts, Body: tr.Body, Status: tr.Status, ContentType: ct, Class: cls,
-		Reason: reason, Errors: errs, Elapsed: elapsed, Vars: req.Vars, BytesIn: tr.BytesIn, BytesOut: tr.BytesOut}, nil
+		Reason: reason, Errors: errs, Elapsed: elapsed, Vars: req.Vars, BytesIn: tr.BytesIn, BytesOut: tr.BytesOut, RawRef: ref}, nil
 }
 
 // pace applies identity pacing, then the per-page and global fleet limits.

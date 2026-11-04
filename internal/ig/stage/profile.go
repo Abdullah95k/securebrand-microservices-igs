@@ -245,7 +245,8 @@ func (s *ProfileStage) profile(ctx context.Context, t *igstaskv1.Task, id *sessi
 	if res.NotFound {
 		return s.unavailable(ctx, t, sc, c, "no user"), true
 	}
-	src := emit.Source{JobID: t.JobId, Query: "profile", DocID: resp.Query.DocID, ParserVersion: parse.ProfileVersion, Mode: t.Mode}
+	src := emit.Source{JobID: t.JobId, Query: "profile", DocID: resp.Query.DocID, ParserVersion: parse.ProfileVersion, Mode: t.Mode,
+		RawRef: resp.RawRef}
 	p := res.Profile
 	p.RequestedRef, p.HighlightsHash = sc.ProfileRef, res.HighlightsHash
 	if d.Suppression.PageSuppressed(p.UserPk) {
@@ -317,6 +318,9 @@ func (s *ProfileStage) highlights(ctx context.Context, t *igstaskv1.Task, id *se
 		byID[h.HighlightId] = h
 	}
 	src := emit.Source{JobID: t.JobId, Query: "highlights", ParserVersion: parse.HighlightsVersion, Mode: t.Mode}
+	if resp != nil {
+		src.RawRef = resp.RawRef
+	}
 	for _, h := range res.Highlights {
 		if full := byID[h.HighlightId]; full != nil {
 			full.Cover = h.Cover
@@ -602,7 +606,8 @@ func (s *ProfileStage) reelsPage(ctx context.Context, t *igstaskv1.Task, id *ses
 	if a := t.Limits.GetMaxAgeSeconds(); a > 0 {
 		maxAge = d.now().Add(-time.Duration(a) * time.Second)
 	}
-	src := emit.Source{JobID: t.JobId, Query: "reels", DocID: resp.Query.DocID, ParserVersion: parse.ReelsVersion, Mode: t.Mode}
+	src := emit.Source{JobID: t.JobId, Query: "reels", DocID: resp.Query.DocID, ParserVersion: parse.ReelsVersion, Mode: t.Mode,
+		RawRef: resp.RawRef}
 	b := d.Producer.NewBatch()
 	old := false
 	for _, r := range res.Reels {

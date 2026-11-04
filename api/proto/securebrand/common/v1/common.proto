@@ -41,6 +41,17 @@ message Observation {
   uint32 parser_version = 6;
   bytes content_hash = 7;
   CrawlMode mode = 8;
+  // The shared contract's envelope (architecture §5), on every event:
+  // the platform, the entity's own id as text, a version that grows with
+  // every observation (observed_at in microseconds: ClickHouse keeps the
+  // highest), the collector and its build, and where the raw response
+  // that carried it is kept (s3://bucket/key#line), if it was kept.
+  Platform platform = 9;
+  string native_id = 10;
+  int64 version = 11;
+  string collector = 12;
+  string collector_version = 13;
+  string raw_ref = 14;
 }
 
 message ImageRef {

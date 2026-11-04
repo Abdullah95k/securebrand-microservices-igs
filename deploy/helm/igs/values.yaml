@@ -47,7 +47,7 @@ config:
     block_hops: 2
     profile_rps: 3
     global_rps: 50      # AIMD's starting ceiling; ig.aimd.max_rps caps how far it grows
-    capture_raw: failures
+    capture_raw: all
     proxy:
       # Tiers (endpoints and credentials) come from the proxies Secret.
       # ISP proxies only (the owner's decision); residential is not used.

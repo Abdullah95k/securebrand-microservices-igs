@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 ARG VERSION=dev
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -ldflags="-s -w -X main.version=${VERSION}" -o /out/ ./cmd/...
+    go build -ldflags="-s -w -X main.version=${VERSION} -X github.com/abdullah95k/securebrand-microservices-igs/internal/platform/buildinfo.version=${VERSION}" -o /out/ ./cmd/...
 
 # `--target browser`: the same binaries with Chromium, for crawlers and
 # igs-registry-sync with ig.browser.enabled (headless-Chromium fallback).
