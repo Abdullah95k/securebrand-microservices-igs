@@ -3,9 +3,11 @@ package e2e
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/minio/minio-go/v7"
 	dto "github.com/prometheus/client_model/go"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
@@ -179,6 +181,31 @@ func TestHighlightsOutlastRefusedRuns(t *testing.T) {
 	for id, j := range st {
 		if j.Counters["tasks_failed"] != 0 {
 			t.Errorf("job %s: %v", id, j.Counters)
+		}
+	}
+}
+
+// With ig.capture_raw all, every response the crawl read is kept in the raw
+// bucket: the GraphQL answers (profile, grid, reels, highlights, comments)
+// and the post pages, so a parser fix can be applied to past data.
+func TestRawResponsesKept(t *testing.T) {
+	sp := spec()
+	sp.Profiles = 1
+	s := Start(t, Options{Spec: sp, RawCapture: true})
+	p := s.World.Profiles()[0]
+	s.Wait(t, 2*time.Minute, s.Crawl(t, p.Username, full, s.Limits(), nil))
+	s.stop("crawler") // the sink flushes on stop
+	seen := map[string]int{}
+	for obj := range s.S3.ListObjects(context.Background(), s.Cfg.S3.RawBucket, minio.ListObjectsOptions{Prefix: "raw/", Recursive: true}) {
+		if obj.Err != nil {
+			t.Fatal(obj.Err)
+		}
+		q := strings.SplitN(strings.TrimPrefix(obj.Key, "raw/"), "/", 2)[0]
+		seen[q]++
+	}
+	for _, q := range []string{"profile", "comments", "post_page", "reels"} {
+		if seen[q] == 0 {
+			t.Errorf("no raw %s responses kept: %v", q, seen)
 		}
 	}
 }

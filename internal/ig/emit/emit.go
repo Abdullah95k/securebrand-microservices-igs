@@ -22,6 +22,7 @@ import (
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/buildinfo"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/suppress"
 )
@@ -45,7 +46,13 @@ type Source struct {
 	DocID         string
 	ParserVersion uint32
 	Mode          commonv1.CrawlMode
+	// RawRef is where the response that carried the entity is kept
+	// (rawsink), if it is.
+	RawRef string
 }
+
+// Collector names igs in every event's envelope.
+const Collector = "igs"
 
 // Emitter publishes entities.
 type Emitter struct {
@@ -75,9 +82,13 @@ func (e *Emitter) stamp(src Source, entityKey string, msg proto.Message, set fun
 	if src.JobID != "" {
 		jobs = []string{src.JobID}
 	}
+	now := e.now()
+	_, native, _ := strings.Cut(entityKey, ":")
 	set(&commonv1.Observation{
-		EventId: hex.EncodeToString(ev[:]), ObservedAt: timestamppb.New(e.now()), JobIds: jobs,
+		EventId: hex.EncodeToString(ev[:]), ObservedAt: timestamppb.New(now), JobIds: jobs,
 		QueryName: src.Query, DocId: src.DocID, ParserVersion: src.ParserVersion, ContentHash: h[:], Mode: src.Mode,
+		Platform: commonv1.Platform_PLATFORM_INSTAGRAM, NativeId: native, Version: now.UnixMicro(),
+		Collector: Collector, CollectorVersion: buildinfo.Version(), RawRef: src.RawRef,
 	})
 }
 

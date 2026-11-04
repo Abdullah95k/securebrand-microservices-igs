@@ -307,7 +307,7 @@ privacy:
     comments_days: 0
     authors_inactive_days: 0
     metrics_days: 0
-    raw_payload_days: 7
+    raw_payload_days: 0   # raw responses are kept with the data (architecture §2.5)
     media_rows_days: 30
     jobs_days: 90
 
@@ -371,7 +371,11 @@ ig:
   # proxy credentials) in Valkey this long; the next pod on the same exits
   # resumes them instead of loading a page per exit again. 0 = off.
   keep_identities: 1h
-  capture_raw: failures    # all | failures | none
+  # Every raw response is kept in the raw bucket (architecture §2.5), so a
+  # parser fix or a new field can be applied to past data without
+  # collecting again; each event carries its response's raw_ref.
+  # failures keeps only the failed ones, none nothing.
+  capture_raw: all         # all | failures | none
   proxy:
     tiers: []
     routing:

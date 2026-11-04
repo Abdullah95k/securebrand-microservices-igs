@@ -66,6 +66,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	}
 
 	var embedded parse.CommentsResult
+	var pageRef string // the post page's raw reference: its embedded comments came with it
 	var watermark time.Time
 	// The post page bootstraps a fresh identity and, on the first segment,
 	// is the post's detail. A blocked load, or a page gated for this
@@ -116,7 +117,8 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 				return classOutcome(t, detect.SchemaDrift, fmt.Sprint(rep.Missing), st.Cursor, c)
 			}
 			metrics.ParseTotal.WithLabelValues("post", "1", "ok").Inc()
-			out, stop := s.publish(ctx, t, sc, res, c)
+			pageRef = d.keepRaw(ctx, "post_page", pl.HTML, map[string]any{"shortcode": sc.Shortcode})
+			out, stop := s.publish(ctx, t, sc, res, pageRef, c)
 			if stop {
 				return out
 			}
@@ -206,7 +208,9 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	if first {
 		// The page's embedded comments are the connection's first page.
 		b := d.Producer.NewBatch()
-		n, older, err := s.emitComments(ctx, b, t, src, embedded, watermark, maxC, &st, c)
+		esrc := src
+		esrc.Query, esrc.DocID, esrc.RawRef = "post_page", "", pageRef
+		n, older, err := s.emitComments(ctx, b, t, esrc, embedded, watermark, maxC, &st, c)
 		if err == nil {
 			err = b.Wait(ctx)
 		}
@@ -282,6 +286,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 			break
 		}
 		b := d.Producer.NewBatch()
+		src.RawRef = resp.RawRef
 		n, older, err := s.emitComments(ctx, b, t, src, res, watermark, maxC, &st, c)
 		if err == nil {
 			err = b.Wait(ctx)
@@ -319,7 +324,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 
 // publish emits the post and its media. stop is true when the task ends
 // here (retry on a produce failure).
-func (s *PostStage) publish(ctx context.Context, t *igstaskv1.Task, sc *igstaskv1.PostScope, res parse.PostResult, c map[string]int64) (Outcome, bool) {
+func (s *PostStage) publish(ctx context.Context, t *igstaskv1.Task, sc *igstaskv1.PostScope, res parse.PostResult, rawRef string, c map[string]int64) (Outcome, bool) {
 	d := s.D
 	p := res.Post
 	if p.OwnerPk == 0 {
@@ -337,7 +342,7 @@ func (s *PostStage) publish(ctx context.Context, t *igstaskv1.Task, sc *igstaskv
 	if p.ProductType == "clips" && p.DiscoveredVia == igv1.DiscoveredVia_DISCOVERED_VIA_UNSPECIFIED {
 		p.DiscoveredVia = igv1.DiscoveredVia_DISCOVERED_VIA_GRID
 	}
-	src := emit.Source{JobID: t.JobId, Query: "post_page", ParserVersion: parse.PostVersion, Mode: t.Mode}
+	src := emit.Source{JobID: t.JobId, Query: "post_page", ParserVersion: parse.PostVersion, Mode: t.Mode, RawRef: rawRef}
 	b := d.Producer.NewBatch()
 	if err := d.Emit.Post(ctx, b, src, p); err != nil {
 		return retry(t, "", "30s", err.Error(), c), true

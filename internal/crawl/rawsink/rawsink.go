@@ -1,6 +1,9 @@
-// Package rawsink batches raw Facebook responses into zstd-compressed JSONL
-// objects in S3 so payloads can be re-parsed after a parser fix
-// (fbctl replay). Failures go under raw-failures/, everything else under raw/.
+// Package rawsink batches raw platform responses into zstd-compressed JSONL
+// objects in S3, so payloads can be parsed again after a parser fix or for
+// a new field without collecting again (architecture §2.5: keep the raw
+// responses). Failures go under raw-failures/, everything else under raw/.
+// Each captured response gets a reference (s3://bucket/key#line) that the
+// events built from it carry as raw_ref.
 package rawsink
 
 import (
@@ -10,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,13 +31,21 @@ type Sink struct {
 	maxSize int
 
 	mu   sync.Mutex
-	bufs map[string]*bytes.Buffer // prefix/query -> JSONL
+	bufs map[string]*batch // prefix/query -> the open object
 	seq  int
+}
+
+// batch is an object being filled: its key is chosen when it opens, so a
+// line's reference is known when the line is captured.
+type batch struct {
+	obj   string
+	buf   bytes.Buffer
+	lines int
 }
 
 func New(s3 *minio.Client, bucket string) *Sink {
 	pod, _ := os.Hostname()
-	return &Sink{s3: s3, bucket: bucket, pod: pod, maxSize: 8 << 20, bufs: map[string]*bytes.Buffer{}}
+	return &Sink{s3: s3, bucket: bucket, pod: pod, maxSize: 8 << 20, bufs: map[string]*batch{}}
 }
 
 // Line is one captured response (one JSONL line of a raw object).
@@ -46,8 +58,9 @@ type Line struct {
 	Text  string          `json:"text,omitempty"`
 }
 
-// Capture buffers one response.
-func (s *Sink) Capture(ctx context.Context, query string, cls detect.Class, body []byte, vars map[string]any) {
+// Capture buffers one response and returns its reference
+// (s3://bucket/key#line, the line counted from 1).
+func (s *Sink) Capture(ctx context.Context, query string, cls detect.Class, body []byte, vars map[string]any) string {
 	prefix := "raw"
 	if cls != detect.OK {
 		prefix = "raw-failures"
@@ -61,18 +74,22 @@ func (s *Sink) Capture(ctx context.Context, query string, cls detect.Class, body
 	b, _ := json.Marshal(l)
 	key := prefix + "/" + query
 	s.mu.Lock()
-	buf := s.bufs[key]
-	if buf == nil {
-		buf = &bytes.Buffer{}
-		s.bufs[key] = buf
+	bt := s.bufs[key]
+	if bt == nil {
+		s.seq++
+		bt = &batch{obj: fmt.Sprintf("%s/%s/%s-%d-%06d.jsonl.zst", key, l.At.Format("2006/01/02/15"), s.pod, l.At.UnixNano(), s.seq)}
+		s.bufs[key] = bt
 	}
-	buf.Write(b)
-	buf.WriteByte('\n')
-	full := buf.Len() >= s.maxSize
+	bt.buf.Write(b)
+	bt.buf.WriteByte('\n')
+	bt.lines++
+	ref := "s3://" + s.bucket + "/" + bt.obj + "#" + strconv.Itoa(bt.lines)
+	full := bt.buf.Len() >= s.maxSize
 	s.mu.Unlock()
 	if full {
 		go s.flushKey(context.WithoutCancel(ctx), key)
 	}
+	return ref
 }
 
 // Run flushes buffers every interval until ctx is done.
@@ -104,22 +121,19 @@ func (s *Sink) FlushAll(ctx context.Context) {
 
 func (s *Sink) flushKey(ctx context.Context, key string) {
 	s.mu.Lock()
-	buf := s.bufs[key]
-	if buf == nil || buf.Len() == 0 {
+	bt := s.bufs[key]
+	if bt == nil || bt.buf.Len() == 0 {
 		s.mu.Unlock()
 		return
 	}
 	delete(s.bufs, key)
-	s.seq++
-	seq := s.seq
 	s.mu.Unlock()
 
 	var out bytes.Buffer
 	enc, _ := zstd.NewWriter(&out, zstd.WithEncoderLevel(zstd.SpeedDefault))
-	_, _ = enc.Write(buf.Bytes())
+	_, _ = enc.Write(bt.buf.Bytes())
 	_ = enc.Close()
-	now := time.Now().UTC()
-	obj := fmt.Sprintf("%s/%s/%s-%06d.jsonl.zst", key, now.Format("2006/01/02/15"), s.pod, seq)
+	obj := bt.obj
 	_, err := s.s3.PutObject(ctx, s.bucket, obj, &out, int64(out.Len()), minio.PutObjectOptions{ContentType: "application/zstd"})
 	if err != nil {
 		slog.Warn("rawsink: upload failed", "object", obj, "err", err)

@@ -104,6 +104,9 @@ type Options struct {
 	// to fakeig, naming their exit (fakeig.ExitHeader) for its per-exit
 	// faults.
 	Exits int
+	// RawCapture keeps every raw response in the raw bucket
+	// (ig.capture_raw: all), as production does.
+	RawCapture bool
 }
 
 // Start brings up the stack; it stops at test cleanup.
@@ -225,6 +228,10 @@ func Start(t *testing.T, o Options) *Stack {
 				}
 				return d, nil
 			}}}
+	if o.RawCapture {
+		cfg.IG.CaptureRaw = "all"
+		s.copts.RawS3 = s3
+	}
 	for _, tp := range topics.Entity {
 		s.topics = append(s.topics, prefix+tp)
 	}

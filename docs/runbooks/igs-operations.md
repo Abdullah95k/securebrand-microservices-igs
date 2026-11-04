@@ -125,9 +125,10 @@ igs keeps what it collects forever (the owner, 2026-11-03): profiles and their s
 - A post's likes, comments and views (`post_metrics`) and a comment's likes and replies (`comment_metrics`) are kept each time they change.
 - A post, comment or highlight item that disappears is marked `unavailable` or `deleted`, never removed.
 
+**Raw responses are kept** (`ig.capture_raw: all`, architecture §2.5): every GraphQL answer and post page goes to the raw bucket as zstd JSONL (`raw/<query>/<yyyy/mm/dd/hh>/...`, failures under `raw-failures/`). Every event carries the reference of the response it came from (`raw_ref`: `s3://bucket/key#line`), so a parser fix or a new field can be applied to past data without collecting again. They take about as much as the proxy traffic before compression, a fifth to a tenth of it after: plan the raw bucket for 0.1 to 0.5 GB a day per 1,000 long-tail profiles, more with hot and warm ones.
+
 These still expire, being operational:
 - finished jobs after `jobs_days` (90);
-- raw failure captures after `raw_payload_days` (7);
 - media rows after `media_rows_days` (30) once their files are deleted.
 
 Media files are deleted once the analysis service acknowledged them (or after `media.ttl`, if set).
