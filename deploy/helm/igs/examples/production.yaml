@@ -28,6 +28,16 @@ config:
     region: "<region>"
     media_bucket: "<igs-media-bucket>"
     raw_bucket: "<igs-raw-bucket>"
+  # The shared content store (architecture §6). Set it and enable
+  # components.content-writer once the ClickHouse cluster exists; the
+  # password comes from IGS_CLICKHOUSE__PASSWORD in the igs-env Secret.
+  clickhouse:
+    addr: ["<clickhouse-host>:9000"]
+    database: securebrand
+    username: igs
+    cluster: "<cluster>"            # Replicated tables ON CLUSTER; "" for one server
+    storage_policy: "<policy>"      # with a 'cold' volume on object storage; "" for none
+    cold_after: 4320h               # partitions move to 'cold' after 180 days
   media:
     # Kept until the analysis service acknowledged it (0); a duration
     # deletes it after that long without an acknowledgement.

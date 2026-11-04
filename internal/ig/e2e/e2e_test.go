@@ -21,6 +21,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
 )
 
 const (
@@ -281,6 +282,54 @@ func TestContentEventsMatchStore(t *testing.T) {
 	for _, p := range s.World.Profiles() {
 		if accounts[strconv.FormatInt(p.PK, 10)] != p.Username {
 			t.Errorf("no content account for %s: %v", p.Username, accounts)
+		}
+	}
+}
+
+// The whole path to the shared store: a crawl, igs-normalizer and
+// igs-content-writer leave in ClickHouse every post (highlight items
+// included), comment and account the persister stored in Postgres.
+// Needs IGS_TEST_CLICKHOUSE_ADDR.
+func TestContentStoreMatchesPostgres(t *testing.T) {
+	ch := testenv.ClickHouse(t)
+	sp := spec()
+	sp.Profiles = 2
+	s := Start(t, Options{Spec: sp})
+	s.StartNormalizer(t)
+	conn := s.StartContentWriter(t, ch)
+	lim := s.Limits()
+	var ids []string
+	for _, p := range s.World.Profiles() {
+		ids = append(ids, s.Crawl(t, p.Username, full, lim, nil))
+	}
+	s.Wait(t, 2*time.Minute, ids...)
+	ctx := context.Background()
+	pg := func(q string) uint64 {
+		var n int64
+		_ = s.DB.QueryRow(ctx, q).Scan(&n)
+		return uint64(n)
+	}
+	chCount := func(q string) uint64 {
+		var n uint64
+		_ = conn.QueryRow(ctx, q).Scan(&n)
+		return n
+	}
+	pairs := []struct{ ch, pg string }{
+		{"SELECT count() FROM posts FINAL WHERE platform = 'instagram'", "SELECT count(*) FROM posts"},
+		{"SELECT count() FROM posts FINAL WHERE kind = 'highlight'", "SELECT count(*) FROM posts WHERE kind = 'highlight'"},
+		{"SELECT count() FROM comments FINAL WHERE is_deleted = 0", "SELECT count(*) FROM comments"},
+		{"SELECT count() FROM accounts FINAL", "SELECT count(*) FROM profiles"},
+	}
+	for _, p := range pairs {
+		want := pg(p.pg)
+		var got uint64
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+			if got = chCount(p.ch); got == want || time.Now().After(deadline) {
+				break
+			}
+		}
+		if got != want || want == 0 {
+			t.Errorf("%s = %d; Postgres has %d", p.ch, got, want)
 		}
 	}
 }

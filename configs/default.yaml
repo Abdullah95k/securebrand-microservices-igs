@@ -276,6 +276,20 @@ scheduler:
     stretch_tiers: [T4, T3, T2]
     projection_span: 1h
 
+# The shared content store (architecture §6). igs-content-writer reads the
+# content.* topics into it; igsctl clickhouse migrate creates its tables.
+clickhouse:
+  addr: []                  # host:9000, ... (native protocol); empty: off
+  database: securebrand
+  username: default
+  password: ""              # IGS_CLICKHOUSE__PASSWORD
+  secure: false
+  cluster: ""               # set to create Replicated tables ON CLUSTER
+  storage_policy: ""        # with cold_after: old partitions move to its 'cold' volume
+  cold_after: 0s
+  batch_size: 5000
+  linger: 1s
+
 media:
   concurrency: 50
   # Media is kept until every required consumer (the analysis service)

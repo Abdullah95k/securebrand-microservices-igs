@@ -91,7 +91,11 @@ var (
 	ProfilesByTier = gaugeVec("profiles_scheduled", "Enabled profiles on the schedule, by tier.", "tier")
 	// Normalized counts ig.* records mapped to content.* by
 	// igs-normalizer (outcome ok or undecodable).
-	Normalized           = counterVec("normalized_total", "ig.* records mapped to the content contract, by topic and outcome.", "topic", "outcome")
+	Normalized = counterVec("normalized_total", "ig.* records mapped to the content contract, by topic and outcome.", "topic", "outcome")
+	// ContentWritten counts rows igs-content-writer inserted into the
+	// shared store per table (outcome ok), and records it skipped
+	// (undecodable, by topic).
+	ContentWritten       = counterVec("content_written_total", "Rows written to the shared content store, by table and outcome.", "table", "outcome")
 	BreakerState         = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
 	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")

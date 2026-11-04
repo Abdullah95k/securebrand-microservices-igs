@@ -5,6 +5,7 @@
 {{- if .Values.hooks.topicPartitionsCap }}{{ $topicArgs = concat $topicArgs (list "--partitions-cap" (toString .Values.hooks.topicPartitionsCap)) }}{{ end -}}
 {{- if .Values.hooks.topics }}{{ $jobs = append $jobs (dict "name" "topics" "args" $topicArgs) }}{{ end -}}
 {{- if .Values.hooks.schemas }}{{ $jobs = append $jobs (dict "name" "schemas" "args" (list "schemas" "apply")) }}{{ end -}}
+{{- if and .Values.hooks.clickhouse (index .Values.components "content-writer" "enabled") }}{{ $jobs = append $jobs (dict "name" "clickhouse" "args" (list "clickhouse" "migrate")) }}{{ end -}}
 {{- range $jobs }}
 ---
 apiVersion: batch/v1
