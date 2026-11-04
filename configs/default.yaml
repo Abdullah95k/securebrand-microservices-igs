@@ -360,6 +360,14 @@ ig:
   # A task whose identity is blocked moves to a fresh identity on another
   # exit and carries on, this many times a run, before it waits for a retry.
   block_hops: 2
+  # A rest one crawler pod sees holds for every pod on the same exits: rests
+  # are shared through Valkey and read every exit_rest_sync.
+  share_exit_rests: true
+  exit_rest_sync: 2s
+  # A stopping crawler keeps its idle identities (cookies and tokens, never
+  # proxy credentials) in Valkey this long; the next pod on the same exits
+  # resumes them instead of loading a page per exit again. 0 = off.
+  keep_identities: 1h
   capture_raw: failures    # all | failures | none
   proxy:
     tiers: []

@@ -4,6 +4,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -92,6 +93,85 @@ type Pool struct {
 	// exit is half-open: one identity probes it, and a failure rests it
 	// again for twice as long (up to the breaker's max_cooldown).
 	rests *breaker.Set
+	// shared, when set, spreads rests to every process that uses the same
+	// exits (ShareRests).
+	shared RestStore
+}
+
+// RestStore shares exit rests between processes: a rest one crawler pod
+// sees (a rate limit, a checkpoint, a login page) holds for every pod, so
+// the others do not each meet the same limit once more before they rest
+// the exit too.
+type RestStore interface {
+	// Publish records that exit rests until until (keeping a later end).
+	Publish(ctx context.Context, exit string, until time.Time) error
+	// Load returns the rests recorded, ended ones included.
+	Load(ctx context.Context) (map[string]time.Time, error)
+}
+
+// ShareRests publishes this pool's exit rests to s; SyncRests applies the
+// rests other processes published.
+func (p *Pool) ShareRests(s RestStore) { p.shared = s }
+
+// SyncRests applies the shared rests every interval until ctx ends.
+func (p *Pool) SyncRests(ctx context.Context, every time.Duration) error {
+	if p.shared == nil {
+		return nil
+	}
+	if every <= 0 {
+		every = 2 * time.Second
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		if err := p.PullRests(ctx); err != nil && ctx.Err() == nil {
+			slog.Debug("proxy: shared exit rests", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+	}
+}
+
+// PullRests applies the rests other processes published once: an exit
+// they rest that this pool does not (or rests for less) rests here too,
+// until the same end.
+func (p *Pool) PullRests(ctx context.Context) error {
+	rests, err := p.shared.Load(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for exit, until := range rests {
+		if !until.After(now.Add(time.Second)) {
+			continue
+		}
+		if mine, open := p.rests.OpenUntil(exit); open && !mine.Before(until) {
+			continue
+		}
+		p.rests.Trip(exit, until.Sub(now))
+	}
+	return nil
+}
+
+// publish shares exit's rest, if it rests, without holding up the caller.
+func (p *Pool) publish(exit string) {
+	if p.shared == nil {
+		return
+	}
+	until, open := p.rests.OpenUntil(exit)
+	if !open {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := p.shared.Publish(ctx, exit, until); err != nil {
+			slog.Debug("proxy: publish exit rest", "err", err)
+		}
+	}()
 }
 
 // New builds a pool from config. A "direct" tier always exists.
@@ -237,6 +317,7 @@ func (p *Pool) IsOpen(ep Endpoint) bool {
 func (p *Pool) Rest(ep Endpoint, d time.Duration) {
 	if ep.Exit() != "" && d > 0 {
 		p.rests.Trip(ep.Exit(), d)
+		p.publish(ep.Exit())
 	}
 }
 
@@ -249,7 +330,13 @@ func (p *Pool) Observe(ep Endpoint, c detect.Class) {
 		p.breakers.Observe(ep.Bucket, failed)
 	}
 	if x := ep.Exit(); x != "" && p.rests.State(x) != breaker.Closed {
+		before := p.rests.State(x)
 		p.rests.Observe(x, failed)
+		if before == breaker.HalfOpen && p.rests.State(x) == breaker.Open {
+			// A failed probe rests the exit again, for longer: for every
+			// process.
+			p.publish(x)
+		}
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/clients"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/registrysync"
@@ -42,7 +43,12 @@ func runSync(ctx context.Context, cfg *config.Config, once bool) (int, error) {
 		return 0, err
 	}
 	defer db.Close()
-	s, reg, err := igapp.NewRegistrySync(ctx, cfg, db, nil)
+	rdb, err := clients.Redis(ctx, cfg)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rdb.Close() }()
+	s, reg, rests, err := igapp.NewRegistrySync(ctx, cfg, db, rdb, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -73,7 +79,8 @@ func runSync(ctx context.Context, cfg *config.Config, once bool) (int, error) {
 	}
 	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("postgres", db.Ping)
-	return 0, run.Group(ctx, ops.Run, func(ctx context.Context) error {
+	ops.AddCheck("redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })
+	return 0, run.Group(ctx, ops.Run, rests, func(ctx context.Context) error {
 		return scheduler.Every(ctx, "registry-sync", rc.Interval, func(ctx context.Context) error {
 			_, err := sync(ctx)
 			return err

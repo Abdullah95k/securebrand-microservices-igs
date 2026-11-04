@@ -6,9 +6,14 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
+
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
+	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 )
 
@@ -103,6 +108,53 @@ func TestExitFailoverEqualsTruth(t *testing.T) {
 	}
 	if wall.Requests > 20 {
 		t.Errorf("the walled exit got %d page loads: it must rest after a walled one", wall.Requests)
+	}
+}
+
+// A crawler pod that stops parks its idle identities, and the pod that
+// replaces it resumes them (fakeig accepts their cookies and tokens), so a
+// rolling restart does not load a page on every exit again. A rest one
+// crawler pod takes holds for every other pod on the same exits.
+func TestIdentitiesAndRestsOutliveAPod(t *testing.T) {
+	sp := spec()
+	sp.Profiles = 2
+	s := Start(t, Options{Spec: sp, Exits: 2, Config: func(c *config.Config) { c.IG.ExitRestSync = 50 * time.Millisecond }})
+	lim := s.Limits()
+	ps := s.World.Profiles()
+	s.Wait(t, 2*time.Minute, s.Crawl(t, ps[0].Username, full, lim, nil))
+	resumed := func() float64 {
+		var m dto.Metric
+		_ = metrics.IdentityUnparked.WithLabelValues("isp").Write(&m)
+		return m.GetCounter().GetValue()
+	}
+	before := resumed()
+	s.RestartCrawler(t)
+	st := s.Wait(t, 2*time.Minute, s.Crawl(t, ps[1].Username, full, lim, nil))
+	if resumed() == before {
+		t.Fatal("the new crawler resumed no parked identity")
+	}
+	truth, _ := s.World.Truth(ps[1].Username, time.Now().Add(-time.Duration(lim.MaxAgeSeconds)*time.Second))
+	checkTruth(t, s, truth)
+	for id, j := range st {
+		if j.Counters["tasks_failed"] != 0 {
+			t.Errorf("job %s: tasks failed after the restart: %v", id, j.Counters)
+		}
+	}
+
+	other, err := igapp.NewCrawler(context.Background(), s.Cfg, s.DB, s.Redis, s.Producer, s.copts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.start("crawler-b", other.Components...)
+	ep := proxy.Endpoint{Tier: "isp", URL: "http://" + igtest.ExitName(1)}
+	s.Crawler.Deps.Proxies.Rest(ep, time.Minute)
+	for deadline := time.Now().Add(5 * time.Second); !other.Deps.Proxies.IsOpen(ep); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("a rest one crawler took does not hold in the other")
+		}
+	}
+	if other.Deps.Proxies.IsOpen(proxy.Endpoint{Tier: "isp", URL: "http://" + igtest.ExitName(2)}) {
+		t.Fatal("the other exit rests too")
 	}
 }
 

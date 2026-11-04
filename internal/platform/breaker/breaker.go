@@ -237,6 +237,24 @@ func (s *Set) Allow(key string) bool {
 	return allowed
 }
 
+// OpenUntil returns when key's cooldown ends, if key is open.
+func (s *Set) OpenUntil(key string) (time.Time, bool) {
+	var ch []change
+	s.mu.Lock()
+	e := s.entries[key]
+	var until time.Time
+	open := false
+	if e != nil {
+		s.advance(key, e, s.now(), &ch)
+		if e.state == Open {
+			until, open = e.openUntil, true
+		}
+	}
+	s.mu.Unlock()
+	s.notify(ch)
+	return until, open
+}
+
 // IsOpen reports whether key is open (cooling down), without admitting a
 // probe.
 func (s *Set) IsOpen(key string) bool {

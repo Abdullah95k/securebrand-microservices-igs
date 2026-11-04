@@ -54,14 +54,23 @@ type IG struct {
 	// BlockHops is how many times a task run replaces a blocked identity
 	// (rate limit, checkpoint, login wall) with a fresh one on another exit
 	// and carries on, before it waits for a retry.
-	BlockHops    int            `koanf:"block_hops"`
-	CaptureRaw   string         `koanf:"capture_raw"`
-	Proxy        Proxy          `koanf:"proxy"`
-	QueryBreaker breaker.Config `koanf:"query_breaker"`
-	AIMD         AIMD           `koanf:"aimd"`
-	Browser      Browser        `koanf:"browser"`
-	Detect       detect.Config  `koanf:"detect"`
-	Limits       IGLimits       `koanf:"limits"`
+	BlockHops int `koanf:"block_hops"`
+	// ShareExitRests spreads exit rests to every process on the same exits
+	// through Valkey, read every ExitRestSync: a rest one pod sees holds
+	// for all of them.
+	ShareExitRests bool          `koanf:"share_exit_rests"`
+	ExitRestSync   time.Duration `koanf:"exit_rest_sync"`
+	// KeepIdentities keeps a stopping crawler's idle identities (cookies
+	// and tokens, never proxy credentials) in Valkey this long, for the next
+	// pod on the same exits; 0 = off.
+	KeepIdentities time.Duration  `koanf:"keep_identities"`
+	CaptureRaw     string         `koanf:"capture_raw"`
+	Proxy          Proxy          `koanf:"proxy"`
+	QueryBreaker   breaker.Config `koanf:"query_breaker"`
+	AIMD           AIMD           `koanf:"aimd"`
+	Browser        Browser        `koanf:"browser"`
+	Detect         detect.Config  `koanf:"detect"`
+	Limits         IGLimits       `koanf:"limits"`
 	// RegistrySync follows Instagram's doc_id rotations (igs-registry-sync):
 	// canary_pages are public profiles (usernames) with regular posts,
 	// comments, reels and highlights.
@@ -180,8 +189,9 @@ func (c *Config) validateIG() []error {
 			errs = append(errs, errors.New("ig.discovery: threshold, vet_in_flight, interval and flush_every must be > 0; min_priority and revet_after not negative"))
 		}
 	}
-	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 {
-		errs = append(errs, errors.New("ig.exit_rps, ig.rate_limit_rest, ig.checkpoint_rest, ig.page_wall_rest and ig.block_hops must not be negative"))
+	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 || g.ExitRestSync < 0 ||
+		g.KeepIdentities < 0 {
+		errs = append(errs, errors.New("ig.exit_rps, ig.rate_limit_rest, ig.checkpoint_rest, ig.page_wall_rest, ig.block_hops, ig.exit_rest_sync and ig.keep_identities must not be negative"))
 	}
 	if g.IdentityMaxRequestsMin <= 0 || g.IdentityMaxRequestsMax < g.IdentityMaxRequestsMin {
 		errs = append(errs, errors.New("ig.identity_max_requests_min must be > 0 and <= identity_max_requests_max"))
