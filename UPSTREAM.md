@@ -23,6 +23,30 @@ The Go module here is `github.com/abdullah95k/securebrand-microservices-igs` (fb
 | Date | fbs commit | What | igs PR |
 |---|---|---|---|
 
+## Proposed to fbs
+
+Changes prepared here for fbs's repository, as patch files under [`docs/upstream/`](docs/upstream/). igs never pushes to fbs: the owner, or an fbs session, applies them.
+
+| Date | Patch | What | Status |
+|---|---|---|---|
+| 2026-11-05 | [`fbs-0001-iraq-seed-igs-spellings.patch`](docs/upstream/fbs-0001-iraq-seed-igs-spellings.patch) | The Iraq place seed (`configs/discovery/iraq.yaml`) gains the spellings igs matched that it lacked: Irak, Iraqis, Iraqia, عيراق; Kurdistan, كردستان, كوردستان, کوردستان, Kurdistanê; هولير; Sulaymani (سليماني off); انبار (حلة off); Dhiqar, ذيقار; Misan. With it, fbs's seed equals what igs loads (376 keywords). fbs's tests pass | proposed |
+
+To apply one, in a clone of fbs's repository (on the Phase 0 droplet: `~/securebrand-microservices`), with this repository next to it:
+
+```bash
+git checkout main && git pull --ff-only origin main && git checkout -b igs-iraq-spellings
+```
+
+```bash
+git am ../securebrand-microservices-igs/docs/upstream/fbs-0001-iraq-seed-igs-spellings.patch
+```
+
+```bash
+git push -u origin igs-iraq-spellings
+```
+
+Then open a pull request for the branch on GitHub. Once fbs merges it, igs copies fbs's new `iraq.yaml` over its own and empties `configs/discovery/iraq-igs.yaml` (`groups: []`); `igsctl migrate up` then adds nothing, as both lists are already loaded.
+
 ## igs fixes fbs may want
 
 Fixes made in igs's copy of shared code that fbs still lacks. fbs's own sessions decide whether to port them.

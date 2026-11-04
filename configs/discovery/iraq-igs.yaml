@@ -1,8 +1,9 @@
 # igs's additions to the shared Iraq seed (iraq.yaml, fbs's file, copied
 # unchanged). These are spellings igs's discovery matched before the two
 # lists were shared that fbs's seed lacks. igs loads both files into
-# ig.discovery_keywords; propose these to fbs's configs/discovery/iraq.yaml,
-# and delete them here once fbs has them.
+# ig.discovery_keywords. They are proposed to fbs in
+# docs/upstream/fbs-0001-iraq-seed-igs-spellings.patch; once fbs merges it,
+# copy fbs's iraq.yaml here and empty this file (groups: []).
 #
 # Same format and languages as iraq.yaml. Group names are iraq.yaml's.
 #

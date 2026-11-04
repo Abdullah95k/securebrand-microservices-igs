@@ -102,7 +102,7 @@ func TestSeedAddsIGSSpellingsToFBS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) <= len(fbs) || !slices.Equal(all[:len(fbs)], fbs) {
+	if len(all) < len(fbs) || !slices.Equal(all[:len(fbs)], fbs) {
 		t.Fatalf("Seed() does not start with fbs's %d keywords unchanged", len(fbs))
 	}
 	groups := map[string]bool{}

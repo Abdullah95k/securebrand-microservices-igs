@@ -1,0 +1,130 @@
+From 3ac18161a2d9f063451db041dd36e6be17c4062d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 23:05:23 +0000
+Subject: [PATCH] discovery: Iraq seed gains igs's spellings
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+igs now loads this seed (configs/discovery/iraq.yaml, copied unchanged)
+and kept the spellings its discovery matched that the seed lacked in
+its own additions file. This adds them here, so the two lists are one:
+
+- iraq: Irak, Iraqis, Iraqia; عيراق
+- kurdistan_region: Kurdistan, كردستان, كوردستان, کوردستان, Kurdistanê
+  (Kurdistan alone also names the Kurdish parts of Turkey, Syria and
+  Iran; turn it off in the table if its searches bring in mostly pages
+  from outside Iraq)
+- erbil: هولير
+- sulaymaniyah: Sulaymani; سليماني off (also a common surname)
+- anbar: انبار
+- babil: حلة off (also "outfit", "a new look")
+- dhi_qar: Dhiqar, ذيقار
+- maysan: Misan
+
+Loading the seed again (fbctl discovery keywords seed) adds only these;
+keywords already listed keep their state.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01E488KDjGFuWptvrd8QU5Bf
+---
+ configs/discovery/iraq.yaml | 31 +++++++++++++++++--------------
+ 1 file changed, 17 insertions(+), 14 deletions(-)
+
+diff --git a/configs/discovery/iraq.yaml b/configs/discovery/iraq.yaml
+index af81259..5855f2c 100644
+--- a/configs/discovery/iraq.yaml
++++ b/configs/discovery/iraq.yaml
+@@ -16,17 +16,20 @@
+ groups:
+   - name: iraq
+     terms:
+-      en: [Iraq, Iraqi]
+-      ar: [العراق, عراق, العراقية, العراقي]
++      en: [Iraq, Iraqi, Iraqis, Iraqia, Irak]
++      ar: [العراق, عراق, العراقية, العراقي, عيراق]
+       ckb: [عێراق]
+       kmr: [Iraq, Iraqê]
+ 
++  # Kurdistan alone also names the Kurdish parts of Turkey, Syria and Iran;
++  # Iraqi pages often mean the Region by it. Turn it off in the table if
++  # its searches bring in mostly pages from outside Iraq.
+   - name: kurdistan_region
+     terms:
+-      en: [Kurdistan Region, KRG, Kurdistan Region of Iraq]
+-      ar: [إقليم كوردستان, إقليم كردستان, اقليم كوردستان, اقليم كردستان]
+-      ckb: [هەرێمی کوردستان]
+-      kmr: [Herêma Kurdistanê]
++      en: [Kurdistan Region, KRG, Kurdistan Region of Iraq, Kurdistan]
++      ar: [إقليم كوردستان, إقليم كردستان, اقليم كوردستان, اقليم كردستان, كردستان, كوردستان]
++      ckb: [هەرێمی کوردستان, کوردستان]
++      kmr: [Herêma Kurdistanê, Kurdistanê]
+ 
+   - name: baghdad
+     terms:
+@@ -55,7 +58,7 @@ groups:
+   - name: erbil
+     terms:
+       en: [Erbil, Arbil, Irbil, Hawler, Hewler, Shaqlawa, Rawanduz, Rwanduz, Makhmour, Makhmur, Ankawa, Choman]
+-      ar: [أربيل, اربيل, شقلاوة, راوندوز, مخمور, عنكاوا]
++      ar: [أربيل, اربيل, هولير, شقلاوة, راوندوز, مخمور, عنكاوا]
+       ckb: [هەولێر, کۆیە, شەقڵاوە, ڕەواندز, مەخموور, عەنکاوە, چۆمان]
+       kmr: [Hewlêr, Koye, Şeqlawe, Rewandiz, Mexmûr]
+     off:
+@@ -66,13 +69,13 @@ groups:
+ 
+   - name: sulaymaniyah
+     terms:
+-      en: [Sulaymaniyah, Sulaimaniyah, Sulaimani, Slemani, Suleimaniyah, Qaladiza, Qaladze, Chamchamal, Kalar, Darbandikhan, Penjwen, Said Sadiq]
++      en: [Sulaymaniyah, Sulaimaniyah, Sulaimani, Sulaymani, Slemani, Suleimaniyah, Qaladiza, Qaladze, Chamchamal, Kalar, Darbandikhan, Penjwen, Said Sadiq]
+       ar: [السليمانية, سليمانية, قلعة دزة, جمجمال, كلار, دربندخان, بنجوين]
+       ckb: [سلێمانی, ڕانیە, قەڵادزێ, چەمچەماڵ, کەلار, دەربەندیخان, پێنجوێن]
+       kmr: [Silêmanî, Ranye, Qeladizê, Çemçemal, Kelar, Derbendîxan, Pêncwên]
+     off:
+       en: [Ranya, Rania]
+-      ar: [رانية]
++      ar: [رانية, سليماني]   # سليماني is also a common surname
+ 
+   - name: duhok
+     terms:
+@@ -121,7 +124,7 @@ groups:
+   - name: anbar
+     terms:
+       en: [Anbar, Al Anbar, Ramadi, Fallujah, Falluja, Haditha, Al-Qaim, Rutba, Rutbah]
+-      ar: [الأنبار, الانبار, الرمادي, رمادي, الفلوجة, فلوجة]
++      ar: [الأنبار, الانبار, انبار, الرمادي, رمادي, الفلوجة, فلوجة]
+       ckb: [ئەنبار, ڕەمادی, فەللووجە]
+       kmr: [Enbar]
+     off:
+@@ -134,7 +137,7 @@ groups:
+       ar: [بابل, الحلة, المسيب, المحاويل]
+       ckb: [بابل]
+     off:
+-      ar: [الهاشمية]
++      ar: [الهاشمية, حلة]   # حلة is also "outfit", "a new look"
+       en: [Hashimiya]
+ 
+   - name: karbala
+@@ -170,8 +173,8 @@ groups:
+ 
+   - name: dhi_qar
+     terms:
+-      en: [Dhi Qar, Thi Qar, Nasiriyah, Nasiriya, Nasiriyya, Shatra, Suq al-Shuyukh, Chibayish]
+-      ar: [ذي قار, الناصرية, ناصرية, الشطرة, سوق الشيوخ, الجبايش]
++      en: [Dhi Qar, Thi Qar, Dhiqar, Nasiriyah, Nasiriya, Nasiriyya, Shatra, Suq al-Shuyukh, Chibayish]
++      ar: [ذي قار, ذيقار, الناصرية, ناصرية, الشطرة, سوق الشيوخ, الجبايش]
+       ckb: [ناسریە]
+     off:
+       en: [Rifai]
+@@ -179,7 +182,7 @@ groups:
+ 
+   - name: maysan
+     terms:
+-      en: [Maysan, Missan, Amarah, Majar al-Kabir]
++      en: [Maysan, Missan, Misan, Amarah, Majar al-Kabir]
+       ar: [ميسان, المجر الكبير]
+       ckb: [میسان, عەمارە]
+     off:
+-- 
+2.43.0
+
