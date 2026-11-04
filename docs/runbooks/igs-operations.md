@@ -118,14 +118,19 @@ What to do when exits keep resting:
 
 ## Data retention
 
-igs keeps what it collects forever (the owner, 2026-11-03): profiles and their snapshots, posts, comments and their authors, post metrics, highlights, and discovery candidates with every vet. `privacy.retention.comments_days` and `metrics_days` are 0: no partition is dropped by age.
+igs keeps what it collects forever (the owner, 2026-11-03): profiles and their snapshots, posts (with each highlight's items as posts of kind `highlight`), comments and their authors, post and comment metrics, highlights, and discovery candidates with every vet. `privacy.retention.comments_days` and `metrics_days` are 0: no partition is dropped by age.
+
+**Append, don't overwrite** (architecture §2.4):
+- A caption's or a comment's text before each edit is kept (`ig.post_edits`, `ig.comment_edits`), with when the new text was seen.
+- A post's likes, comments and views (`post_metrics`) and a comment's likes and replies (`comment_metrics`) are kept each time they change.
+- A post, comment or highlight item that disappears is marked `unavailable` or `deleted`, never removed.
 
 These still expire, being operational:
 - finished jobs after `jobs_days` (90);
 - raw failure captures after `raw_payload_days` (7);
 - media rows after `media_rows_days` (30) once their files are deleted.
 
-Media files themselves expire after `media.ttl`, once the analysis service has them.
+Media files are deleted once the analysis service acknowledged them (or after `media.ttl`, if set).
 
 An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, including discovery rows, and suppresses them from later crawls.
 
@@ -349,7 +354,7 @@ The planner runs each scheduled profile at its tier's interval, and its profile 
 
 Media files are downloaded only with `ig.limits.include_media` (D5: metadata always, files once the analysis service exists). Instagram's CDN URLs expire within hours, so a backlog on `igs.task.media` turns into failed downloads (`IgsIgMediaDownloadsFailing`). Scale the downloader, or check the CDN responses.
 
-The janitor deletes a file once every `media.required_consumers` acknowledged it (`ig.media.processed.v1`), or at `media.ttl`. `IgsIgMediaTTLExpiries` means the analysis service does not keep up with `ig.media.ready.v1`, or its acks do not arrive.
+The janitor deletes a file once every `media.required_consumers` acknowledged it (`ig.media.processed.v1`): media is kept until its analysis is complete (architecture). With `media.ttl` set (0 by default), it also deletes a file not acknowledged within that time; `IgsIgMediaTTLExpiries` then means the analysis service does not keep up with `ig.media.ready.v1`, or its acks do not arrive. With no TTL, watch the media bucket's size instead: files waiting for analysis stay.
 
 ## Capacity and sizing
 

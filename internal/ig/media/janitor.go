@@ -189,9 +189,9 @@ func (j *Janitor) Sweep(ctx context.Context) error {
 }
 
 // Orphans deletes stored objects no ready media row references, older than
-// the TTL plus an hour.
+// the TTL (at least a day) plus an hour.
 func (j *Janitor) Orphans(ctx context.Context) error {
-	cutoff := time.Now().Add(-j.TTL - time.Hour)
+	cutoff := time.Now().Add(-max(j.TTL, 24*time.Hour) - time.Hour)
 	for obj := range j.S3.ListObjects(ctx, j.Bucket, minio.ListObjectsOptions{Prefix: "ig/", Recursive: true}) {
 		if obj.Err != nil {
 			return obj.Err
@@ -239,6 +239,10 @@ func val32(v *int32) int32 {
 // Lifecycle sets the bucket's expiry rule for igs's objects (prefix ig/),
 // a safety net behind the janitor: objects expire a day after the TTL.
 func Lifecycle(ctx context.Context, s3 *minio.Client, bucket string, ttl time.Duration) {
+	if ttl <= 0 {
+		// Kept until analysed: no expiry rule.
+		return
+	}
 	cfg := &lifecycle.Configuration{Rules: []lifecycle.Rule{{
 		ID: "igs-ig-media-ttl", Status: "Enabled", RuleFilter: lifecycle.Filter{Prefix: "ig/"},
 		Expiration: lifecycle.Expiration{Days: lifecycle.ExpirationDays(int(ttl.Hours()/24) + 1)},

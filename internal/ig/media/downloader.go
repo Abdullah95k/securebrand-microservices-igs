@@ -123,7 +123,12 @@ func (d *Downloader) Handle(ctx context.Context, rec *kgo.Record) error {
 		return err // the consumer retries with backoff
 	}
 	now := time.Now().UTC()
-	deleteAfter := now.Add(d.TTL)
+	// With no TTL the media waits for its acknowledgements however long.
+	var deleteAfter *time.Time
+	if d.TTL > 0 {
+		t := now.Add(d.TTL)
+		deleteAfter = &t
+	}
 	_, err = d.DB.Exec(ctx, `
 		INSERT INTO media (media_id, source_media_id, variant, kind, owner_type, user_pk, media_pk, parent_media_pk, position,
 			comment_pk, source_url, width, height, duration_ms, mime, alt_text, status, s3_bucket, s3_key, size_bytes, sha256,
@@ -143,10 +148,13 @@ func (d *Downloader) Handle(ctx context.Context, rec *kgo.Record) error {
 		EventId: m.MediaId + ":ready:1", Platform: commonv1.Platform_PLATFORM_INSTAGRAM, MediaId: m.MediaId,
 		SourceMediaId: m.SourceMediaId, Kind: m.Kind, Variant: m.Variant, AccountId: m.UserPk, PostId: m.MediaPk,
 		CommentId: m.CommentPk, Object: obj, Width: m.Width, Height: m.Height, DurationMs: m.DurationMs, AltText: m.AltText,
-		DiscoveredAt: m.GetObs().GetObservedAt(), StoredAt: timestamppb.New(now), DeleteAfter: timestamppb.New(deleteAfter), Attempt: 1,
+		DiscoveredAt: m.GetObs().GetObservedAt(), StoredAt: timestamppb.New(now), Attempt: 1,
 	}
 	if m.ParentMediaPk != nil {
 		ready.PostId = *m.ParentMediaPk // a carousel child belongs to its post
+	}
+	if deleteAfter != nil {
+		ready.DeleteAfter = timestamppb.New(*deleteAfter)
 	}
 	if t.JobId != "" {
 		ready.JobIds = []string{t.JobId}

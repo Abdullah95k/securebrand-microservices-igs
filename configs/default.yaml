@@ -278,7 +278,10 @@ scheduler:
 
 media:
   concurrency: 50
-  ttl: 72h
+  # Media is kept until every required consumer (the analysis service)
+  # acknowledged it (architecture: media until its analysis is complete).
+  # A ttl > 0 deletes it after that long even without an acknowledgement.
+  ttl: 0
   required_consumers: ["analysis"]
   max_retryable_failures: 3
   sweep_interval: 1h

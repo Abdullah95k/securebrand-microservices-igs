@@ -216,7 +216,7 @@ func checkTruth(t *testing.T, s *Stack, truth fakeig.ProfileTruth) {
 		t.Errorf("%s: profile %q %q %d %v hash %x", truth.Username, username, fullName, followers, verified, hash)
 	}
 	var nh, items int
-	if err := db.QueryRow(ctx, `SELECT count(*), coalesce(sum((SELECT count(*) FROM highlight_items i WHERE i.highlight_id = h.highlight_id)), 0)
+	if err := db.QueryRow(ctx, `SELECT count(*), coalesce(sum((SELECT count(*) FROM posts i WHERE i.kind = 'highlight' AND i.highlight_id = h.highlight_id AND i.status = 'visible')), 0)
 		FROM highlights h WHERE user_pk = $1`, truth.PK).Scan(&nh, &items); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func checkTruth(t *testing.T, s *Stack, truth fakeig.ProfileTruth) {
 		status                 string
 	}
 	stored := map[int64]row{}
-	rows, err := db.Query(ctx, `SELECT media_pk, like_count, comment_count, play_count, is_pinned, child_count, status FROM posts WHERE owner_pk = $1`, truth.PK)
+	rows, err := db.Query(ctx, `SELECT media_pk, like_count, comment_count, play_count, is_pinned, child_count, status FROM posts WHERE owner_pk = $1 AND kind <> 'highlight'`, truth.PK)
 	if err != nil {
 		t.Fatal(err)
 	}

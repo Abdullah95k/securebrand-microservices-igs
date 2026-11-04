@@ -2,6 +2,7 @@ package persist
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
@@ -14,6 +15,7 @@ import (
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 )
@@ -39,12 +41,21 @@ func latest[T interface{ GetObs() *commonv1.Observation }](xs []T, key func(T) s
 // withPartitions runs fn and, if a partition was missing, creates the
 // partitions of tables holding times, then runs it once more.
 func (w *Writer) withPartitions(ctx context.Context, tables []string, times []time.Time, fn func() error) error {
+	m := map[string][]time.Time{}
+	for _, t := range tables {
+		m[t] = times
+	}
+	return w.withPartitionsFor(ctx, m, fn)
+}
+
+// withPartitionsFor is withPartitions with each table's own times.
+func (w *Writer) withPartitionsFor(ctx context.Context, times map[string][]time.Time, fn func() error) error {
 	err := fn()
 	if !store.IsNoPartition(err) {
 		return err
 	}
-	for _, t := range tables {
-		for _, at := range times {
+	for t, ts := range times {
+		for _, at := range ts {
 			if perr := store.IGLayout.EnsurePartitionFor(ctx, w.DB, t, at); perr != nil {
 				return errors.Join(err, perr)
 			}
@@ -209,6 +220,16 @@ func (w *Writer) Posts(ctx context.Context, posts []*igv1.Post) error {
 		return pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 			if len(rows) > 0 {
 				if err := copyTemp(ctx, tx, "tmp_posts", "posts", postCols, rows); err != nil {
+					return err
+				}
+				// A newer sighting with another caption: the old one is kept
+				// (append, don't overwrite).
+				if _, err := tx.Exec(ctx, `INSERT INTO post_edits (media_pk, taken_at, owner_pk, replaced_at, caption)
+					SELECT t.media_pk, t.taken_at, t.owner_pk, x.last_seen_at, t.caption FROM tmp_posts x
+					JOIN posts t ON t.taken_at = x.taken_at AND t.media_pk = x.media_pk
+					WHERE x.caption IS NOT NULL AND t.caption IS NOT NULL AND t.caption IS DISTINCT FROM x.caption
+					  AND x.last_seen_at > t.last_seen_at
+					ON CONFLICT DO NOTHING`); err != nil {
 					return err
 				}
 				set := setClause(postCols, "taken_at", "media_pk", "first_seen_at", "play_count", "is_pinned")
@@ -396,10 +417,32 @@ func (w *Writer) Comments(ctx context.Context, cs []*igv1.Comment) error {
 		}
 	}
 	var written, edited int64
-	err := w.withPartitions(ctx, []string{"comments"}, months, func() error {
+	captured := make([]time.Time, 0, len(cs))
+	for _, c := range cs {
+		captured = append(captured, observed(c.Obs))
+	}
+	err := w.withPartitionsFor(ctx, map[string][]time.Time{"comments": months, "comment_metrics": captured}, func() error {
 		written, edited = 0, 0
 		return pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
 			if err := copyTemp(ctx, tx, "tmp_comments", "comments", commentCols, rows); err != nil {
+				return err
+			}
+			// Before the upsert overwrites them: the text an edit replaced, and
+			// the likes and replies of a comment new or changed.
+			if _, err := tx.Exec(ctx, `INSERT INTO comment_edits (comment_pk, media_pk, taken_at, owner_pk, author_key, replaced_at, text)
+				SELECT t.comment_pk, t.media_pk, t.taken_at, t.owner_pk, t.author_key, x.last_seen_at, t.text FROM tmp_comments x
+				JOIN comments t ON t.taken_at = x.taken_at AND t.media_pk = x.media_pk AND t.comment_pk = x.comment_pk
+				WHERE NOT x.redacted AND NOT t.redacted AND t.text IS DISTINCT FROM x.text AND x.last_seen_at > t.last_seen_at
+				ON CONFLICT DO NOTHING`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO comment_metrics (comment_pk, captured_at, media_pk, owner_pk, like_count, child_comment_count)
+				SELECT x.comment_pk, x.last_seen_at, x.media_pk, x.owner_pk, x.like_count, x.child_comment_count FROM tmp_comments x
+				LEFT JOIN comments t ON t.taken_at = x.taken_at AND t.media_pk = x.media_pk AND t.comment_pk = x.comment_pk
+				WHERE (x.like_count IS NOT NULL OR x.child_comment_count IS NOT NULL)
+				  AND (t.comment_pk IS NULL OR (x.last_seen_at > t.last_seen_at
+				   AND (t.like_count IS DISTINCT FROM x.like_count OR t.child_comment_count IS DISTINCT FROM x.child_comment_count)))
+				ON CONFLICT DO NOTHING`); err != nil {
 				return err
 			}
 			const isEdit = `(NOT EXCLUDED.redacted AND t.text IS DISTINCT FROM EXCLUDED.text)`
@@ -496,56 +539,94 @@ func (w *Writer) Media(ctx context.Context, ms []*igv1.Media) error {
 }
 
 // Highlights upserts highlights and, when a highlight came with its items,
-// replaces its items.
+// its items as posts of kind highlight (M12d): new ones added, those still
+// there refreshed, those gone marked unavailable (never deleted).
 func (w *Writer) Highlights(ctx context.Context, hs []*igv1.Highlight) error {
 	hs = latest(hs, func(h *igv1.Highlight) string { return strconv.FormatInt(h.HighlightId, 10) })
 	if len(hs) == 0 {
 		return nil
 	}
 	start := time.Now()
-	err := pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
-		for _, h := range hs {
-			var cover *string
-			if h.Cover != nil {
-				cover = nilIfEmpty(h.Cover.Url)
-			}
-			var n *int32
-			if h.ItemCount > 0 {
-				n = &h.ItemCount
-			} else if len(h.Items) > 0 {
-				c := int32(len(h.Items))
-				n = &c
-			}
-			seen := observed(h.Obs)
-			if _, err := tx.Exec(ctx, `INSERT INTO highlights AS t (highlight_id, user_pk, title, cover_url, item_count, status, first_seen_at, last_seen_at)
-				VALUES ($1, $2, NULLIF($3,''), $4, $5, 'visible', $6, $6)
-				ON CONFLICT (highlight_id) DO UPDATE SET title = EXCLUDED.title, cover_url = COALESCE(EXCLUDED.cover_url, t.cover_url),
-					item_count = COALESCE(EXCLUDED.item_count, t.item_count), status = 'visible', last_seen_at = EXCLUDED.last_seen_at
-				WHERE t.last_seen_at <= EXCLUDED.last_seen_at`, h.HighlightId, h.UserPk, h.Title, cover, n, seen); err != nil {
-				return err
-			}
-			if len(h.Items) == 0 {
-				continue
-			}
-			ids := make([]int64, 0, len(h.Items))
-			for _, it := range h.Items {
-				ids = append(ids, it.ItemPk)
-				if _, err := tx.Exec(ctx, `INSERT INTO highlight_items (highlight_id, item_pk, taken_at, media_type, media_ids)
-					VALUES ($1, $2, $3, $4, $5) ON CONFLICT (highlight_id, item_pk) DO UPDATE SET taken_at = EXCLUDED.taken_at,
-						media_type = EXCLUDED.media_type, media_ids = EXCLUDED.media_ids`,
-					h.HighlightId, it.ItemPk, ts(it.TakenAt), int16(it.MediaType), it.MediaIds); err != nil {
+	var months []time.Time
+	for _, h := range hs {
+		for _, it := range h.Items {
+			months = append(months, itemTime(h, it))
+		}
+	}
+	err := w.withPartitions(ctx, []string{"posts"}, months, func() error {
+		return pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
+			for _, h := range hs {
+				if err := writeHighlight(ctx, tx, h); err != nil {
 					return err
 				}
 			}
-			if _, err := tx.Exec(ctx, `DELETE FROM highlight_items WHERE highlight_id = $1 AND NOT (item_pk = ANY($2))`, h.HighlightId, ids); err != nil {
-				return err
-			}
-		}
-		return nil
+			return nil
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("persist: highlights: %w", err)
 	}
 	observe("highlight", start, len(hs), len(hs))
 	return nil
+}
+
+// itemTime is a highlight item's time: Instagram's, else the time its pk
+// encodes (U10), so every sighting of the item lands on the same row.
+func itemTime(h *igv1.Highlight, it *igv1.HighlightItem) time.Time {
+	if it.TakenAt != nil {
+		return it.TakenAt.AsTime()
+	}
+	if t := parse.TakenAtFromPK(strconv.FormatInt(it.ItemPk, 10)); !t.IsZero() {
+		return t
+	}
+	return time.Unix(0, 0).UTC()
+}
+
+func writeHighlight(ctx context.Context, tx pgx.Tx, h *igv1.Highlight) error {
+	var cover *string
+	if h.Cover != nil {
+		cover = nilIfEmpty(h.Cover.Url)
+	}
+	var n *int32
+	if h.ItemCount > 0 {
+		n = &h.ItemCount
+	} else if len(h.Items) > 0 {
+		c := int32(len(h.Items))
+		n = &c
+	}
+	seen := observed(h.Obs)
+	if _, err := tx.Exec(ctx, `INSERT INTO highlights AS t (highlight_id, user_pk, title, cover_url, item_count, status, first_seen_at, last_seen_at)
+		VALUES ($1, $2, NULLIF($3,''), $4, $5, 'visible', $6, $6)
+		ON CONFLICT (highlight_id) DO UPDATE SET title = EXCLUDED.title, cover_url = COALESCE(EXCLUDED.cover_url, t.cover_url),
+			item_count = COALESCE(EXCLUDED.item_count, t.item_count), status = 'visible', last_seen_at = EXCLUDED.last_seen_at
+		WHERE t.last_seen_at <= EXCLUDED.last_seen_at`, h.HighlightId, h.UserPk, h.Title, cover, n, seen); err != nil {
+		return err
+	}
+	if len(h.Items) == 0 {
+		return nil
+	}
+	link := "https://www.instagram.com/stories/highlights/" + strconv.FormatInt(h.HighlightId, 10) + "/"
+	ids := make([]int64, 0, len(h.Items))
+	for _, it := range h.Items {
+		ids = append(ids, it.ItemPk)
+		mt := int16(it.MediaType)
+		if mt == 0 {
+			mt = 1
+		}
+		hash := sha256.Sum256([]byte(fmt.Sprintf("%d|%d|%d|%v", h.HighlightId, it.ItemPk, mt, it.MediaIds)))
+		if _, err := tx.Exec(ctx, `INSERT INTO posts AS t (taken_at, media_pk, owner_pk, shortcode, media_type, product_type, kind,
+				highlight_id, media_ids, permalink, discovered_via, content_hash, status, first_seen_at, last_seen_at)
+			VALUES ($1, $2, $3, '', $4, 'story', 'highlight', $5, $6, $7, 'highlight', $8, 'visible', $9, $9)
+			ON CONFLICT (taken_at, media_pk) DO UPDATE SET highlight_id = EXCLUDED.highlight_id, media_type = EXCLUDED.media_type,
+				media_ids = EXCLUDED.media_ids, permalink = EXCLUDED.permalink, content_hash = EXCLUDED.content_hash,
+				status = 'visible', last_seen_at = EXCLUDED.last_seen_at
+			WHERE t.last_seen_at <= EXCLUDED.last_seen_at`,
+			itemTime(h, it), it.ItemPk, h.UserPk, mt, h.HighlightId, it.MediaIds, link, hash[:], seen); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(ctx, `UPDATE posts SET status = 'unavailable', last_seen_at = $3
+		WHERE kind = 'highlight' AND highlight_id = $1 AND owner_pk = $4 AND NOT (media_pk = ANY($2)) AND status = 'visible'
+		  AND last_seen_at <= $3`, h.HighlightId, ids, seen, h.UserPk)
+	return err
 }

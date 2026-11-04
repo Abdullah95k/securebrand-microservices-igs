@@ -29,7 +29,9 @@ config:
     media_bucket: "securebrand-igs-media"
     raw_bucket: "securebrand-igs-raw"
   media:
-    ttl: 72h
+    # Kept until the analysis service acknowledged it (0); a duration
+    # deletes it after that long without an acknowledgement.
+    ttl: 0s
     required_consumers: ["analysis"]
   ig:
     base_url: "https://www.instagram.com"

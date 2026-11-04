@@ -114,7 +114,26 @@ var postCols = []string{"taken_at", "media_pk", "owner_pk", "shortcode", "media_
 	"hashtags", "mentions", "accessibility_caption", "location", "usertags", "coauthors", "music", "topics", "ai_label",
 	"like_count", "counts_hidden", "comment_count", "commenting_disabled", "play_count", "is_pinned", "child_count",
 	"video_duration_ms", "width", "height", "has_audio", "media_ids", "discovered_via", "permalink", "content_hash",
-	"status", "first_seen_at", "last_seen_at"}
+	"status", "first_seen_at", "last_seen_at", "kind"}
+
+// Post kinds (posts.kind): a highlight's items are posts too (M12d).
+const (
+	KindPost      = "post"
+	KindVideo     = "video"
+	KindReel      = "reel"
+	KindHighlight = "highlight"
+)
+
+// PostKind is a grid or reels-tab post's kind.
+func PostKind(p *igv1.Post) string {
+	switch {
+	case p.ProductType == "clips":
+		return KindReel
+	case p.MediaType == igv1.MediaType_MEDIA_TYPE_VIDEO:
+		return KindVideo
+	}
+	return KindPost
+}
 
 func postRow(p *igv1.Post) []any {
 	seen := observed(p.Obs)
@@ -138,7 +157,7 @@ func postRow(p *igv1.Post) []any {
 		protoJSON(p.Location), protoJSONList(p.Usertags), protoJSONList(p.Coauthors), protoJSON(p.Music), p.Topics,
 		nilIfEmpty(p.AiLabel), p.LikeCount, p.CountsHidden, p.CommentCount, p.CommentingDisabled, p.PlayCount, p.IsPinned,
 		children, dur, w, h, p.HasAudio, p.MediaIds, discoveredVia(p.DiscoveredVia), nilIfEmpty(p.Permalink), hashOf(p.Obs),
-		"visible", seen, seen}
+		"visible", seen, seen, PostKind(p)}
 }
 
 var commentCols = []string{"taken_at", "media_pk", "comment_pk", "owner_pk", "parent_comment_pk", "depth", "author_key",

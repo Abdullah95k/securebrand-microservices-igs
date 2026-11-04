@@ -138,7 +138,7 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 			t.Fatalf("%s backfill %s", u, st)
 		}
 	}
-	if n := count(t, s, `SELECT count(*) FROM posts p JOIN profiles f ON f.user_pk = p.owner_pk WHERE f.username = 'collab_01'`); n != 2 {
+	if n := count(t, s, `SELECT count(*) FROM posts p JOIN profiles f ON f.user_pk = p.owner_pk WHERE f.username = 'collab_01' AND p.kind <> 'highlight'`); n != 2 {
 		t.Errorf("collab_01's backfill stored %d posts, want 2", n)
 	}
 

@@ -79,7 +79,7 @@ func TestIGMigrationsAndPartitions(t *testing.T) {
 	w := store.PartitionWindow{MonthsBack: 2, MonthsAhead: 1, DaysBack: 1, DaysAhead: 1}
 	created, err := store.IGLayout.EnsurePartitions(ctx, ig, now, w)
 	must(err)
-	if created != 4*3+3*1 { // 3 monthly tables x 4 months, 1 daily table x 3 days
+	if want := 4*len(store.IGLayout.Monthly) + 3*len(store.IGLayout.Daily); created != want { // 4 months, 3 days
 		t.Fatalf("created %d ig partitions", created)
 	}
 	if _, err := other.EnsurePartitions(ctx, pub, now, w); err != nil {

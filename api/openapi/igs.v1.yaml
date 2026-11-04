@@ -165,7 +165,9 @@ paths:
       - {$ref: '#/components/parameters/ProfileRef'}
     get:
       summary: The profile's posts, newest first
+      description: Posts of every kind, a highlight's items included (kind highlight); `kind` filters.
       parameters:
+        - {in: query, name: kind, schema: {type: string, enum: [post, video, reel, highlight]}}
         - {in: query, name: since, schema: {type: string, format: date-time}}
         - {in: query, name: until, schema: {type: string, format: date-time}}
         - {$ref: '#/components/parameters/Limit'}
@@ -507,6 +509,8 @@ components:
     Post:
       type: object
       properties:
+        kind: {type: string, enum: [post, video, reel, highlight]}
+        highlight_id: {type: integer, format: int64, description: The highlight a highlight item belongs to}
         media_pk: {type: integer, format: int64}
         shortcode: {type: string}
         permalink: {type: string}
