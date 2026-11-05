@@ -139,6 +139,19 @@ From the M1d-2 to M1d-5a session:
 - **The GraphQL core could not move before `session`:** the client depends on `session.Identity`. Hence the split into M1d-5a (seams) and M1d-5b (moves).
 - **Local runs without Docker:** a session can start Postgres 16 and Redis from the container's packages. All tests pass on them except three persister writer tests, which use Postgres 18's `RETURNING old./new.` and fail on `main` too. There is no Kafka locally, so the e2e suites run only in CI.
 
+From the readiness pack (2026-11-05, a read-only review for the master session; nothing built):
+
+- **What was delivered.** The owner received `igs-field-inventory.md` and `.yaml`, `igs-operations.md`, `igs-contract-notes.md` and `igs-gaps.md` (outside git). New findings, each with a proposed fix in `igs-gaps.md`, follow.
+- **The reels tab is re-read a year back on every visit** (`limits.max_age_days`), so an account with about 1,000 reels a year costs about 20 extra requests per visit, and every reel is a `ig.post_metrics.v1` event each time. The readiness review's 40,000 to 80,000 requests a day per 1,000 accounts missed this: about 45,000 to 190,000, and 5 to 15 IPs. A proposed fix reads reels to the 7-day window, with a weekly full pass.
+- **The shared rate limiter fails open** when Valkey is unavailable (`internal/scrape/ratelimit`).
+- **Walled post pages (2.6%) publish nothing**, though the grid gave their ID, time and type.
+- **Only reels have a metrics series:** post-page re-reads update `posts` but publish no metrics event.
+- **Comment deletions are never detected**, and posts older than 7 days are never re-read.
+- **The linked Facebook page's ID is dropped**, and `content.account.v1` puts its name in `Link.url`.
+- **Exits are named by address** (`tier|host:port`) in logs, a metric label and Valkey keys (standard D4).
+- **`igsctl schemas apply` would register the `content.*` subjects**, and `examples/production.yaml` turns the hook on. Nothing is registered anywhere; the standing rule is not to until the master publishes v1.
+- Identities are parked only on a graceful stop; discovery has no daily cap by default; `configs/ig/topics.yaml` makes 915 partitions.
+
 ## Seeding (done 2026-10-31)
 
 `main` of this repository is fbs's history up to `f1377a9` (77 commits, no tags) plus the seed commit `c996ec5`, which removes `.github/workflows/release.yml` (on a `v*` tag it would publish `ghcr.io/<owner>/fbs` and fbs's chart) and adds [`UPSTREAM.md`](../../UPSTREAM.md) and a README note. The M0 pull request cherry-picks fbs PR #22's five docs commits and fbs PR #25's two M0 commits on top. To port a later fbs change, see `UPSTREAM.md`.
@@ -209,3 +222,4 @@ From the M1d-2 to M1d-5a session:
 - **2026-11-03 (same session, M11b):** #45 merged on green CI. Its integration run failed twice in `TestExitFailoverEqualsTruth` (a profile's highlights read empty). The first fix (failover on highlights) was real but not the cause; the cause was parks counted as tries. `TestHighlightsAfterParks` reproduces it.
 - **2026-11-03 (same session, M11c and M11d):** #46 (M11c) merged on green CI. M11d adds the candidate intake and the optional daily cap. Still open: fbs's keyword list and normaliser (this session may not read the fbs repository) and `content.account` events (needs `securebrand-architecture.md`).
 - **2026-11-03 (same session, M11d):** #47 merged on green CI after one fix (lint: an unchecked `Close` in `igsctl discovery import`). Of the owner's choices after the fbs discovery brief, two wait on the owner: fbs's keyword list and normaliser (read access to the fbs repository, or its `configs/discovery/iraq.yaml` and normaliser attached) and `content.account` events (`securebrand-architecture.md` attached).
+- **2026-11-05 (readiness pack):** the owner's session pack (documents 03 to 09) asked for the field inventory, the operations questionnaire, contract notes and the gaps against the service standard, read only. Delivered as files; the findings are under Findings. No code, config or server was changed. Fixes wait for the owner's approval, in the order `igs-gaps.md` gives.
