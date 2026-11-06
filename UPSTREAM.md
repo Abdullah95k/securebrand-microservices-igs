@@ -22,6 +22,8 @@ The Go module here is `github.com/abdullah95k/securebrand-microservices-igs` (fb
 
 | Date | fbs commit | What | igs PR |
 |---|---|---|---|
+| 2026-11-04 | not recorded (fbs `main` that day; this session can't read fbs's repository) | The Iraq place seed `configs/discovery/iraq.yaml`, unchanged, and the spelling fold `Normalize` and seed parser from fbs's `internal/discovery`, unchanged, into `internal/keywords` | [#58](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/58) |
+| 2026-11-05 | the merge of [Abdullah95k/securebrand-microservices#49](https://github.com/Abdullah95k/securebrand-microservices/pull/49) | fbs's new `iraq.yaml` (with igs's spellings) copied over igs's; `configs/discovery/iraq-igs.yaml` emptied | [#62](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/62) |
 
 ## Proposed to fbs
 
