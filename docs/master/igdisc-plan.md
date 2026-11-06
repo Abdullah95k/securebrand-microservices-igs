@@ -19,7 +19,7 @@ Read with:
 3. **So the plan has three tracks:**
    - **Track 1 always works, and costs no new requests to find accounts.** igs already reads every registered account's newest posts every 3 hours, with their comments. igdisc matches those captions, comments and post places against the shared keyword list. Accounts met in a matching post or comment in the last 6 hours, and not yet listed, become candidates with the keyword as evidence.
    - **Track 2 (hashtag and location pages) gets built only if your recording shows they work logged out.**
-   - **Track 3 is outside Instagram:** search engines index public posts of professional Instagram accounts (since 10 July 2025). That is the platform's Google discovery tool's job. igdisc takes what that tool finds as candidates.
+   - **Track 3 is outside Instagram:** search engines index public posts of professional Instagram accounts (since 10 July 2025). No session on the platform runs a search-engine tool (master, 6 November). Any Instagram candidates other tools send arrive as ordinary candidates, and igdisc treats them like any other origin.
 4. **One Iraq check:** igs's existing score, with the keyword evidence added as a small, capped signal. A keyword match alone never adds an account.
 5. **What it publishes:** `discovery.candidate.v1`, once when an account is found (outcome PENDING) and once when it's decided. Every field is mapped in §3.6. **Nothing is published or registered until the platform creates the topic.**
 6. **Priority:** a new lowest lane, p3, below backfill. It gets no guaranteed slots, at most a set share of each exit's rate (10% proposed), and it pauses whenever regular collection falls behind. That limits speed, not numbers: **no caps in production;** the `CAPPED` outcome appears only in tests and the canary.
@@ -140,7 +140,7 @@ Read with:
 - **Iraqi places:** built from the post places igs already reads. A place goes in when its coordinates fall inside Iraq and its name matches the place list. Turning places on and off works like keywords.
 
 **Track 3: from outside Instagram.**
-- Instagram accounts that other tools find arrive as candidates for igs's collector: the Google discovery tool, and links that fbs, yts and tks find.
+- Instagram accounts that other tools find arrive as candidates for igs's collector: links that fbs, yts and tks find, and any outside tool's finds. The Google discovery tool is outside the platform's scope (master, 6 November).
 - Today they arrive through igs's intake (`POST /v1/discovery/candidates`). Once the platform creates the topic, they'll come from `discovery.candidate.v1` with `target_platform: ig`.
 - Consuming that topic is the igs collector's side. I'll propose it to the igs session; I won't build it in igs's code myself.
 
@@ -226,8 +226,8 @@ One check for every source: igs's existing score (`score.go`), described in §4.
 | `found_at` | When igdisc saw the matching content (UTC) | the crawl |
 | `found_by` | `igdisc` (keyword, hashtag, location); `igs` for network discovery; the outside tool's name for Track 3 | |
 | `source_platform` | Empty (found on Instagram), or the other platform for Track 3 | |
-| `source` | Track 1: `SOURCE_COMMENTER`, `SOURCE_TAG`, `SOURCE_MENTION` or `SOURCE_COAUTHOR`, with keyword evidence. Track 2: `SOURCE_HASHTAG_PAGE`; a location page has no value yet (see §6, proposal C1); until then `SOURCE_KEYWORD_SEARCH` with `via: location_page` | |
-| `evidence[]` | `keyword_id` (the shared list's ID, see §6, proposal K2); `keyword` (the spelling); `language` (`en`, `ar`, `ckb`, `kmr`); `content_id` `ig:post:<media pk>` or `ig:comment:<comment pk>`; `url` the post's link; `sightings` and `distinct_sources` from the candidate store; `via` `caption`, `comment`, `post_place`, `hashtag_page` or `location_page` | `ig.igdisc_evidence` |
+| `source` | Track 1: `SOURCE_COMMENTER`, `SOURCE_TAG`, `SOURCE_MENTION` or `SOURCE_COAUTHOR`, with keyword evidence. Track 2: `SOURCE_HASHTAG_PAGE`, or `SOURCE_LOCATION_PAGE` (18, contract v1.1.0) | |
+| `evidence[]` | `keyword_id` (`contracts.KeywordID(group, language, spelling)`, contract v1.1.0); `keyword` (the spelling); `content_time` (when the matching post or comment was made, v1.1.0); `language` (`en`, `ar`, `ckb`, `kmr`); `content_id` `ig:post:<media pk>` or `ig:comment:<comment pk>`; `url` the post's link; `sightings` and `distinct_sources` from the candidate store; `via` `caption`, `comment`, `post_place`, `hashtag_page` or `location_page` | `ig.igdisc_evidence` |
 | `relevance` | `score`; `relevant` (score at or above the threshold); `matched_keyword_ids`; `matched_rules` from the score's parts: `named-iraq`, `phone-964`, `tld-iq`, `place-<governorate>`, `kurdistan`, `lang-ckb`, `dialect-iq`, `script-arabic`, `audience-<n>`, `located-IQ`, `coauthor`, `other-country` | the vet's score |
 | `is_private` | From the vet; unset until then | the vet |
 | `outcome` and `outcome_reason` | See the next table | the vetter |
@@ -379,11 +379,20 @@ None of the reliabilities below has been measured as precision or recall. They a
 - **O3.** Discovery's share of each exit: 10% to start (my proposal)?
 - **O4.** For the canary week, a cap of 50 new accounts a day while you label the sample, then none?
 
-**Questions for the master:**
-- **M1.** Stable keyword IDs (K2): this format, or a central one?
-- **M2.** Contract additions C1 and C2: acceptable for the next minor version?
-- **M3.** The Google discovery tool: who runs it, and how will it search once Google's Custom Search API closes on 1 January 2027? Can it send Instagram links it finds for the shared keyword list as `Candidate` events with `target_platform: ig`?
-- **M4.** When will the platform create `discovery.candidate.v1` on production Kafka? igdisc publishes nothing before that.
+**The master's answers to O1 to O4 (6 November, 18:15). They wait for your confirmation:** the master cites a decision D-027 that lets it decide these, and this session hasn't seen it.
+- **O1:** approved. Track 1 first; Track 2 only if the recording shows logged-out access. Logged out only, and stop at any login wall or challenge.
+- **O2:** the proposal. A private account goes to the second list only if it passes the Iraq check from its profile.
+- **O3:** 10% to start. Agree with the igs session on who builds the share.
+- **O4:** 50 a day during the canary week, then no cap once the labelled sample is reviewed.
+
+**Questions for the master, answered on 6 November (18:15):**
+- **M1. Keyword IDs:** `<group>:<language>:<folded spelling>`, with the folding defined once in the contract.
+  - Contract v1.1.0 adds `contracts.KeywordID(group, language, spelling)`. igdisc uses that helper, not a copy of its own.
+  - The folding: Unicode NFKC; Latin lower-cased; Arabic diacritics and tatweel removed; أ إ آ ٱ → ا, ة → ه, ى → ي, ک → ك, ی → ي; Kurdish letters (ڕ ڵ ۆ ێ ە) kept; spaces collapsed to one.
+  - This differs from igs's display fold (`internal/keywords`), which writes ی and ک. The ID uses the contract's fold only. The matching still uses igs's fold.
+- **M2. Contract additions:** both accepted for v1.1.0: `SOURCE_LOCATION_PAGE = 18`, and `Evidence.content_time = 9`, of type `content.v1.Time`, so the estimate rule (D-013) applies to it.
+- **M3. The Google discovery tool:** outside the platform's scope; no session runs it. igdisc doesn't plan on it. If it ever sends Instagram links, they arrive as ordinary candidates with `target_platform: ig`.
+- **M4. The topic:** `discovery.candidate.v1` comes in the platform's first production apply (3 partitions, 7 days, replication 3), once the owner has fixed some GitHub secrets. The master will say when it exists. The platform registers its schema.
 
 **Answered by the contract, no longer open:**
 - Who acts on a candidate: the source publishes it when found, and the target platform's collector publishes the outcome (`candidate.proto`).
