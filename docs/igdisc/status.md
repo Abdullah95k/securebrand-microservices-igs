@@ -34,4 +34,4 @@ Answered by the contract v1.0.0:
 
 ## Log
 
-- **6 Nov:** session started from the owner's REQ-002. Read the contract v1.0.0 (`candidate.proto`, conformance, topics), fbs's keyword list and discovery (identical `iraq.yaml`: 332 spellings on, 52 off), and igs's discovery, lanes and gaps. Desk research on logged-out search found that hashtag pages very likely need a login since October 2024 (a third-party source). Wrote the plan, the owner's recording steps and this page. Docs-only draft PR.
+- **6 Nov:** session started from the owner's REQ-002. Read the contract v1.0.0 (`candidate.proto`, conformance, topics), fbs's keyword list and discovery (identical `iraq.yaml`: 332 spellings on, 52 off), and igs's discovery, lanes and gaps. Desk research on logged-out search found that hashtag pages very likely need a login since October 2024 (a third-party source). Wrote the plan, the owner's recording steps and this page. Docs-only draft PR [#65](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/65).
