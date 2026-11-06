@@ -86,7 +86,11 @@ The fleet therefore reads at most exits × `ig.exit_rps`: 2.5 requests a second 
 - Separately, the exit's bucket (its /24, or its host and port) opens its breaker at a 15% failure rate over a minute.
 - **Rests hold for every pod** (`ig.share_exit_rests`): a pod that rests an exit records it in Valkey, and every crawler and registry-sync pod reads the shared rests every `ig.exit_rest_sync` (2 s). So a limited IP sees one 429 for the whole fleet, not one per pod. A failed probe's longer rest is shared the same way. After a rest each pod may probe the exit once, but the exit's fleet-wide pacing spaces those probes 4 s apart, and the first failed one rests it again for all. `TestIdentitiesAndRestsOutliveAPod` checks a rest taken in one crawler holds in another.
 
-**Sessions across restarts.** A crawler pod that stops (a rollout, a scale-down) keeps its idle identities in Valkey for `ig.keep_identities` (1 h): their cookies and tokens, never the proxy credentials. The pods that start next take them up exit by exit (`igs_identity_unparked_total`), so a rolling restart does not load a page on every exit again. A pod that crashes loses its identities; every page load still waits for its exit's pacing, so even then the IPs do not all load pages at once.
+**Sessions across restarts.** A crawler pod that stops (a rollout, a scale-down) keeps its idle identities in Valkey for `ig.keep_identities` (1 h): their cookies and tokens, never the proxy credentials. The pods that start next take them up exit by exit (`igs_identity_unparked_total`), so a rolling restart does not load a page on every exit again.
+- **A pod that dies** (killed, out of memory, its node lost) can't park. So every running crawler also checkpoints every identity it holds, idle or in use, every 2 minutes, under a 5-minute lease.
+- Once a dead pod's lease ends, another crawler adopts its last checkpoint within a minute and parks those identities exit by exit (`igs_identity_adopted_total`, and a log line with their age). So at most 6 minutes after a crash, the dead pod's sessions are available again.
+- A clean stop parks and drops the checkpoint, so nothing is handed out twice.
+- Every page load still waits for its exit's pacing, so even a crash with no checkpoint does not make the IPs all load pages at once.
 
 **IPs shared with fbs, yts and tks.** igs paces and rests an exit only for its own requests. When the same IPs also carry the other collectors' traffic:
 - Instagram's limit counts only requests to Instagram, so igs's pacing stays right.

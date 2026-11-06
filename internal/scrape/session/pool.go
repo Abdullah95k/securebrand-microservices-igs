@@ -70,6 +70,10 @@ type Pool struct {
 	leased map[string]int
 	// waiting counts the Acquire calls waiting at MaxPerTier, per tier.
 	waiting map[string]int
+	// all holds every live identity, idle or in use, for Checkpoint.
+	all map[*Identity]struct{}
+	// owner names this pool's checkpoint in the store.
+	owner string
 }
 
 // gaugesLocked publishes tier's identities (igs_identities{tier,state}):
@@ -115,7 +119,8 @@ func NewPool(cfg PoolConfig, proxies *proxy.Pool, fps map[string]Fingerprint, f 
 		cfg.MaxPerTier = 512
 	}
 	p := &Pool{cfg: cfg, base: base, proxies: proxies, fps: fps, newDoer: f,
-		idle: map[string][]*Identity{}, live: map[string]int{}, leased: map[string]int{}, waiting: map[string]int{}}
+		idle: map[string][]*Identity{}, live: map[string]int{}, leased: map[string]int{}, waiting: map[string]int{},
+		all: map[*Identity]struct{}{}, owner: "crawler-" + randAlnum(10)}
 	p.cond = sync.NewCond(&p.mu)
 	return p, nil
 }
@@ -160,6 +165,7 @@ func (p *Pool) acquire(ctx context.Context, tier, avoid string) (*Identity, erro
 				list = append(list[:i], list[i+1:]...)
 				p.idle[tier] = list
 				p.live[tier]--
+				delete(p.all, id)
 				if best > i {
 					best--
 				}
@@ -254,6 +260,7 @@ func (p *Pool) Release(id *Identity) {
 	defer p.gaugesLocked(tier)
 	if reason := id.RetireReason(); reason != "" {
 		p.live[tier]--
+		delete(p.all, id)
 		metrics.IdentityRetired.WithLabelValues(tier, reason).Inc()
 		slog.Debug("session: identity retired", "identity", id.ID, "tier", tier, "reason", reason)
 		go id.Doer.Close()
@@ -299,6 +306,7 @@ func (p *Pool) createLocked(tier string, skip func(proxy.Endpoint) bool) (*Ident
 		return nil, err
 	}
 	p.lease(id)
+	p.all[id] = struct{}{}
 	return id, nil
 }
 

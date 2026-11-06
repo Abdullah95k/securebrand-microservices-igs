@@ -179,6 +179,12 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		func(ctx context.Context) error { return reg.Run(ctx, g.RegistryRefresh) },
 		func(ctx context.Context) error { return supp.Run(ctx, cfg.Crawler.SuppressionRefresh) },
 	}
+	if g.KeepIdentities > 0 {
+		// Every identity this crawler holds, checkpointed every 2 minutes
+		// under a lease, so a crawler that dies leaves them to the others
+		// (B5); and the identities of crawlers that died, adopted.
+		c.Components = append(c.Components, pool.RunCheckpoint)
+	}
 	if g.ShareExitRests {
 		proxies.ShareRests(ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix))
 		c.Components = append(c.Components, func(ctx context.Context) error { return proxies.SyncRests(ctx, g.ExitRestSync) })
