@@ -324,6 +324,16 @@ igsctl kafka apply
 
 `igsctl schemas apply` registers the `ig.*` subjects (`<topic>-value`, `BACKWARD_TRANSITIVE`); `schemas check` only checks them. Both leave out the `content.*` subjects unless `--include-content` (a registry of igs's own).
 
+## Valkey unavailable
+
+**Alert `IgsIgValkeyUnavailable`:** crawlers have been waiting for Valkey for 2 minutes.
+
+The fleet-wide rate limit (each exit's pace, `ig.exit_rps`, and the query limits) lives in Valkey, and it **fails closed**. While Valkey does not answer, no request goes to Instagram: each one waits, trying again with a growing gap (up to 5 seconds), until Valkey answers or the task's time runs out. A crawler never runs on its own pace alone, because several pods would then use one exit faster than its limit.
+
+1. Check Valkey itself: is it up, and is it reachable from the crawler pods? `igs_ratelimit_store_errors_total{kind}` counts the checks it did not answer.
+2. Nothing else is needed: crawling resumes by itself once Valkey answers. Tasks that ran out of time go to the retry topics as usual.
+3. Valkey loses nothing that matters: exit rests and parked identities rebuild within minutes ([backups](igs-backups.md)).
+
 ## Kafka lag
 
 - **On-demand lag (`IgsIgOnDemandLag`):** p0 tasks wait.

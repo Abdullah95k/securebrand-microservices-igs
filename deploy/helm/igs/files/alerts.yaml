@@ -120,6 +120,20 @@ groups:
             too high for the exits; checkpoints and page walls mean flagged
             IPs to replace.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#rotation-retries-and-failover
+      - alert: IgsIgValkeyUnavailable
+        # The fleet-wide rate limit fails closed (REQ-008 fix 4): while
+        # Valkey does not answer, crawlers hold every request.
+        expr: max(igs_ratelimit_waiting_for_store) > 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Crawlers are waiting for Valkey: no request goes out"
+          description: >-
+            The fleet-wide rate limit cannot reach Valkey, so crawlers hold
+            every request rather than run without the per-exit limit.
+            Crawling resumes by itself once Valkey answers. Check Valkey and
+            the crawlers' connection to it (igs_ratelimit_store_errors_total).
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#valkey-unavailable
       - alert: IgsIgTasksParked
         expr: sum(rate(igs_tasks_total{outcome="parked"}[10m])) > 0
         for: 15m

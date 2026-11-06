@@ -95,8 +95,12 @@ var (
 	// ContentWritten counts rows igs-content-writer inserted into the
 	// shared store per table (outcome ok), and records it skipped
 	// (undecodable, by topic).
-	ContentWritten       = counterVec("content_written_total", "Rows written to the shared content store, by table and outcome.", "table", "outcome")
-	BreakerState         = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
+	ContentWritten = counterVec("content_written_total", "Rows written to the shared content store, by table and outcome.", "table", "outcome")
+	BreakerState   = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
+	// RateLimitStoreErrors and RateLimitWaiting: the fleet-wide rate limit
+	// fails closed, so a request waits while Valkey does not answer.
+	RateLimitStoreErrors = counterVec("ratelimit_store_errors_total", "Fleet-wide rate limit checks Valkey did not answer (the request waited and tried again), by key kind.", "kind")
+	RateLimitWaiting     = gauge("ratelimit_waiting_for_store", "Requests in this pod waiting for Valkey before the fleet-wide rate limit lets them go.")
 	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")
 	AIMDCeiling          = gauge("aimd_ceiling_rps", "Fleet-wide platform request ceiling set by AIMD.")

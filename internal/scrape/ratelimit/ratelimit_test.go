@@ -44,3 +44,47 @@ func TestWaitRateSpacesAKeyAcrossLimiters(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The limiter fails closed: while Valkey does not answer, a wait never
+// lets the request go; it waits until the context ends, and resumes once
+// Valkey answers again.
+func TestWaitFailsClosedWithoutValkey(t *testing.T) {
+	defer func(lo, hi time.Duration) { StoreRetryMin, StoreRetryMax = lo, hi }(StoreRetryMin, StoreRetryMax)
+	StoreRetryMin, StoreRetryMax = 20*time.Millisecond, 100*time.Millisecond
+	mr := miniredis.RunT(t)
+	l := NewRedis(redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1, DialTimeout: 50 * time.Millisecond}))
+	mr.Close()
+
+	for _, wait := range []func(context.Context) error{
+		func(ctx context.Context) error { return l.WaitRate(ctx, "exit:isp#1", 0.25) },
+		func(ctx context.Context) error { return l.Wait(ctx, "global", 1000) },
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+		start := time.Now()
+		err := wait(ctx)
+		cancel()
+		if err == nil || time.Since(start) < 350*time.Millisecond {
+			t.Fatalf("Valkey down: returned %v after %v; want a wait until the context ends", err, time.Since(start))
+		}
+	}
+
+	// Valkey comes back: a waiting request goes ahead.
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- l.WaitRate(ctx, "exit:isp#2", 0.25)
+	}()
+	time.Sleep(150 * time.Millisecond)
+	if err := mr.Restart(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("after Valkey came back: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("still waiting after Valkey came back")
+	}
+}
