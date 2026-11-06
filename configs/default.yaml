@@ -442,6 +442,11 @@ ig:
     jitter: 0.1
     post_refresh_window: 168h    # posts of the last 7 days: comments and counts refreshed
     post_refresh_per_run: 30
+    # The reels tab, for each reel's views (owner, 6 Nov 2026): a scheduled
+    # run reads it 7 days back; once a week per profile, back to
+    # limits.max_age_days. 0: the whole age window on every run.
+    reels_window: 168h
+    reels_full_every: 168h
     # No profile is read more often than this (the hot tier, a custom interval).
     min_interval: 5m
     # Tiers (architecture §8). Hot is pinned (API, igsctl profiles tier,

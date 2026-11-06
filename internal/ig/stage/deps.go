@@ -336,6 +336,42 @@ func (d *Deps) saveWatermark(ctx context.Context, userPK int64, newest, oldest t
 	return err
 }
 
+// lastReelsFull is when the profile's reels tab was last read back to the
+// age window (crawl_cursors, scope profile_reels); zero if never, or without
+// a store.
+func (d *Deps) lastReelsFull(ctx context.Context, userPK int64) (time.Time, error) {
+	if d.DB == nil || userPK == 0 {
+		return time.Time{}, nil
+	}
+	var at *time.Time
+	err := d.DB.QueryRow(ctx, `SELECT last_full_at FROM crawl_cursors
+		WHERE scope_type = 'profile_reels' AND scope_id = $1 AND ordering = 'default'`, userPK).Scan(&at)
+	if errors.Is(err, pgx.ErrNoRows) || at == nil {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return *at, nil
+}
+
+// saveReelsPass records the end of a reels pass: a full one (back to the age
+// window) sets last_full_at, a windowed one last_incremental_at.
+func (d *Deps) saveReelsPass(ctx context.Context, userPK int64, full bool) error {
+	if d.DB == nil || userPK == 0 {
+		return nil
+	}
+	_, err := d.DB.Exec(ctx, `
+		INSERT INTO crawl_cursors (scope_type, scope_id, ordering, state, last_full_at, last_incremental_at, updated_at)
+		VALUES ('profile_reels', $1, 'default', 'complete', CASE WHEN $2 THEN now() END, CASE WHEN NOT $2 THEN now() END, now())
+		ON CONFLICT (scope_type, scope_id, ordering) DO UPDATE SET
+			state = 'complete',
+			last_full_at = COALESCE(EXCLUDED.last_full_at, crawl_cursors.last_full_at),
+			last_incremental_at = COALESCE(EXCLUDED.last_incremental_at, crawl_cursors.last_incremental_at),
+			updated_at = now()`, userPK, full)
+	return err
+}
+
 // storedCommentState is a post's comment count and newest comment time as
 // last stored, for incremental comment reads.
 // keepRaw keeps a page load's HTML with the raw responses when every
