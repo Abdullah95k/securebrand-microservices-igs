@@ -1,7 +1,9 @@
 // Package rawsink batches raw platform responses into zstd-compressed JSONL
 // objects in S3, so payloads can be parsed again after a parser fix or for
 // a new field without collecting again (architecture §2.5: keep the raw
-// responses). Failures go under raw-failures/, everything else under raw/.
+// responses). Failures go under the keep prefix (raw-failures/ by default,
+// kept forever), everything else under the other (raw/; one a bucket rule
+// may expire).
 // Each captured response gets a reference (s3://bucket/key#line) that the
 // events built from it carry as raw_ref.
 package rawsink
@@ -29,6 +31,8 @@ type Sink struct {
 	bucket  string
 	pod     string
 	maxSize int
+	// prefix and keepPrefix start the keys of OK responses and failures.
+	prefix, keepPrefix string
 
 	mu   sync.Mutex
 	bufs map[string]*batch // prefix/query -> the open object
@@ -43,9 +47,11 @@ type batch struct {
 	lines int
 }
 
-func New(s3 *minio.Client, bucket string) *Sink {
+// New writes to bucket: OK responses under prefix, failures under
+// keepPrefix (s3.raw_prefix, s3.raw_keep_prefix).
+func New(s3 *minio.Client, bucket, prefix, keepPrefix string) *Sink {
 	pod, _ := os.Hostname()
-	return &Sink{s3: s3, bucket: bucket, pod: pod, maxSize: 8 << 20, bufs: map[string]*batch{}}
+	return &Sink{s3: s3, bucket: bucket, pod: pod, maxSize: 8 << 20, bufs: map[string]*batch{}, prefix: prefix, keepPrefix: keepPrefix}
 }
 
 // Line is one captured response (one JSONL line of a raw object).
@@ -61,9 +67,9 @@ type Line struct {
 // Capture buffers one response and returns its reference
 // (s3://bucket/key#line, the line counted from 1).
 func (s *Sink) Capture(ctx context.Context, query string, cls detect.Class, body []byte, vars map[string]any) string {
-	prefix := "raw"
+	prefix := s.prefix
 	if cls != detect.OK {
-		prefix = "raw-failures"
+		prefix = s.keepPrefix
 	}
 	l := Line{At: time.Now().UTC(), Query: query, Class: cls.String(), Vars: vars}
 	if json.Valid(body) {
@@ -72,7 +78,7 @@ func (s *Sink) Capture(ctx context.Context, query string, cls detect.Class, body
 		l.Text = string(body)
 	}
 	b, _ := json.Marshal(l)
-	key := prefix + "/" + query
+	key := prefix + query
 	s.mu.Lock()
 	bt := s.bufs[key]
 	if bt == nil {

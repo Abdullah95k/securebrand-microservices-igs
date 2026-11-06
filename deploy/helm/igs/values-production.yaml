@@ -1,0 +1,111 @@
+# igs on the platform's production cluster (REQ-008 fix 11a). The platform
+# installs it in the namespace igs:
+#
+#   helm upgrade --install igs deploy/helm/igs -n igs -f deploy/helm/igs/values-production.yaml
+#
+# It reads, in the namespace igs:
+#   - Secret platform-credentials: Postgres, Kafka, Valkey, S3 and the
+#     schema registry, under the platform's key names (values.yaml,
+#     platformCredentials, lists them);
+#   - Secret proxies, key proxies.yaml: the ISP exits, as a config layer
+#     (ig.proxy.tiers, tier name isp; phase0/proxies.example.yaml shows
+#     the shape);
+#   - Secret igs-keys, key IGS_IG__PRIVACY__AUTHOR_HMAC_KEY: igs's own key
+#     for the authors' HMAC (32+ random characters, never fbs's). The
+#     platform's Secret has no such key.
+# Nothing here is a secret. Replace every <...> with the platform's value.
+
+image:
+  # The platform builds the image (Dockerfile, target runtime) and sets
+  # these.
+  repository: "<registry>/igs"
+  tag: "<full commit SHA>"
+
+platformCredentials:
+  existingSecret: platform-credentials
+secretFiles:
+  existingSecret: proxies
+  key: proxies.yaml
+secretEnv:
+  existingSecret: igs-keys
+
+config:
+  service: {name: igs, env: prod}
+  log: {level: info, format: json}
+  s3:
+    # The platform's shared buckets (S3_BUCKET_RAW, S3_BUCKET_MEDIA): igs
+    # keeps to its prefixes and creates no bucket. Raw failures are kept
+    # under igs/keep/; the other raw responses go under igs/30d/, which
+    # the platform may expire after 30 days; media files under igs/.
+    raw_keep_prefix: igs/keep/
+    raw_prefix: igs/30d/
+    media_prefix: igs/
+    manage_buckets: false
+  media:
+    # Kept until the analysis service acknowledged it.
+    ttl: 0s
+    required_consumers: ["analysis"]
+  ig:
+    exit_rps: 0.25
+    rate_limit_rest: 10m
+    checkpoint_rest: 30m
+    page_wall_rest: 30m
+    block_hops: 2
+    identity_rps: 0.33
+    # Off until the pilot measures what an IP tolerates (owner, 6 Nov 2026).
+    exit_page_loads_per_day: 0
+    proxy:
+      routing:
+        default: [isp]
+    privacy:
+      pii_mode: full
+    discovery:
+      enabled: true
+      threshold: 4
+      vet_in_flight: 50
+      max_new_per_day: 0         # no cap in production (owner, 6 Nov 2026)
+    registry_sync:
+      canary_pages: ["<canary-1>", "<canary-2>", "<canary-3>"]
+
+hooks:
+  # The platform creates igs's topics (infra/production/kafka.tf) and
+  # registers the shared subjects: igs creates no topic and registers no
+  # schema. Migrations of igs's own schema still run.
+  migrate: true
+  topics: false
+  schemas: false
+
+keda:
+  # The lag triggers read the brokers from the pods' KAFKA_BROKERS and log
+  # in with the platform's Kafka user.
+  bootstrapServersFromEnv: KAFKA_BROKERS
+  authSecret: platform-credentials
+  authKeys: {username: KAFKA_USER, password: KAFKA_PASSWORD}
+  # KEDA's spelling of KAFKA_SASL_MECHANISM and KAFKA_TLS.
+  sasl: "<scram_sha512>"
+  tls: "<enable>"
+
+alerts:
+  enabled: true
+  labels: {release: prometheus}
+dashboards:
+  enabled: true
+serviceMonitor:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+
+# KEDA's maxima equal the partitions of the topics each consumes (the
+# platform's sizes): more pods than partitions would only wait.
+components:
+  crawler-profile:
+    autoscale: {min: 2, max: 6}
+  crawler-post:
+    autoscale: {min: 4, max: 12}
+  persister:
+    autoscale: {min: 2, max: 12}
+  normalizer:
+    autoscale: {min: 2, max: 12}
+  media-downloader:
+    autoscale: {min: 1, max: 3}

@@ -44,6 +44,8 @@ type Downloader struct {
 	MaxBytes   int64
 	Presign    bool
 	PresignTTL time.Duration
+	// Prefix starts every object key (s3.media_prefix).
+	Prefix string
 }
 
 // NewHTTPClient returns a client for CDN downloads.
@@ -58,8 +60,9 @@ func NewHTTPClient() *http.Client {
 	}
 }
 
-// ObjectKey is the deterministic storage key of a media item.
-func ObjectKey(m *igv1.Media, contentType string) string {
+// ObjectKey is the deterministic storage key of a media item, under
+// prefix (s3.media_prefix: ig/, or igs/ in the platform's shared bucket).
+func ObjectKey(prefix string, m *igv1.Media, contentType string) string {
 	ext := ".bin"
 	if exts, _ := mime.ExtensionsByType(contentType); len(exts) > 0 {
 		ext = exts[0]
@@ -69,7 +72,7 @@ func ObjectKey(m *igv1.Media, contentType string) string {
 	} else if e := path.Ext(strings.SplitN(m.SourceUrl, "?", 2)[0]); len(e) > 1 && len(e) <= 5 {
 		ext = e
 	}
-	return "ig/" + m.MediaId[:2] + "/" + m.MediaId + ext
+	return prefix + m.MediaId[:2] + "/" + m.MediaId + ext
 }
 
 func kindName(k commonv1.MediaKind) string {
@@ -208,7 +211,7 @@ func (d *Downloader) download(ctx context.Context, m *igv1.Media) (*commonv1.S3O
 		ct = "application/octet-stream"
 	}
 	ct = strings.TrimSpace(strings.SplitN(ct, ";", 2)[0])
-	key := ObjectKey(m, ct)
+	key := ObjectKey(d.Prefix, m, ct)
 	h := sha256.New()
 	var src io.Reader = resp.Body
 	if d.MaxBytes > 0 {

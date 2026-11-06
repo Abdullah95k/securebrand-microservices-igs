@@ -32,6 +32,10 @@ type Janitor struct {
 	RequiredConsumers    []string
 	MaxRetryableFailures int
 	TTL                  time.Duration
+	// Prefix is igs's part of the bucket (s3.media_prefix): the orphan
+	// sweep lists and deletes under it alone, never elsewhere in a shared
+	// bucket.
+	Prefix string
 }
 
 // Handle consumes ig.media.processed.v1.
@@ -189,10 +193,14 @@ func (j *Janitor) Sweep(ctx context.Context) error {
 }
 
 // Orphans deletes stored objects no ready media row references, older than
-// the TTL (at least a day) plus an hour.
+// the TTL (at least a day) plus an hour, under igs's prefix only.
 func (j *Janitor) Orphans(ctx context.Context) error {
+	if j.Prefix == "" {
+		// The whole bucket: other services' objects too. Never sweep it.
+		return errors.New("igs janitor: no media prefix: the orphan sweep would list the whole bucket")
+	}
 	cutoff := time.Now().Add(-max(j.TTL, 24*time.Hour) - time.Hour)
-	for obj := range j.S3.ListObjects(ctx, j.Bucket, minio.ListObjectsOptions{Prefix: "ig/", Recursive: true}) {
+	for obj := range j.S3.ListObjects(ctx, j.Bucket, minio.ListObjectsOptions{Prefix: j.Prefix, Recursive: true}) {
 		if obj.Err != nil {
 			return obj.Err
 		}
@@ -236,15 +244,17 @@ func val32(v *int32) int32 {
 	return *v
 }
 
-// Lifecycle sets the bucket's expiry rule for igs's objects (prefix ig/),
-// a safety net behind the janitor: objects expire a day after the TTL.
-func Lifecycle(ctx context.Context, s3 *minio.Client, bucket string, ttl time.Duration) {
-	if ttl <= 0 {
+// Lifecycle sets the bucket's expiry rule for igs's objects (under
+// prefix), a safety net behind the janitor: objects expire a day after the
+// TTL. It replaces the bucket's whole lifecycle configuration, so it is
+// only for a bucket igs owns (s3.manage_buckets).
+func Lifecycle(ctx context.Context, s3 *minio.Client, bucket, prefix string, ttl time.Duration) {
+	if ttl <= 0 || prefix == "" {
 		// Kept until analysed: no expiry rule.
 		return
 	}
 	cfg := &lifecycle.Configuration{Rules: []lifecycle.Rule{{
-		ID: "igs-ig-media-ttl", Status: "Enabled", RuleFilter: lifecycle.Filter{Prefix: "ig/"},
+		ID: "igs-ig-media-ttl", Status: "Enabled", RuleFilter: lifecycle.Filter{Prefix: prefix},
 		Expiration: lifecycle.Expiration{Days: lifecycle.ExpirationDays(int(ttl.Hours()/24) + 1)},
 	}}}
 	if err := s3.SetBucketLifecycle(ctx, bucket, cfg); err != nil {

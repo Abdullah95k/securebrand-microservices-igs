@@ -55,7 +55,9 @@ GHCR packages start private. Either make both packages public in their package s
 
 ## 4. Secrets
 
-Create them in the release namespace (`igs` below).
+**On the platform's production cluster** (namespace `igs`), the platform provides the stores' credentials in `platform-credentials` and the exits in `proxies`; nothing is copied by hand. Install with [`deploy/helm/igs/values-production.yaml`](../../deploy/helm/igs/values-production.yaml) instead of the steps below: it reads both Secrets and keeps igs to its prefixes in the shared buckets, creating no bucket, topic or schema. [`docs/master/igs-production.md`](../master/igs-production.md) lists what it needs, including igs's one Secret of its own, `igs-keys` (the authors' HMAC key).
+
+Elsewhere, create the Secrets yourself in the release namespace (`igs` below).
 
 1. **`igs-env`**, the environment of every pod:
    - `IGS_POSTGRES__DSN`: `postgres://USER:PASS@HOST:5432/igs?sslmode=require`;

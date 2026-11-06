@@ -28,13 +28,25 @@ app.kubernetes.io/component: {{ .name }}
 {{- define "igs.env" -}}
 - name: IGS_CONFIG
   value: {{ include "igs.configFiles" . | quote }}
+{{- if .Values.platformCredentials.existingSecret }}
+# The platform's credentials Secret arrives under its own key names
+# (POSTGRES_*, KAFKA_*, VALKEY_*, S3_*, ...); igs reads them by those names.
+- name: IGS_PLATFORM_CREDENTIALS
+  value: "true"
+{{- end }}
 {{- end -}}
 
 {{- define "igs.envFrom" -}}
-{{- if .Values.secretEnv.existingSecret }}
+{{- if or .Values.secretEnv.existingSecret .Values.platformCredentials.existingSecret }}
 envFrom:
+  {{- if .Values.platformCredentials.existingSecret }}
+  - secretRef:
+      name: {{ .Values.platformCredentials.existingSecret }}
+  {{- end }}
+  {{- if .Values.secretEnv.existingSecret }}
   - secretRef:
       name: {{ .Values.secretEnv.existingSecret }}
+  {{- end }}
 {{- end }}
 {{- end -}}
 

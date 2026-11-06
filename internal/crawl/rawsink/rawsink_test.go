@@ -20,8 +20,17 @@ import (
 )
 
 // Every captured response gets a reference (s3://bucket/key#line) that
-// names, once flushed, the object and the line holding exactly it.
+// names, once flushed, the object and the line holding exactly it. OK
+// responses go under the prefix, failures under the keep prefix: igs's own
+// bucket's raw/ and raw-failures/, or the platform's shared bucket's
+// igs/30d/ and igs/keep/.
 func TestCaptureReferencesTheStoredLine(t *testing.T) {
+	for _, p := range [][2]string{{"raw/", "raw-failures/"}, {"igs/30d/", "igs/keep/"}} {
+		t.Run(p[0], func(t *testing.T) { testCapture(t, p[0], p[1]) })
+	}
+}
+
+func testCapture(t *testing.T, prefix, keepPrefix string) {
 	srv := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(srv.Close)
 	u, _ := url.Parse(srv.URL)
@@ -33,7 +42,7 @@ func TestCaptureReferencesTheStoredLine(t *testing.T) {
 	if err := s3.MakeBucket(ctx, "raw", minio.MakeBucketOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	sink := New(s3, "raw")
+	sink := New(s3, "raw", prefix, keepPrefix)
 	refs := map[string]string{}
 	for i, body := range []string{`{"data":{"n":1}}`, `{"data":{"n":2}}`, `<html>page</html>`} {
 		q := "comments"
@@ -44,14 +53,14 @@ func TestCaptureReferencesTheStoredLine(t *testing.T) {
 	}
 	failed := sink.Capture(ctx, "comments", detect.RateLimited, []byte(`{"message":"wait"}`), nil)
 	sink.FlushAll(ctx)
-	if !strings.Contains(failed, "/raw-failures/comments/") {
-		t.Fatalf("a failed response's reference %q is not under raw-failures/", failed)
+	if !strings.HasPrefix(failed, "s3://raw/"+keepPrefix+"comments/") {
+		t.Fatalf("a failed response's reference %q is not under %s", failed, keepPrefix)
 	}
 	for ref, body := range refs {
 		rest, ok := strings.CutPrefix(ref, "s3://raw/")
 		key, lineStr, ok2 := strings.Cut(rest, "#")
 		line, _ := strconv.Atoi(lineStr)
-		if !ok || !ok2 || line < 1 || !strings.HasPrefix(key, "raw/") {
+		if !ok || !ok2 || line < 1 || !strings.HasPrefix(key, prefix) {
 			t.Fatalf("reference %q", ref)
 		}
 		obj, err := s3.GetObject(ctx, "raw", key, minio.GetObjectOptions{})
