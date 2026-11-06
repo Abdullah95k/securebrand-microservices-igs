@@ -20,7 +20,6 @@ import (
 	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 )
 
@@ -41,7 +40,7 @@ func runMedia(ctx context.Context, cfg *config.Config, roles []string) error {
 		return err
 	}
 	defer db.Close()
-	s3, err := s3x.Open(ctx, cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Region, cfg.S3.UseSSL, cfg.S3.MediaBucket)
+	s3, err := igapp.OpenS3(ctx, cfg, cfg.S3.MediaBucket)
 	if err != nil {
 		return err
 	}

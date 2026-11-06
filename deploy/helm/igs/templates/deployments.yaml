@@ -95,7 +95,17 @@ spec:
     {{- range $c.autoscale.lag }}
     - type: kafka
       metadata:
+        {{- if $root.Values.keda.bootstrapServersFromEnv }}
+        bootstrapServersFromEnv: {{ $root.Values.keda.bootstrapServersFromEnv | quote }}
+        {{- else }}
         bootstrapServers: {{ $root.Values.keda.kafkaBootstrap | quote }}
+        {{- end }}
+        {{- with $root.Values.keda.sasl }}
+        sasl: {{ . | quote }}
+        {{- end }}
+        {{- with $root.Values.keda.tls }}
+        tls: {{ . | quote }}
+        {{- end }}
         consumerGroup: {{ printf "%s%s" ($root.Values.config.kafka.topic_prefix | default "") .group | quote }}
         topic: {{ printf "%s%s" ($root.Values.config.kafka.topic_prefix | default "") .topic | quote }}
         lagThreshold: {{ .threshold | quote }}

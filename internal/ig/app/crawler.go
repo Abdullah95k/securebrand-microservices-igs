@@ -229,7 +229,7 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		}
 	}
 	if o.RawS3 != nil && g.CaptureRaw != "none" {
-		sink := rawsink.New(o.RawS3, cfg.S3.RawBucket)
+		sink := rawsink.New(o.RawS3, cfg.S3.RawBucket, cfg.S3.RawPrefix, cfg.S3.RawKeepPrefix)
 		gql.Raw, gql.CaptureAll = sink, g.CaptureRaw == "all"
 		c.Components = append(c.Components, func(ctx context.Context) error { return sink.Run(ctx, time.Minute) })
 	}

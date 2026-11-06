@@ -69,6 +69,19 @@ config:
     registry_sync:
       canary_pages: []
 
+# The platform's credentials Secret (production: platform-credentials, in
+# the release namespace). Its keys become environment variables and igs
+# reads them by the platform's names (REQ-008 fix 11a):
+#   POSTGRES_HOST, _PORT, _DATABASE, _USER, _PASSWORD, _SSLMODE;
+#   KAFKA_BROKERS, KAFKA_USER, KAFKA_PASSWORD, KAFKA_SASL_MECHANISM, KAFKA_TLS;
+#   VALKEY_HOST and VALKEY_PORT (or VALKEY_ADDR, or VALKEY_URL),
+#   VALKEY_PASSWORD, VALKEY_TLS, VALKEY_DB;
+#   S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_RAW,
+#   S3_BUCKET_MEDIA, S3_BUCKET_BACKUPS; SCHEMA_REGISTRY_URL, CONTRACT_VERSION.
+# Each one set wins over config and secretEnv. Empty: not used.
+platformCredentials:
+  existingSecret: ""
+
 # Existing Secret whose keys become environment variables, e.g.
 #   IGS_POSTGRES__DSN, IGS_POSTGRES__READ_DSN, IGS_REDIS__PASSWORD,
 #   IGS_S3__ACCESS_KEY, IGS_S3__SECRET_KEY, IGS_IG__PRIVACY__AUTHOR_HMAC_KEY
@@ -127,6 +140,16 @@ keda:
   # holds: KEDA rejects an empty tls. For TLS brokers add tls and ca.
   authSecret: ""
   authParams: [sasl, username, password]
+  # With a Secret whose keys have other names (the platform's): authKeys
+  # maps KEDA's parameter to the Secret's key, e.g. {username: KAFKA_USER,
+  # password: KAFKA_PASSWORD}, and replaces authParams. The mode then goes
+  # in the trigger (sasl: scram_sha512, tls: enable: KEDA's spelling).
+  authKeys: {}
+  sasl: ""
+  tls: ""
+  # Read the brokers from the scaled pod's environment variable instead of
+  # kafkaBootstrap (KAFKA_BROKERS with platformCredentials).
+  bootstrapServersFromEnv: ""
 
 # Hooks run `igsctl migrate up` (schema ig, the query registry seed,
 # partitions), `igsctl kafka apply --apply` (configs/ig/topics.yaml) and,
