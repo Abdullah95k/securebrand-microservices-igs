@@ -183,8 +183,8 @@ func (p *Pool) Adopt(ctx context.Context) (int, error) {
 			if left <= 0 || rec.Exit == "" || len(rec.Tokens) == 0 {
 				continue
 			}
-			one, err := json.Marshal(rec)
-			if err != nil {
+			one, merr := json.Marshal(rec)
+			if merr != nil {
 				continue
 			}
 			if perr := p.cfg.Store.Put(ctx, rec.Exit, one, left); perr != nil {

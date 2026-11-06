@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -108,5 +109,32 @@ func TestCheckpointOutlivesACrash(t *testing.T) {
 	mr.FastForward(6 * time.Minute)
 	if n, _ := storePool(t, store).Adopt(ctx); n != 0 {
 		t.Fatalf("adopted %d from a crawler that parked: they would be handed out twice", n)
+	}
+}
+
+// failingPut is a store whose per-exit parking fails.
+type failingPut struct{ *ratelimit.ParkedIdentities }
+
+func (failingPut) Put(context.Context, string, []byte, time.Duration) error {
+	return errors.New("valkey down")
+}
+
+// Adopt reports an identity it took from a dead crawler's checkpoint but
+// could not park: the checkpoint is gone, so a silent failure would lose
+// the identity unseen.
+func TestAdoptReportsParkingErrors(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	store := ratelimit.NewParkedIdentities(rdb, "t.")
+	ctx := context.Background()
+	dead := storePool(t, store)
+	id, _ := dead.Acquire(ctx, "isp")
+	id.SetTokens(session.Tokens{"lsd": "x"})
+	if _, err := dead.Checkpoint(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mr.FastForward(6 * time.Minute)
+	if n, err := storePool(t, failingPut{store}).Adopt(ctx); n != 0 || err == nil {
+		t.Fatalf("adopted %d with parking failing, err %v: want 0 and the error", n, err)
 	}
 }
