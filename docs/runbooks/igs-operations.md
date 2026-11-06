@@ -26,6 +26,8 @@ Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and
 | Block rate | classes `rate_limited`, `login_wall`, `checkpoint`; `igs:ig_block_ratio:rate5m`; `igs_fleet_block_rate` | < 5% (Phase 0's threshold) |
 | Fleet ceiling | `igs:ig_leader:aimd_ceiling_rps`, `igs:ig_leader:fleet_rps` | ceiling stable or rising; fleet rate close to it while there is backlog |
 | Identity churn | `igs_identity_retired_total{tier,reason}` | mostly `max_requests` (identities retire after 500 to 750 requests by design) |
+| Identity pool | `igs_identities{tier,state}`; `igs_identity_shortfall_total{tier,reason}` | `waiting` 0; shortfalls flat ([Identity pool](#identity-pool)) |
+| Page loads per exit | `increase(igs_exit_page_loads_total[1d])` by `exit` | even across exits; under `ig.exit_page_loads_per_day` when set |
 | Exits | `igs_exits_resting{tier}` against `igs_exits{tier}`; `igs_exit_rests_total{tier,reason}`; `igs_identity_hops_total{stage,class}` | few exits resting; rests and failovers flat |
 | Parked tasks | `igs_tasks_total{outcome="parked"}` | 0: a task parks only while every exit rests |
 | Daily budget | `igs_budget_projected{kind}` against `igs_budget_limit{kind}`; `igs_budget_backfill_paused` | under the limit; 0 |
@@ -105,6 +107,25 @@ What to do when exits keep resting:
 2. **Rate limits:** a steady stream of `rate_limited` rests means `ig.exit_rps` is above what Instagram tolerates per IP. Lower it, or add exits to keep the throughput.
 3. **Checkpoints and page walls:** these mean the provider's IPs are flagged. Replace those endpoints in the `igs-proxies` Secret.
 4. **Every exit resting:** the crawl stops until rests end. If it lasts, add exits from another provider or subnet.
+
+## Identity pool
+
+An identity is made when a task needs one: a fresh browser identity on an exit, bootstrapped by its first page load. There is no fixed pool to fill; what limits it is the exits and each pod's cap (1.3 identities per task slot).
+
+- **`igs_identities{tier,state}`** is each pod's identities: `idle` (ready for the next task), `leased` (in use by a task) and `waiting` (tasks waiting at the pod's cap). Sum over pods for the fleet.
+- **`igs_identity_shortfall_total{tier,reason}`** counts the tasks that got no identity:
+  - `exits_cooling`: every exit of the tier rests or cools down; the task parks;
+  - `no_other_exit`: a failover found no exit but the one it left; the task retries;
+  - `at_cap`: the pod was at its cap; the task waited.
+- **`IgsIgIdentityPoolLow`** fires when `exits_cooling` or `at_cap` shortfalls go on for 15 minutes.
+  - `exits_cooling`: see "What to do when exits keep resting" in [Rotation, retries and failover](#rotation-retries-and-failover); `IgsIgTasksParked` fires as well.
+  - `at_cap`: the pod has more tasks in flight than identities allowed. That shouldn't happen with the default cap; check for identities leaking (`leased` growing while `igs_tasks_total` is flat) and restart the pod.
+
+**Page loads per exit.** Each page load (a profile or post page; a fresh identity's first one included) counts in `igs_exit_page_loads_total{tier,exit}`: a static exit by name (`isp#3`), a gateway's sessions by bucket. Instagram flags IPs that load too many pages for fresh visitors (3 of 10 ISP exits in Phase 0), and how many a day an IP tolerates is not yet measured. The daily count per exit is `increase(igs_exit_page_loads_total[1d])`.
+
+- **The daily limit, `ig.exit_page_loads_per_day`** (0, off): once a static exit reaches it in a UTC day, counted fleet-wide in Valkey, it rests until the day ends at 00:00 UTC (03:00 Iraq time), reason `page_load_limit`. Its tasks move to other exits. Pods learn of the rest within `ig.exit_rest_sync`, so the fleet can go a few loads over.
+- It stays off until the pilot measures what an IP tolerates (the owner, 6 November 2026). Set it from the pilot's numbers: the most page loads a day on exits that were never walled, with a margin.
+- While it rests, the exit also sends no GraphQL request, so a limit set too low cuts throughput: watch `igs_exits_resting` after setting it.
 
 ## Daily budget
 

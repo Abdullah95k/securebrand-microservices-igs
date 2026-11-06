@@ -120,6 +120,21 @@ groups:
             too high for the exits; checkpoints and page walls mean flagged
             IPs to replace.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#rotation-retries-and-failover
+      - alert: IgsIgIdentityPoolLow
+        # Tasks get no identity: every exit of the tier cools down, or a
+        # pod is at its identity cap (REQ-008 fix 7).
+        expr: |
+          sum by (tier) (rate(igs_identity_shortfall_total{reason=~"exits_cooling|at_cap"}[10m])) > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Crawl tasks on {{ $labels.tier }} keep finding no identity"
+          description: >-
+            For 15 minutes, tasks on the tier got no identity: every exit
+            cools down (they park), or a crawler pod is at its identity cap
+            (they wait). Check igs_identities by state and
+            igs_identity_shortfall_total by reason.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#identity-pool
       - alert: IgsIgValkeyUnavailable
         # The fleet-wide rate limit fails closed (REQ-008 fix 4): while
         # Valkey does not answer, crawlers hold every request.

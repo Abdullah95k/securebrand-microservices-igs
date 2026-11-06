@@ -45,6 +45,7 @@ func (p *Pool) Park(ctx context.Context) int {
 		all = append(all, list...)
 		p.live[tier] -= len(list)
 		delete(p.idle, tier)
+		p.gaugesLocked(tier)
 	}
 	p.mu.Unlock()
 	n := 0

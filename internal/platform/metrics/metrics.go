@@ -57,6 +57,13 @@ var (
 	// Identities.
 	IdentityActive  = gaugeVec("identity_active", "Live identities in this pod.", "tier")
 	IdentityRetired = counterVec("identity_retired_total", "Retired identities by reason.", "tier", "reason")
+	// Identities and IdentityShortfall show the identity pool: what a pod
+	// holds, and the tasks that got no identity.
+	Identities        = gaugeVec("identities", "Identities in this pod by state: idle, leased (in use by a task), waiting (tasks waiting at the pod's cap).", "tier", "state")
+	IdentityShortfall = counterVec("identity_shortfall_total", "Identity requests a pod could not meet, by reason (exits_cooling, no_other_exit, at_cap).", "tier", "reason")
+	// ExitPageLoads counts page loads per exit: a static exit by name
+	// (isp#3), a gateway's sessions by bucket.
+	ExitPageLoads = counterVec("exit_page_loads_total", "Page loads by exit (static exits by name, gateway sessions by bucket).", "tier", "exit")
 	// IdentityUnparked counts identities a pod resumed from another
 	// process's park (session.Pool.Park) instead of bootstrapping anew.
 	IdentityUnparked = counterVec("identity_unparked_total", "Identities resumed from the store after a restart.", "tier")
