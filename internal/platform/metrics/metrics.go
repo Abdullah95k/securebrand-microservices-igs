@@ -67,11 +67,14 @@ var (
 	// IdentityUnparked counts identities a pod resumed from another
 	// process's park (session.Pool.Park) instead of bootstrapping anew.
 	IdentityUnparked = counterVec("identity_unparked_total", "Identities resumed from the store after a restart.", "tier")
-	IdentityHops     = counterVec("identity_hops_total", "Blocked identities a task replaced with one on another exit and carried on, by stage and block class.", "stage", "class")
-	Exits            = gaugeVec("exits", "Proxy exits configured, by static tier.", "tier")
-	ExitsResting     = gaugeVec("exits_resting", "Proxy exits resting after a rate limit, checkpoint or login page, by tier.", "tier")
-	ExitRests        = counterVec("exit_rests_total", "Times an exit was rested, by tier and reason (rate_limited, checkpoint, page_wall).", "tier", "reason")
-	Bootstraps       = counterVec("bootstrap_total", "Identity bootstraps.", "method", "outcome")
+	// IdentityAdopted counts identities taken from the checkpoint of a
+	// crawler that died without parking, and parked for the others.
+	IdentityAdopted = counterVec("identity_adopted_total", "Identities taken from a dead crawler's checkpoint and parked for reuse.")
+	IdentityHops    = counterVec("identity_hops_total", "Blocked identities a task replaced with one on another exit and carried on, by stage and block class.", "stage", "class")
+	Exits           = gaugeVec("exits", "Proxy exits configured, by static tier.", "tier")
+	ExitsResting    = gaugeVec("exits_resting", "Proxy exits resting after a rate limit, checkpoint or login page, by tier.", "tier")
+	ExitRests       = counterVec("exit_rests_total", "Times an exit was rested, by tier and reason (rate_limited, checkpoint, page_wall).", "tier", "reason")
+	Bootstraps      = counterVec("bootstrap_total", "Identity bootstraps.", "method", "outcome")
 
 	// Tasks.
 	Tasks       = counterVec("tasks_total", "Crawl tasks by stage, lane and outcome.", "stage", "lane", "outcome")
