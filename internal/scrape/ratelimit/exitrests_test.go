@@ -63,7 +63,7 @@ func TestExitRestsAreSharedBetweenPools(t *testing.T) {
 	// An ended rest is not applied, and is dropped at the next publication.
 	fresh, _ := proxy.New(cfg)
 	fresh.ShareRests(stores[0])
-	if err := stores[0].Publish(ctx, "isp|ended:1", time.Now().Add(-time.Minute)); err != nil {
+	if err := stores[0].Publish(ctx, "isp#1", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if err := fresh.PullRests(ctx); err != nil {
@@ -76,7 +76,7 @@ func TestExitRestsAreSharedBetweenPools(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ = stores[0].Load(ctx)
-	if _, ok := got["isp|ended:1"]; ok {
+	if _, ok := got["isp#1"]; ok {
 		t.Fatal("an ended rest was kept")
 	}
 }
@@ -101,21 +101,21 @@ func TestParkedIdentitiesTakenOnce(t *testing.T) {
 	mr := miniredis.RunT(t)
 	s := NewParkedIdentities(redis.NewClient(&redis.Options{Addr: mr.Addr()}), "")
 	ctx := context.Background()
-	if b, err := s.Take(ctx, "isp|h:1"); b != nil || err != nil {
+	if b, err := s.Take(ctx, "isp#2"); b != nil || err != nil {
 		t.Fatalf("empty store gave %q %v", b, err)
 	}
 	for _, v := range []string{"one", "two"} {
-		if err := s.Put(ctx, "isp|h:1", []byte(v), time.Hour); err != nil {
+		if err := s.Put(ctx, "isp#2", []byte(v), time.Hour); err != nil {
 			t.Fatal(err)
 		}
 	}
-	a, _ := s.Take(ctx, "isp|h:1")
-	b, _ := s.Take(ctx, "isp|h:1")
-	c, _ := s.Take(ctx, "isp|h:1")
+	a, _ := s.Take(ctx, "isp#2")
+	b, _ := s.Take(ctx, "isp#2")
+	c, _ := s.Take(ctx, "isp#2")
 	if string(a) != "one" || string(b) != "two" || c != nil {
 		t.Fatalf("took %q %q %q", a, b, c)
 	}
-	if other, _ := s.Take(ctx, "isp|h:2"); other != nil {
+	if other, _ := s.Take(ctx, "isp#3"); other != nil {
 		t.Fatal("another exit's identity was taken")
 	}
 }

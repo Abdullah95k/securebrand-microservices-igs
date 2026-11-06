@@ -32,6 +32,7 @@ import (
 	igclient "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/browser"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
@@ -327,7 +328,7 @@ func (s *Sync) renderMissing(ctx context.Context, pages []*canary, entries []*en
 		}
 		xs, err := s.Render(ctx, c.id, c.url.String())
 		if err != nil {
-			slog.Warn("registry-sync: render", "page", c.ref, "err", err)
+			slog.Warn("registry-sync: render", plog.Account(c.userPK, c.ref), "err", err)
 			continue
 		}
 		for _, x := range xs {

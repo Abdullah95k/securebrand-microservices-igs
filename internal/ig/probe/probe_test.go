@@ -500,14 +500,20 @@ func TestProbeRestsWalledExits(t *testing.T) {
 	if s.ExitsRested != 3 || len(s.PageWallExits) != 3 {
 		t.Fatalf("rested %d, walls by exit %v", s.ExitsRested, s.PageWallExits)
 	}
-	for _, e := range bad {
-		if n := s.PageWallExits["isp|"+e]; n != 1 {
-			t.Fatalf("exit %s walled %d times, want once (then it rests): %v", e, n, s.PageWallExits)
+	// Each of the six exits is its own bucket (a host named by port), named
+	// by tier and number like every exit: never by address.
+	badBuckets := []string{"isp/b2", "isp/b3", "isp/b4"}
+	for _, b := range badBuckets {
+		if n := s.PageWallExits[b]; n != 1 {
+			t.Fatalf("exit %s walled %d times, want once (then it rests): %v", b, n, s.PageWallExits)
 		}
 	}
 	for _, p := range rep.Profiles {
-		if slices.Contains(bad, strings.TrimPrefix(p.Exit, "isp|")) {
+		if slices.Contains(badBuckets, p.Exit) {
 			t.Fatalf("%s was read through a flagged exit %s", p.Username, p.Exit)
+		}
+		if strings.Contains(p.Exit, ".test") {
+			t.Fatalf("%s: exit %q names an address", p.Username, p.Exit)
 		}
 	}
 	if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "resting it for 30m0s") }) {
