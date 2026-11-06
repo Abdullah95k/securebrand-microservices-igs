@@ -202,8 +202,8 @@ themselves out of git.
 single run, so the load per IP does not change, as long as there are more
 IPs than workers (one more IP serves the cursor check, and spares replace
 blocked ones). With 10 IPs, use 6. Count your ISP endpoints without showing
-the credentials (endpoints named by port on one host, such as
-`isp.decodo.com:10001`, count one IP per port):
+the credentials (endpoints named by port on one host count one IP per
+port):
 
 ```bash
 python3 -c "t=open('phase0/proxies.yaml').read();s=t.split('name: isp',1)[1].split('- name:',1)[0];print(sum(1 for l in s.splitlines() if l.strip().startswith('- ')),'ISP endpoints')"

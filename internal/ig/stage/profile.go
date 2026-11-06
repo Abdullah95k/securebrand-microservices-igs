@@ -22,6 +22,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
@@ -361,7 +362,7 @@ func (s *ProfileStage) unavailable(ctx context.Context, t *igstaskv1.Task, sc *i
 	if err := b.Wait(ctx); err != nil {
 		return retry(t, "", "30s", err.Error(), c)
 	}
-	slog.Debug("profile unavailable", "profile", sc.ProfileRef, "why", why)
+	slog.Debug("profile unavailable", plog.Account(sc.UserPk, sc.ProfileRef), "why", why)
 	return done(c)
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -41,7 +40,7 @@ func TestBreakerRetiresIdleIdentitiesAndFeedsOutcomes(t *testing.T) {
 	}
 	ctx := context.Background()
 	a, err := pool.Acquire(ctx, "isp")
-	if err != nil || a.Endpoint.Bucket != "isp|203.0.113.0/24" {
+	if err != nil || a.Endpoint.Bucket != "isp/b1" {
 		t.Fatalf("%+v %v", a.Endpoint, err)
 	}
 	pool.Release(a)
@@ -59,7 +58,7 @@ func TestBreakerRetiresIdleIdentitiesAndFeedsOutcomes(t *testing.T) {
 	pool.Release(b)
 
 	c, err := pool.Acquire(ctx, "isp")
-	if err != nil || c == a || c.Endpoint.Bucket != "isp|198.51.100.0/24" {
+	if err != nil || c == a || c.Endpoint.Bucket != "isp/b2" {
 		t.Fatalf("want a fresh identity on the other /24: %+v %v", c.Endpoint, err)
 	}
 	if pool.live["isp"] != 1 {
@@ -178,9 +177,9 @@ func (p *pacer) WaitRate(_ context.Context, key string, rps float64) error {
 	return nil
 }
 
-// ispPool is a pool on three ISP exits named by port on one host, as
-// Decodo's are, resting an exit 10 minutes on a rate limit and 30 on a
-// checkpoint, and pacing each exit at 0.25 requests a second.
+// ispPool is a pool on three ISP exits named by port on one host, as some
+// providers name theirs, resting an exit 10 minutes on a rate limit and 30
+// on a checkpoint, and pacing each exit at 0.25 requests a second.
 func ispPool(t *testing.T, maxPerTier int) (*Pool, *proxy.Pool, *pacer) {
 	t.Helper()
 	proxies, err := proxy.New(config.Proxy{
@@ -311,8 +310,8 @@ func TestAcquireElsewhere(t *testing.T) {
 		}
 		pool.Release(id)
 	}
-	for _, ep := range []string{"http://isp.example:10002", "http://isp.example:10003"} {
-		e := proxy.Endpoint{Tier: "isp", URL: ep, Bucket: "isp|" + strings.TrimPrefix(ep, "http://")}
+	for i, ep := range []string{"http://isp.example:10002", "http://isp.example:10003"} {
+		e := proxy.Endpoint{Tier: "isp", URL: ep, Index: i + 2, Bucket: fmt.Sprintf("isp/b%d", i+2)}
 		proxies.Rest(e, time.Hour)
 	}
 	if _, err := pool.AcquireElsewhere(ctx, "isp", a.Endpoint.Exit()); !errors.Is(err, proxy.ErrNoFreeExit) {

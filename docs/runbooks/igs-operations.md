@@ -68,7 +68,8 @@ The fleet therefore reads at most exits × `ig.exit_rps`: 2.5 requests a second 
 **Rotation.**
 - Identities spread over the exits. A task gets an idle identity on an exit no other task uses; failing that, a new identity on such an exit; failing that, the idle identity on the least used exit.
 - An identity retires after 500 to 750 requests (`ig.identity_max_requests_min`/`_max`), at its fifth rate limit in a row, at once on a login wall or a checkpoint, and when its exit starts resting.
-- A static exit is one IP: its host and port (Decodo names its exits by port). A gateway session is its own exit.
+- A static exit is one IP: its host and port (some providers name their exits by port on one host). A gateway session is its own exit.
+- **Exits are named by tier and position, never by address:** the nth endpoint of tier `isp` in `proxies.yaml` is `isp#n` in logs, metrics and Valkey keys, and its breaker bucket is `isp/b<k>` (endpoints in one /24 share a bucket). A gateway session is `<tier>#s<session>`, its bucket `<tier>/gw-<country>`. To find an exit, count its position in `proxies.yaml`; keep the order stable.
 
 **Exit rests.** One answer is enough to rest an exit, since the limit is per IP:
 
