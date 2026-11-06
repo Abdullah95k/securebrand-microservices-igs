@@ -121,6 +121,14 @@ type IGSchedule struct {
 	PostRefreshWindow time.Duration `koanf:"post_refresh_window"`
 	// PostRefreshPerRun caps the refreshes riding on one scheduled run.
 	PostRefreshPerRun int `koanf:"post_refresh_per_run"`
+	// ReelsWindow is how far back a scheduled run reads the reels tab for
+	// the views of recent reels (owner, 6 Nov 2026: 7 days). Once every
+	// ReelsFullEvery per profile, a run reads it back to limits.max_age_days
+	// instead, so older reels' views are refreshed weekly. Backfills and
+	// on-demand full runs always read it to max_age_days. 0 reads it back to
+	// max_age_days on every run.
+	ReelsWindow    time.Duration `koanf:"reels_window"`
+	ReelsFullEvery time.Duration `koanf:"reels_full_every"`
 	// MinInterval floors any profile's interval (the hot tier, a custom
 	// interval).
 	MinInterval time.Duration `koanf:"min_interval"`
@@ -254,6 +262,9 @@ func (c *Config) validateIG() []error {
 	}
 	if g.Schedule.PostRefreshWindow < 0 || g.Schedule.PostRefreshPerRun < 0 {
 		errs = append(errs, errors.New("ig.schedule.post_refresh_window and post_refresh_per_run must not be negative"))
+	}
+	if g.Schedule.ReelsWindow < 0 || (g.Schedule.ReelsWindow > 0 && g.Schedule.ReelsFullEvery <= 0) {
+		errs = append(errs, errors.New("ig.schedule.reels_window must not be negative, and with a window reels_full_every must be > 0"))
 	}
 	if g.Schedule.Jitter < 0 || g.Schedule.Jitter >= 0.5 {
 		errs = append(errs, errors.New("ig.schedule.jitter must be in [0, 0.5)"))

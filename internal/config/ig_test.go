@@ -24,6 +24,11 @@ func TestIGDefaults(t *testing.T) {
 	if g.Limits.MaxAgeDays != 365 || g.Limits.IncludeMedia || !g.Limits.IncludeReels || !g.Limits.IncludeComments {
 		t.Fatalf("limits: %+v", g.Limits)
 	}
+	// The reels tab: 7 days back on a scheduled run, all of it weekly (the
+	// owner, 2026-11-06).
+	if g.Schedule.ReelsWindow != 7*24*time.Hour || g.Schedule.ReelsFullEvery != 7*24*time.Hour {
+		t.Fatalf("reels: window %s, full every %s", g.Schedule.ReelsWindow, g.Schedule.ReelsFullEvery)
+	}
 	if g.IdentityMaxRequestsMin != 500 || g.IdentityMaxRequestsMax != 750 || g.PageWallRest != 30*time.Minute {
 		t.Fatalf("identities: %d..%d rest %s", g.IdentityMaxRequestsMin, g.IdentityMaxRequestsMax, g.PageWallRest)
 	}
@@ -67,6 +72,8 @@ func TestIGValidate(t *testing.T) {
 		{"age", func(c *Config) { c.IG.Limits.MaxAgeDays = 400 }, "ig.limits.max_age_days"},
 		{"interval", func(c *Config) { c.IG.Schedule.Interval = 10 * time.Minute }, "ig.schedule.interval"},
 		{"refresh", func(c *Config) { c.IG.Schedule.ProfileRefresh = time.Hour }, "ig.schedule.profile_refresh"},
+		{"reels window", func(c *Config) { c.IG.Schedule.ReelsWindow = -time.Hour }, "ig.schedule.reels_window"},
+		{"reels full pass", func(c *Config) { c.IG.Schedule.ReelsFullEvery = 0 }, "ig.schedule.reels_window"},
 		{"identities", func(c *Config) { c.IG.IdentityMaxRequestsMax = 10 }, "ig.identity_max_requests_min"},
 		{"video", func(c *Config) { c.IG.Limits.VideoPolicy = "4k" }, "ig.limits.video_policy"},
 		{"pii", func(c *Config) { c.IG.Privacy.PIIMode = "none" }, "ig.privacy.pii_mode"},

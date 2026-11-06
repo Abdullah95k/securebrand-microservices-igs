@@ -427,6 +427,16 @@ A job ends `partial` when posts failed, or when a grid ended before the job's ag
 
 The planner runs each scheduled profile at its tier's interval, and its profile query every `ig.schedule.profile_refresh` (24 h). The post refresh re-reads the comments and counts of posts from the last `ig.schedule.post_refresh_window` (7 days), `post_refresh_per_run` posts at a time; each post's refreshes start at its profile's interval and double.
 
+**The reels tab** gives each reel's views (and its likes and comment count). A scheduled run reads it back `ig.schedule.reels_window` (7 days). Once a profile's last full pass is `ig.schedule.reels_full_every` (7 days) old, its next scheduled run reads the tab back to `limits.max_age_days` (a year) instead, so older reels' views are refreshed weekly. A profile's first read (its backfill) and any full run always read it all.
+- Each profile's last full pass is `last_full_at` in `crawl_cursors` (scope `profile_reels`); the last windowed pass is `last_incremental_at`. A job's `reels_full_passes` counter counts its full passes.
+- To read every profile's tab in full on its next run (for example after an outage longer than a week), clear the full-pass times in the igs database:
+
+  ```sql
+  UPDATE ig.crawl_cursors SET last_full_at = NULL WHERE scope_type = 'profile_reels';
+  ```
+
+- `reels_window: 0` reads the tab back to `max_age_days` on every run (the behaviour before 6 November 2026): about 20 more requests per visit for a profile with 1,000 reels a year.
+
 **Tiers** (`ig.schedule.tiers`, architecture §8):
 
 | Tier | Interval | Who |
