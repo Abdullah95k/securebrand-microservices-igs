@@ -374,6 +374,11 @@ ig:
   rate_limit_rest: 10m
   checkpoint_rest: 30m
   page_wall_rest: 30m
+  # Page loads (profile and post pages) per static exit and UTC day,
+  # fleet-wide; an exit that reaches it rests until the day ends (03:00
+  # Iraq time). 0: no limit. Off until the pilot measures what an IP
+  # tolerates (igs_exit_page_loads_total gives the counts).
+  exit_page_loads_per_day: 0
   # A task whose identity is blocked moves to a fresh identity on another
   # exit and carries on, this many times a run, before it waits for a retry.
   block_hops: 2

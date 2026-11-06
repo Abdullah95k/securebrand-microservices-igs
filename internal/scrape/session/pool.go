@@ -68,6 +68,31 @@ type Pool struct {
 	// leased counts the identities in use per exit (Endpoint.Exit), so
 	// tasks spread over the exits rather than queue on one exit's pacing.
 	leased map[string]int
+	// waiting counts the Acquire calls waiting at MaxPerTier, per tier.
+	waiting map[string]int
+}
+
+// gaugesLocked publishes tier's identities (igs_identities{tier,state}):
+// idle, leased (in use by a task) and waiting (tasks waiting at the
+// pod's cap). Callers hold p.mu.
+func (p *Pool) gaugesLocked(tier string) {
+	idle := len(p.idle[tier])
+	metrics.IdentityActive.WithLabelValues(tier).Set(float64(p.live[tier]))
+	metrics.Identities.WithLabelValues(tier, "idle").Set(float64(idle))
+	metrics.Identities.WithLabelValues(tier, "leased").Set(float64(max(p.live[tier]-idle, 0)))
+	metrics.Identities.WithLabelValues(tier, "waiting").Set(float64(p.waiting[tier]))
+}
+
+// shortfall counts an Acquire that found no identity for a task
+// (igs_identity_shortfall_total): every exit cooling down, no exit but the
+// one to avoid, or the pod's cap.
+func shortfall(tier string, err error) {
+	switch {
+	case errors.Is(err, proxy.ErrTierOpen):
+		metrics.IdentityShortfall.WithLabelValues(tier, "exits_cooling").Inc()
+	case errors.Is(err, proxy.ErrNoFreeExit):
+		metrics.IdentityShortfall.WithLabelValues(tier, "no_other_exit").Inc()
+	}
 }
 
 func NewPool(cfg PoolConfig, proxies *proxy.Pool, fps map[string]Fingerprint, f DoerFactory) (*Pool, error) {
@@ -90,7 +115,7 @@ func NewPool(cfg PoolConfig, proxies *proxy.Pool, fps map[string]Fingerprint, f 
 		cfg.MaxPerTier = 512
 	}
 	p := &Pool{cfg: cfg, base: base, proxies: proxies, fps: fps, newDoer: f,
-		idle: map[string][]*Identity{}, live: map[string]int{}, leased: map[string]int{}}
+		idle: map[string][]*Identity{}, live: map[string]int{}, leased: map[string]int{}, waiting: map[string]int{}}
 	p.cond = sync.NewCond(&p.mu)
 	return p, nil
 }
@@ -119,6 +144,8 @@ func (p *Pool) AcquireElsewhere(ctx context.Context, tier, avoid string) (*Ident
 func (p *Pool) acquire(ctx context.Context, tier, avoid string) (*Identity, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.gaugesLocked(tier)
+	waited := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -182,6 +209,7 @@ func (p *Pool) acquire(ctx context.Context, tier, avoid string) (*Identity, erro
 				id, err = p.createLocked(tier, func(ep proxy.Endpoint) bool { return avoid != "" && ep.Exit() == avoid })
 			}
 			if err != nil {
+				shortfall(tier, err)
 				return nil, err
 			}
 			return id, nil
@@ -190,11 +218,18 @@ func (p *Pool) acquire(ctx context.Context, tier, avoid string) (*Identity, erro
 			return take(best), nil
 		}
 		// At the cap: wait for a release (or a cooldown to end).
+		if !waited {
+			waited = true
+			metrics.IdentityShortfall.WithLabelValues(tier, "at_cap").Inc()
+		}
+		p.waiting[tier]++
+		p.gaugesLocked(tier)
 		stop := context.AfterFunc(ctx, func() { p.mu.Lock(); p.cond.Broadcast(); p.mu.Unlock() })
 		timer := time.AfterFunc(time.Second, func() { p.mu.Lock(); p.cond.Broadcast(); p.mu.Unlock() })
 		p.cond.Wait()
 		stop()
 		timer.Stop()
+		p.waiting[tier]--
 	}
 }
 
@@ -216,9 +251,9 @@ func (p *Pool) Release(id *Identity) {
 			delete(p.leased, x)
 		}
 	}
+	defer p.gaugesLocked(tier)
 	if reason := id.RetireReason(); reason != "" {
 		p.live[tier]--
-		metrics.IdentityActive.WithLabelValues(tier).Set(float64(p.live[tier]))
 		metrics.IdentityRetired.WithLabelValues(tier, reason).Inc()
 		slog.Debug("session: identity retired", "identity", id.ID, "tier", tier, "reason", reason)
 		go id.Doer.Close()
@@ -264,7 +299,6 @@ func (p *Pool) createLocked(tier string, skip func(proxy.Endpoint) bool) (*Ident
 		return nil, err
 	}
 	p.lease(id)
-	metrics.IdentityActive.WithLabelValues(tier).Set(float64(p.live[tier]))
 	return id, nil
 }
 

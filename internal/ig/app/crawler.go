@@ -165,6 +165,9 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		Jobs: jobs.New(rdb), Ckpt: checkpoint.New(rdb), DB: db, Suppression: supp,
 		Emit: &emit.Emitter{HMACKey: []byte(g.Privacy.AuthorHMACKey), Pseudonymize: g.Privacy.PIIMode == "pseudonymized", Suppression: supp},
 	}
+	if g.ExitPageLoadsPerDay > 0 {
+		deps.PageLoads = ratelimit.NewPageLoads(rdb, cfg.Kafka.TopicPrefix)
+	}
 	worker := &stage.Worker{D: deps, MaxAttempts: uint32(cfg.Crawler.MaxAttempts), MaxTotalAttempts: uint32(cfg.Crawler.MaxTotalAttempts),
 		LeaseTTL: cfg.Crawler.LeaseTTL, RetryScale: o.RetryScale,
 		Stages: map[igstaskv1.Kind]stage.Stage{

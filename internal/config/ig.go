@@ -51,6 +51,12 @@ type IG struct {
 	RateLimitRest  time.Duration `koanf:"rate_limit_rest"`
 	CheckpointRest time.Duration `koanf:"checkpoint_rest"`
 	PageWallRest   time.Duration `koanf:"page_wall_rest"`
+	// ExitPageLoadsPerDay caps the page loads (HTML pages: profiles, posts)
+	// each static exit makes in a UTC day, fleet-wide: an exit that reaches
+	// it rests until the day ends (03:00 Iraq time). How many a day an IP
+	// tolerates is unmeasured (3 of 10 ISP exits were flagged in Phase 0),
+	// so it is off (0) until the pilot measures it (owner, 6 Nov 2026).
+	ExitPageLoadsPerDay int `koanf:"exit_page_loads_per_day"`
 	// BlockHops is how many times a task run replaces a blocked identity
 	// (rate limit, checkpoint, login wall) with a fresh one on another exit
 	// and carries on, before it waits for a retry.
@@ -244,6 +250,9 @@ func (c *Config) validateIG() []error {
 		if d.HoldRestingShare < 0 || d.HoldRestingShare > 1 {
 			errs = append(errs, errors.New("ig.discovery.hold_resting_share must be in [0, 1]"))
 		}
+	}
+	if g.ExitPageLoadsPerDay < 0 {
+		errs = append(errs, errors.New("ig.exit_page_loads_per_day must not be negative"))
 	}
 	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 || g.ExitRestSync < 0 ||
 		g.KeepIdentities < 0 {

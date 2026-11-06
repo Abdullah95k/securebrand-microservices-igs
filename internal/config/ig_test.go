@@ -40,6 +40,10 @@ func TestIGDefaults(t *testing.T) {
 	if g.ExitRPS != 0.25 || g.RateLimitRest != 10*time.Minute || g.CheckpointRest != 30*time.Minute || g.BlockHops != 2 {
 		t.Fatalf("exits: %v rps, rests %s %s, hops %d", g.ExitRPS, g.RateLimitRest, g.CheckpointRest, g.BlockHops)
 	}
+	// No page-load limit until the pilot measures one (the owner, 2026-11-06).
+	if g.ExitPageLoadsPerDay != 0 {
+		t.Fatalf("exit_page_loads_per_day %d, want 0 (off)", g.ExitPageLoadsPerDay)
+	}
 	// Collected data is kept forever (the owner, 2026-11-03).
 	if r := c.Privacy.Retention; r.CommentsDays != 0 || r.MetricsDays != 0 || r.AuthorsInactiveDays != 0 {
 		t.Fatalf("retention %+v: comments, metrics and authors are kept forever", r)
@@ -74,6 +78,7 @@ func TestIGValidate(t *testing.T) {
 		{"base url", func(c *Config) { c.IG.BaseURL = "instagram.com" }, "ig.base_url"},
 		{"exit rps", func(c *Config) { c.IG.ExitRPS = -1 }, "ig.exit_rps"},
 		{"hops", func(c *Config) { c.IG.BlockHops = -1 }, "ig.block_hops"},
+		{"page loads", func(c *Config) { c.IG.ExitPageLoadsPerDay = -1 }, "ig.exit_page_loads_per_day"},
 		{"age", func(c *Config) { c.IG.Limits.MaxAgeDays = 400 }, "ig.limits.max_age_days"},
 		{"interval", func(c *Config) { c.IG.Schedule.Interval = 10 * time.Minute }, "ig.schedule.interval"},
 		{"refresh", func(c *Config) { c.IG.Schedule.ProfileRefresh = time.Hour }, "ig.schedule.profile_refresh"},
