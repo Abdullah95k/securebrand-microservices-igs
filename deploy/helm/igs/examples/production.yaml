@@ -76,8 +76,12 @@ config:
       canary_pages: ["<canary-1>", "<canary-2>", "<canary-3>"]
 
 hooks:
+  # The production Kafka and Schema Registry are shared: the platform
+  # creates igs's topics and registers its subjects (owner, 6 Nov 2026).
+  # igs creates no topic and registers no schema there.
+  topics: false
   topicReplicas: 3
-  schemas: true
+  schemas: false
 
 keda:
   kafkaBootstrap: "<kafka-bootstrap>:9092"

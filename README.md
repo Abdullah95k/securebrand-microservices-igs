@@ -89,7 +89,7 @@ Its registry goes live with `igsctl registry import --file phase0/out/registry.y
 ## Running in Kubernetes
 
 `deploy/helm/igs` installs every component, with KEDA scaling on consumer lag, hooks that run
-`igsctl migrate up` and `igsctl kafka apply`, and optional alerts, dashboard, PodMonitor, ingress and
+`igsctl migrate up` and, on a Kafka of its own, `igsctl kafka apply --apply`, and optional alerts, dashboard, PodMonitor, ingress and
 network policy. `examples/fakeig.yaml` rehearses an install; `examples/production.yaml` starts a real one.
 A version tag (`v1.2.3`) publishes the images (`ghcr.io/abdullah95k/igs`) and the chart
 (`oci://ghcr.io/abdullah95k/charts/igs`). Going live: [`igs-go-live.md`](docs/runbooks/igs-go-live.md);

@@ -41,7 +41,7 @@ infra-down:
 
 ## Integration tests against real Postgres/Redpanda/Valkey (make infra-up first).
 test-integration:
-	$(TEST_ENV) $(GO) test -count=1 ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./cmd/igsctl/...
+	$(TEST_ENV) $(GO) test -count=1 ./internal/platform/kafka/... ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./cmd/igsctl/...
 
 ## igs's load tests against fakeig (opt-in; prints a report). Size with
 ## IGS_LOADTEST_PROFILES, _POSTS, _COMMENTS, _ROWS; IGS_LOADTEST_OUT appends

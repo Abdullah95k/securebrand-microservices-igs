@@ -7,8 +7,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"slices"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -130,15 +133,38 @@ func loadTopics(replicas, partitionsCap int) (topicDoc, error) {
 	return doc, nil
 }
 
+// platformOwned reports a topic the shared platform owns: igs never creates,
+// changes or registers it on a shared cluster (the content.* topics).
+func platformOwned(topic string) bool {
+	for _, t := range igtopics.Content {
+		if t == topic {
+			return true
+		}
+	}
+	return false
+}
+
+// kafkaApply compares configs/ig/topics.yaml with the cluster. By default it
+// is a dry run that prints the difference. With --apply it creates the
+// missing topics; existing topics stay exactly as they are unless
+// --grow-partitions or --set-retention allows that change. The content.*
+// topics belong to the platform and are left alone, unless
+// --include-content asks for them (a stack with its own Kafka: tests,
+// rehearsals, the fake-Instagram soak).
 func kafkaApply(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("kafka apply", flag.ExitOnError)
 	pcap := fs.Int("partitions-cap", 0, "cap partition counts (local dev, one-node rehearsals)")
 	repl := fs.Int("replicas", 0, "override the replication factor")
+	apply := fs.Bool("apply", false, "make the changes (without it: a dry run that prints the difference)")
+	grow := fs.Bool("grow-partitions", false, "allow adding partitions to existing topics")
+	retention := fs.Bool("set-retention", false, "allow changing existing topics' retention (raising or lowering it)")
+	content := fs.Bool("include-content", false, "include the platform's content.* topics (only on a Kafka of igs's own)")
 	_ = fs.Parse(args)
 	doc, err := loadTopics(*repl, *pcap)
 	if err != nil {
 		return err
 	}
+	specs, skipped := ownTopics(doc.Topics, *content)
 	kcfg, err := clients.Kafka(cfg, "-igsctl")
 	if err != nil {
 		return err
@@ -148,24 +174,143 @@ func kafkaApply(ctx context.Context, cfg *config.Config, args []string) error {
 		return err
 	}
 	defer p.Close()
-	if err := kafka.EnsureTopics(ctx, p.Client(), cfg.Kafka.TopicPrefix, doc.Topics, doc.Replicas); err != nil {
-		return err
-	}
-	fmt.Printf("%d topics applied\n", len(doc.Topics))
-	return nil
+	opt := kafka.ApplyOptions{Apply: *apply, GrowPartitions: *grow, SetRetention: *retention}
+	diffs, err := kafka.ApplyTopics(ctx, p.Client(), cfg.Kafka.TopicPrefix, specs, doc.Replicas, opt)
+	printTopicDiffs(os.Stdout, diffs, skipped, cfg.Kafka.TopicPrefix, opt)
+	return err
 }
 
-// schemasApply registers the public ig topics' schemas, or with check only
-// verifies they are compatible with what is registered.
-func schemasApply(ctx context.Context, cfg *config.Config, check bool) error {
+// ownTopics drops the platform's topics unless includeContent.
+func ownTopics(specs []kafka.TopicSpec, includeContent bool) (own []kafka.TopicSpec, skipped []string) {
+	for _, s := range specs {
+		if platformOwned(s.Name) && !includeContent {
+			skipped = append(skipped, s.Name)
+			continue
+		}
+		own = append(own, s)
+	}
+	return own, skipped
+}
+
+// printTopicDiffs prints one line per topic and a summary: what is
+// different, what was done, and what was held back and by which flag.
+func printTopicDiffs(w io.Writer, diffs []kafka.TopicDiff, skipped []string, prefix string, opt kafka.ApplyOptions) {
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "TOPIC\tPARTITIONS\tRETENTION\tRESULT")
+	var create, changed, held, same int
+	for _, d := range diffs {
+		parts := fmt.Sprint(d.WantPartitions)
+		ret := retentionText(d.WantRetention)
+		if d.Exists {
+			parts = fmt.Sprintf("%d -> %d", d.HavePartitions, d.WantPartitions)
+			if d.WantRetention != 0 {
+				ret = retentionText(d.HaveRetention) + " -> " + ret
+			}
+		}
+		var res []string
+		switch {
+		case len(d.Changes) == 0:
+			res = append(res, "unchanged")
+			same++
+		case !opt.Apply:
+			res = append(res, "would "+strings.Join(d.Changes, ", "))
+		default:
+			if len(d.Applied) > 0 {
+				res = append(res, "done: "+strings.Join(d.Applied, ", "))
+			}
+		}
+		if slices.Contains(d.Applied, "create") || (!opt.Apply && slices.Contains(d.Changes, "create")) {
+			create++
+		} else if len(d.Applied) > 0 {
+			changed++
+		}
+		if len(d.Held) > 0 {
+			held++
+			if opt.Apply {
+				res = append(res, "held: "+strings.Join(d.Held, ", ")+" (needs "+heldFlags(d.Held)+")")
+			}
+		}
+		res = append(res, d.Notes...)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", d.Topic, parts, ret, strings.Join(res, "; "))
+	}
+	for _, t := range skipped {
+		_, _ = fmt.Fprintf(tw, "%s\t-\t-\tskipped: the platform's topic (--include-content on a Kafka of igs's own)\n", prefix+t)
+	}
+	_ = tw.Flush()
+	if !opt.Apply {
+		_, _ = fmt.Fprintf(w, "dry run: %d to create, %d existing with differences, %d unchanged, %d skipped. Nothing was changed; --apply creates the missing topics.\n",
+			create, countDiffering(diffs), same, len(skipped))
+		return
+	}
+	_, _ = fmt.Fprintf(w, "applied: %d created, %d changed, %d with changes held back, %d unchanged, %d skipped\n", create, changed, held, same, len(skipped))
+}
+
+func countDiffering(diffs []kafka.TopicDiff) int {
+	n := 0
+	for _, d := range diffs {
+		if d.Exists && len(d.Changes) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// heldFlags names the flags that would allow the held changes.
+func heldFlags(held []string) string {
+	var f []string
+	for _, h := range held {
+		switch {
+		case h == "add partitions" && !slices.Contains(f, "--grow-partitions"):
+			f = append(f, "--grow-partitions")
+		case strings.HasSuffix(h, "retention") && !slices.Contains(f, "--set-retention"):
+			f = append(f, "--set-retention")
+		}
+	}
+	return strings.Join(f, " and ")
+}
+
+func retentionText(d time.Duration) string {
+	switch {
+	case d < 0:
+		return "forever"
+	case d == 0:
+		return "?"
+	case d%time.Hour == 0:
+		return fmt.Sprintf("%dh", d/time.Hour)
+	default:
+		return d.String()
+	}
+}
+
+// schemasApply registers the schemas of igs's public ig topics, or with
+// check only verifies they are compatible with what is registered. The
+// content.* subjects are left out: the platform registers the shared
+// contract. --include-content adds them, for a registry of igs's own.
+func schemasApply(ctx context.Context, cfg *config.Config, check bool, args []string) error {
+	fs := flag.NewFlagSet("schemas", flag.ExitOnError)
+	content := fs.Bool("include-content", false, "also register the content.* subjects (only on a Schema Registry of igs's own)")
+	_ = fs.Parse(args)
 	sr := cfg.Kafka.SchemaRegistry
 	if sr.URL == "" {
 		return errors.New("kafka.schema_registry.url is not set")
 	}
 	c := &schemareg.Client{URL: sr.URL, Username: sr.Username, Password: sr.Password}
-	res, err := schemareg.Apply(ctx, c, protosrc.FS, cfg.Kafka.TopicPrefix, igtopics.ValueSchemas, check)
+	res, err := schemareg.Apply(ctx, c, protosrc.FS, cfg.Kafka.TopicPrefix, ownSchemas(*content), check)
 	printJSON(res)
 	return err
+}
+
+// ownSchemas is igtopics.ValueSchemas without the platform's topics unless
+// includeContent.
+func ownSchemas(includeContent bool) map[string]string {
+	m := make(map[string]string, len(igtopics.ValueSchemas))
+	for t, f := range igtopics.ValueSchemas {
+		if platformOwned(t) && !includeContent {
+			continue
+		}
+		m[t] = f
+	}
+	return m
 }
 
 func apikeyCreate(ctx context.Context, cfg *config.Config, args []string) error {
