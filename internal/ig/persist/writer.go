@@ -128,15 +128,16 @@ func (w *Writer) Profiles(ctx context.Context, ps []*igv1.Profile) error {
 					INSERT INTO profiles AS t (user_pk, username, full_name, biography, bio_links, verified, private,
 						follower_count, following_count, media_count, profile_pic_url, linked_facebook_page, category,
 						is_business, highlight_count, highlights_hash, author_key, status, content_hash,
-						first_seen_at, last_scraped_at, last_profile_read_at)
+						first_seen_at, last_scraped_at, last_profile_read_at, linked_facebook_page_id)
 					VALUES ($1, NULLIF($2,''), NULLIF($3,''), NULLIF($4,''), $5, $6, $7, $8, $9, $10, $11, NULLIF($12,''), NULLIF($13,''),
-						$14, $15, $16, $17, $18, $19, $20, $20, $20)
+						$14, $15, $16, $17, $18, $19, $20, $20, $20, NULLIF($21,''))
 					ON CONFLICT (user_pk) DO UPDATE SET
 						username = COALESCE(EXCLUDED.username, t.username), full_name = EXCLUDED.full_name,
 						biography = EXCLUDED.biography, bio_links = EXCLUDED.bio_links, verified = EXCLUDED.verified,
 						private = EXCLUDED.private, follower_count = EXCLUDED.follower_count,
 						following_count = EXCLUDED.following_count, media_count = COALESCE(EXCLUDED.media_count, t.media_count),
 						profile_pic_url = EXCLUDED.profile_pic_url, linked_facebook_page = EXCLUDED.linked_facebook_page,
+						linked_facebook_page_id = EXCLUDED.linked_facebook_page_id,
 						category = EXCLUDED.category, is_business = EXCLUDED.is_business,
 						highlight_count = COALESCE(EXCLUDED.highlight_count, t.highlight_count),
 						highlights_hash = COALESCE(EXCLUDED.highlights_hash, t.highlights_hash),
@@ -145,7 +146,7 @@ func (w *Writer) Profiles(ctx context.Context, ps []*igv1.Profile) error {
 					WHERE t.status <> 'suppressed' AND (t.last_profile_read_at IS NULL OR t.last_profile_read_at <= EXCLUDED.last_profile_read_at)`,
 					p.UserPk, p.Username, p.FullName, p.Biography, protoJSONList(p.BioLinks), p.IsVerified, p.IsPrivate,
 					p.FollowerCount, p.FollowingCount, p.MediaCount, pic, p.LinkedFacebookPage, p.Category, p.IsBusiness, hl,
-					emptyNil(p.HighlightsHash), p.AuthorKey, profileStatus(p.Status), hashOf(p.Obs), seen)
+					emptyNil(p.HighlightsHash), p.AuthorKey, profileStatus(p.Status), hashOf(p.Obs), seen, p.LinkedFacebookPageId)
 				if err != nil || tag.RowsAffected() == 0 {
 					return err
 				}

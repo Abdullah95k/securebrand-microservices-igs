@@ -105,6 +105,8 @@ func Profile(parts []gjson.Result) (ProfileResult, walk.Report) {
 	}
 	if fb := u.Get("linked_fb_info"); fb.IsObject() {
 		p.LinkedFacebookPage = walk.First(fb, "linked_fb_page.name", "linked_fb_user.name", "name").String()
+		// A page's ID only: a linked personal account is not a page.
+		p.LinkedFacebookPageId = fb.Get("linked_fb_page.id").String()
 	}
 	var pronouns []string
 	for _, x := range u.Get("pronouns").Array() {

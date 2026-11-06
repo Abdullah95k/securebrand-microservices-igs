@@ -177,10 +177,10 @@ entities:
     present_pct: null
     source: profile query (user by username) (linked_fb_info.linked_fb_page.name)
     stored_at: profiles.linked_facebook_page
-    published_at: Profile.linked_facebook_page; in content.account.v1 as a Link with the name in url and title facebook (a defect)
+    published_at: Profile.linked_facebook_page; in content.account.v1 as the title of a Link with platform fb (the name was in url until REQ-008 fix 9)
     history: latest
     personal_data: false
-    notes: Share not measured. The page's ID is dropped (see the next row); the fix is planned.
+    notes: Share not measured. Its ID is kept since REQ-008 fix 9 (the next row).
   - name: linked_fb_info.linked_fb_page.id
     meaning: The linked Facebook page's ID
     type: text
@@ -188,11 +188,11 @@ entities:
     present: rare
     present_pct: null
     source: profile query (user by username)
-    stored_at: not stored
-    published_at: not published
-    history: '-'
+    stored_at: profiles.linked_facebook_page_id
+    published_at: Profile.linked_facebook_page_id; in content.account.v1 as a Link with platform fb, platform_id the ID and url https://www.facebook.com/<id>
+    history: latest
     personal_data: false
-    notes: 'Dropped today, by mistake. It is the strongest Instagram-to-Facebook link for the entity layer. Planned fix: keep it (an added field).'
+    notes: 'Kept since REQ-008 fix 9 (dropped before). The strongest Instagram-to-Facebook link for the entity layer. A linked personal account''s ID is not kept: it is not a page.'
   - name: linked_fb_info.linked_fb_user
     meaning: A linked Facebook user
     type: object
@@ -1935,7 +1935,7 @@ planned:
 - field: linked Facebook page ID
   entity: account
   why: Cross-platform linking; today the name is kept and the ID dropped.
-  change: Add Profile.linked_facebook_page_id and a proper link on content.account.v1; stop putting the name in Link.url.
+  change: 'Done (REQ-008 fix 9): Profile.linked_facebook_page_id and a link with platform fb on content.account.v1; the name no longer in Link.url.'
 - field: is_business / category as optional
   entity: account
   why: false and empty mean unknown today.

@@ -55,4 +55,6 @@ message Profile {
   // A hash of the highlights list (ids and titles): a scheduled run reads
   // the highlights' items again only when it changed.
   bytes highlights_hash = 21;
+  // The linked Facebook page's ID (linked_facebook_page is its name).
+  string linked_facebook_page_id = 22;
 }

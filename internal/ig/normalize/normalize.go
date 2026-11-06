@@ -152,8 +152,14 @@ func profile(p *igv1.Profile) []Out {
 	if len(a.Links) > 0 {
 		a.Website = a.Links[0].Url
 	}
-	if p.LinkedFacebookPage != "" {
-		a.Links = append(a.Links, &contentv1.Link{Url: p.LinkedFacebookPage, Title: "facebook"})
+	// The linked Facebook page: its name as the title and, with its ID, the
+	// page as platform "fb" (REQ-008 fix 9). The name is not a URL.
+	if p.LinkedFacebookPage != "" || p.LinkedFacebookPageId != "" {
+		l := &contentv1.Link{Title: p.LinkedFacebookPage, Platform: "fb", PlatformId: p.LinkedFacebookPageId}
+		if p.LinkedFacebookPageId != "" {
+			l.Url = "https://www.facebook.com/" + p.LinkedFacebookPageId
+		}
+		a.Links = append(a.Links, l)
 	}
 	var highlights *int32
 	if p.HighlightCount != nil {
