@@ -51,13 +51,14 @@ func checkEnvelope(t *testing.T, e *contentv1.Envelope, native string) {
 func TestProfileToAccount(t *testing.T) {
 	outs := Map(&igv1.Profile{Obs: obs("e1"), UserPk: 42, Username: "brand", FullName: "Brand", Biography: "Baghdad",
 		BioLinks:           []*igv1.BioLink{{Url: "https://brand.iq", Title: "site"}, {Url: "https://youtube.com/@brand"}},
-		LinkedFacebookPage: "https://www.facebook.com/brand", IsVerified: true, Category: "Shop", IsBusiness: true,
+		LinkedFacebookPage: "Brand Page", LinkedFacebookPageId: "540790833730240", IsVerified: true, Category: "Shop", IsBusiness: true,
 		FollowerCount: i64(1000), FollowingCount: i64(10), MediaCount: i64(55), ProfilePic: &commonv1.ImageRef{Url: "https://cdn/p.jpg"},
 		Status: igv1.ProfileStatus_PROFILE_STATUS_ACTIVE})
 	a := one[*contentv1.Account](t, outs, topics.ContentAccount)
 	checkEnvelope(t, a.Envelope, "42")
 	if a.Handle != "brand" || a.Name != "Brand" || a.Bio != "Baghdad" || a.Website != "https://brand.iq" || len(a.Links) != 3 ||
-		a.Links[2].Url != "https://www.facebook.com/brand" || !a.Verified || !a.IsBusiness || a.IsPrivate || a.IsDeleted ||
+		a.Links[2].Url != "https://www.facebook.com/540790833730240" || a.Links[2].Title != "Brand Page" || a.Links[2].Platform != "fb" ||
+		a.Links[2].PlatformId != "540790833730240" || !a.Verified || !a.IsBusiness || a.IsPrivate || a.IsDeleted ||
 		a.GetFollowers() != 1000 || a.PictureUrl != "https://cdn/p.jpg" || a.Kind != "profile" {
 		t.Fatalf("account %+v", a)
 	}

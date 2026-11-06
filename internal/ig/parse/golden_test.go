@@ -187,7 +187,7 @@ func TestFixtureSemantics(t *testing.T) {
 
 	full, rep := Profile(parts("profile/profile_full"))
 	if !rep.OK() || full.Profile.UserPk == 0 || full.UserID == "" || len(full.Highlights) < 3 || len(full.Profile.BioLinks) == 0 ||
-		full.Profile.FollowerCount == nil || full.Profile.LinkedFacebookPage == "" || len(full.HighlightsHash) == 0 || len(full.Media) != 1 {
+		full.Profile.FollowerCount == nil || full.Profile.LinkedFacebookPage == "" || full.Profile.LinkedFacebookPageId != "540790833730240" || len(full.HighlightsHash) == 0 || len(full.Media) != 1 {
 		t.Errorf("profile_full: %+v %v", full, rep)
 	}
 	if p, _ := Profile(parts("profile/profile_private")); !p.Profile.IsPrivate || p.Profile.Status.String() != "PROFILE_STATUS_PRIVATE" {
