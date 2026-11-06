@@ -122,6 +122,7 @@ var (
 	DiscoverySightings = counterVec("discovery_sightings_total", "Accounts met in the posts read, by source (tags, coauthors, mentions, commenters).", "source")
 	DiscoveryVets      = counterVec("discovery_vets_total", "Discovery candidates vetted, by outcome (registered, below, private, gone, failed, already_registered).", "outcome")
 	DiscoveryQueue     = gaugeVec("discovery_candidates", "Discovery candidates by status (new counts those at ig.discovery.min_priority or above).", "status")
+	DiscoveryHeld      = gaugeVec("discovery_held", "1 while discovery starts no vets, by reason (schedule_behind, exits_resting, rests_unknown).", "reason")
 
 	// Registry sync (igs-registry-sync).
 	RegistrySyncRuns        = counterVec("registry_sync_runs_total", "Registry sync runs by status (ok, degraded, error).", "status")
