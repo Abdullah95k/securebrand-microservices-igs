@@ -495,8 +495,17 @@ ig:
     min_followers: 0
     flush_every: 10s
     # Profiles registered per UTC day (03:00 Iraq time); 0 = no cap. Over
-    # it, candidates wait as "capped", registered on the next days.
+    # it, candidates wait as "capped", registered on the next days. No cap
+    # in production (owner, 6 Nov 2026); tests, staging and a canary may
+    # set one.
     max_new_per_day: 0
+    # Discovery ranks below regular collection (owner, 6 Nov 2026): no new
+    # vet while a scheduled profile is a full interval overdue or its run
+    # still going a full interval after it started, or while more than
+    # hold_resting_share of a static proxy tier's exits rest (0: never
+    # held for rests). Running vets carry on.
+    hold_when_behind: true
+    hold_resting_share: 0.5
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

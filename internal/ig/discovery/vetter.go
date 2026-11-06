@@ -42,11 +42,17 @@ const maxVetAttempts = 3
 // Vetter is profile discovery's leader loop (igs-scheduler): every
 // ig.discovery.interval it decides the candidates whose vet came back,
 // queues for another vet those seen again long after their decision, and
-// starts vets for the most seen candidates, up to vet_in_flight at once.
+// starts vets for the most seen candidates, up to vet_in_flight at once,
+// while regular collection keeps up (hold.go).
 type Vetter struct {
 	DB       *pgxpool.Pool // schema ig
 	Dispatch *dispatch.Dispatcher
 	Cfg      *config.Config
+	// Rests, when set, are the exit rests the crawlers share: vets wait
+	// while most exits of a tier rest (ig.discovery.hold_resting_share).
+	Rests RestLoader
+	// held is the last hold reason, for logging its changes.
+	held string
 }
 
 // Tick runs one round.
@@ -68,8 +74,15 @@ func (v *Vetter) Tick(ctx context.Context) error {
 	if err := v.promote(ctx); err != nil {
 		return fmt.Errorf("discovery: promote capped: %w", err)
 	}
-	if err := v.start(ctx); err != nil {
-		return fmt.Errorf("discovery: start vets: %w", err)
+	reason, err := v.hold(ctx)
+	if err != nil {
+		return fmt.Errorf("discovery: schedule check: %w", err)
+	}
+	v.setHeld(reason)
+	if reason == "" {
+		if err := v.start(ctx); err != nil {
+			return fmt.Errorf("discovery: start vets: %w", err)
+		}
 	}
 	return v.gauges(ctx)
 }

@@ -51,6 +51,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
@@ -279,6 +280,9 @@ func (s *Stack) StartScheduler() {
 	}
 	if s.Cfg.IG.Discovery.Enabled {
 		vetter := &discovery.Vetter{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
+		if s.Cfg.IG.ShareExitRests {
+			vetter.Rests = ratelimit.NewExitRests(s.Redis, s.Cfg.Kafka.TopicPrefix)
+		}
 		loops = append(loops, func(ctx context.Context) error {
 			return scheduler.Every(ctx, "discovery", s.Cfg.IG.Discovery.Interval, vetter.Tick)
 		})

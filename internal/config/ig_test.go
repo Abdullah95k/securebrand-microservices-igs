@@ -29,6 +29,11 @@ func TestIGDefaults(t *testing.T) {
 	if g.Schedule.ReelsWindow != 7*24*time.Hour || g.Schedule.ReelsFullEvery != 7*24*time.Hour {
 		t.Fatalf("reels: window %s, full every %s", g.Schedule.ReelsWindow, g.Schedule.ReelsFullEvery)
 	}
+	// Discovery waits for regular collection, with no daily cap (the
+	// owner, 2026-11-06).
+	if d := g.Discovery; !d.HoldWhenBehind || d.HoldRestingShare != 0.5 || d.MaxNewPerDay != 0 {
+		t.Fatalf("discovery: hold_when_behind %v, hold_resting_share %v, max_new_per_day %d", d.HoldWhenBehind, d.HoldRestingShare, d.MaxNewPerDay)
+	}
 	if g.IdentityMaxRequestsMin != 500 || g.IdentityMaxRequestsMax != 750 || g.PageWallRest != 30*time.Minute {
 		t.Fatalf("identities: %d..%d rest %s", g.IdentityMaxRequestsMin, g.IdentityMaxRequestsMax, g.PageWallRest)
 	}
@@ -74,6 +79,7 @@ func TestIGValidate(t *testing.T) {
 		{"refresh", func(c *Config) { c.IG.Schedule.ProfileRefresh = time.Hour }, "ig.schedule.profile_refresh"},
 		{"reels window", func(c *Config) { c.IG.Schedule.ReelsWindow = -time.Hour }, "ig.schedule.reels_window"},
 		{"reels full pass", func(c *Config) { c.IG.Schedule.ReelsFullEvery = 0 }, "ig.schedule.reels_window"},
+		{"resting share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.HoldRestingShare = 1.5 }, "ig.discovery.hold_resting_share"},
 		{"identities", func(c *Config) { c.IG.IdentityMaxRequestsMax = 10 }, "ig.identity_max_requests_min"},
 		{"video", func(c *Config) { c.IG.Limits.VideoPolicy = "4k" }, "ig.limits.video_policy"},
 		{"pii", func(c *Config) { c.IG.Privacy.PIIMode = "none" }, "ig.privacy.pii_mode"},

@@ -63,10 +63,13 @@ config:
       pii_mode: full
     # Profile discovery: Iraqi profiles found from the registered ones,
     # registered without a cap at threshold or above (operations runbook).
+    # Vets wait while the schedule is behind or most of a tier's exits rest
+    # (hold_when_behind, hold_resting_share: the defaults).
     discovery:
       enabled: true
       threshold: 4
       vet_in_flight: 50
+      max_new_per_day: 0         # no cap in production (owner, 6 Nov 2026)
     # A byte budget suits a proxy plan billed per GB (0: none).
     budget:
       bytes_per_day: 0

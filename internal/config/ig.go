@@ -197,6 +197,14 @@ type IGDiscovery struct {
 	// Iraq time); 0 = no cap. Candidates over the cap wait as "capped" and
 	// are registered on the next days, highest score first.
 	MaxNewPerDay int `koanf:"max_new_per_day"`
+	// Discovery ranks below regular collection (owner, 6 Nov 2026). With
+	// HoldWhenBehind, no vet starts while a scheduled profile is a full
+	// interval overdue or its run is still going a full interval after it
+	// started. With HoldRestingShare > 0, none starts while more than that
+	// share of a static proxy tier's exits rest (the shared rests,
+	// ig.share_exit_rests). Vets already running carry on.
+	HoldWhenBehind   bool    `koanf:"hold_when_behind"`
+	HoldRestingShare float64 `koanf:"hold_resting_share"`
 }
 
 // IGPrivacy keeps igs's person keys apart from fbs's (ADR 0005 §1).
@@ -232,6 +240,9 @@ func (c *Config) validateIG() []error {
 		}
 		if d.Threshold <= 0 || d.VetInFlight <= 0 || d.Interval <= 0 || d.FlushEvery <= 0 || d.MinPriority < 0 || d.RevetAfter < 0 {
 			errs = append(errs, errors.New("ig.discovery: threshold, vet_in_flight, interval and flush_every must be > 0; min_priority and revet_after not negative"))
+		}
+		if d.HoldRestingShare < 0 || d.HoldRestingShare > 1 {
+			errs = append(errs, errors.New("ig.discovery.hold_resting_share must be in [0, 1]"))
 		}
 	}
 	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 || g.ExitRestSync < 0 ||

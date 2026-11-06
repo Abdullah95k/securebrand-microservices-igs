@@ -143,7 +143,7 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
 1. **Sightings.** Crawlers count the accounts they meet in the posts they read: tagged accounts, co-authors, mentions, and commenters (commenters only with `pii_mode: full`). Erased people are never counted.
    - They also record which registered accounts each one was met in (`ig.discovery_sources`). How many different registered accounts link to an account is its Iraqi audience (`sources`).
    - Each sighting adds to the account's priority: a co-author 3, a tag or a mention 2, a comment 1, a sighting on a post located in Iraq 2 more, and each new registered account it is met in 3.
-2. **Vetting.** Every `interval`, the leader scheduler vets the highest-priority accounts at `min_priority` (2) or above, up to `vet_in_flight` (50) at once. A vet is a backfill-lane (p2) job of kind `discovery`:
+2. **Vetting.** Every `interval`, the leader scheduler vets the highest-priority accounts at `min_priority` (2) or above, up to `vet_in_flight` (50) at once, [while regular collection keeps up](#discovery-waits-for-regular-collection). A vet is a backfill-lane (p2) job of kind `discovery`:
    - it reads the profile and its newest 12 posts' captions, 2 or 3 requests;
    - it writes them to `ig.discovery_candidates`;
    - it publishes nothing, so accounts that are not registered never reach the analysis.
@@ -203,12 +203,28 @@ Operations:
 - **Metrics:**
   - `igs_discovery_sightings_total{source}`;
   - `igs_discovery_vets_total{outcome}`;
-  - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet.
+  - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet;
+  - `igs_discovery_held{reason}`, 1 while vets wait for regular collection (below).
 - **Tuning:**
   - Raise `threshold` if registered profiles turn out not to be Iraqi; lower it, or `min_priority`, to find more.
   - Vets share the exits with crawling (about 10 s of one exit's time each) and wait behind scheduled runs (lane p2). The daily budget holds them with backfill.
   - To slow discovery, lower `vet_in_flight`.
-  - **Daily cap:** `max_new_per_day` (0, no cap, by default) is the most profiles discovery registers a day. The day starts at 00:00 UTC, 03:00 Iraq time. Over it, candidates wait as `capped` (`igs_discovery_candidates{status="capped"}`) and are registered on the next days. Profiles registered by hand or with `accept` neither count towards it nor wait for it. Setting the cap back to 0 lets every capped candidate through on the next vetter tick.
+  - **Daily cap:** `max_new_per_day` (0, no cap, by default) is the most profiles discovery registers a day. The day starts at 00:00 UTC, 03:00 Iraq time. Over it, candidates wait as `capped` (`igs_discovery_candidates{status="capped"}`) and are registered on the next days. Profiles registered by hand or with `accept` neither count towards it nor wait for it. Setting the cap back to 0 lets every capped candidate through on the next vetter tick. Production runs without a cap (the owner, 6 November 2026); tests, staging and a canary may set one.
+
+### Discovery waits for regular collection
+
+Discovery ranks below regular collection (the owner, 6 November 2026). Each vetter tick, before starting vets, the leader checks two things:
+
+| Check | Setting (default) | Vets wait while |
+|---|---|---|
+| The schedule is on time | `ig.discovery.hold_when_behind` (true) | an enabled, unpaused profile is overdue by its own interval (3 h for the long tail, 10 min for hot), or a scheduled run is still queued or running its full interval after it started (its next slot gets skipped) |
+| No tier is mostly resting | `ig.discovery.hold_resting_share` (0.5) | more than half of a static proxy tier's exits rest (rate limit, checkpoint or login page), as the crawlers share them in Valkey (`ig.share_exit_rests`). Gateway tiers are left out: their exits are sessions, with no fixed number |
+
+- `igs_discovery_held{reason}` is 1 while vets wait: `schedule_behind`, `exits_resting`, or `rests_unknown` (Valkey did not answer; vets wait rather than guess). The scheduler logs each change.
+- Vets already running finish. Deciding, rescoring and registering go on: they read nothing from Instagram.
+- While discovery waits, `igs_discovery_candidates{status="new"}` grows. That is expected; once collection keeps up again, the vetter works through the queue, highest priority first.
+- If it waits for hours, collection itself is behind: see [Schedule](#schedule) (`IgsIgScheduleLag`) and [Block storm](#block-storm-block-rate--10).
+- `hold_when_behind: false` and `hold_resting_share: 0` turn the checks off.
 
 ### The place list
 

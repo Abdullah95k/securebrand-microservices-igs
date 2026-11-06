@@ -101,6 +101,9 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	}
 	if cfg.IG.Discovery.Enabled {
 		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg}
+		if cfg.IG.ShareExitRests {
+			vetter.Rests = ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix)
+		}
 		loops = append(loops, func(ctx context.Context) error {
 			return scheduler.Every(ctx, "discovery", cfg.IG.Discovery.Interval, vetter.Tick)
 		}, func(ctx context.Context) error {
