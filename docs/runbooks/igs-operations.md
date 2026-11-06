@@ -388,6 +388,13 @@ The fleet-wide rate limit (each exit's pace, `ig.exit_rps`, and the query limits
   - KEDA scales the persister on `ig.comment.v1`, `ig.post.v1` and `ig.post_metrics.v1` lag.
 - **Normalizer lag (`IgsIgNormalizerLag`):** `content.*` events reach ClickHouse, the analysis and the alerts late (the shared contract below).
   - KEDA scales igs-normalizer on the same topics' lag; check its pods and Kafka.
+- **A handler keeps panicking (`IgsIgHandlerPanics`, critical):** a record makes its consumer's code panic. The consumer turns the panic into an error, so the record is retried with backoff and its partition waits behind it: that partition's lag grows while the others move.
+  - The log line `kafka: handler panicked` names the group, topic, partition and offset, with the stack. `igs_kafka_handler_panics_total{group}` counts them.
+  - Fix the bug and roll out; the record goes through once it no longer panics. (The crawler's own tasks are different: a task that panics is dead-lettered at once, so `IgsIgHandlerPanics` comes from the persister, the normalizer, the media downloader or the eraser.)
+
+**Rebalances.** When Kafka moves a partition to another pod (a rollout, a scale-up), the pod that loses it cancels its records still running there and starts none of those still waiting, and never commits them, so the new owner runs them once (ported from fbs `cfc4295`, `ca4769e`, `907e08a`).
+
+**The leader lock.** The leader scheduler holds a Postgres advisory lock on one connection and checks it every few seconds, each check bounded to 3 s: a hung connection counts as lost, and the leader's work stops before another scheduler can take the lock. A connection whose unlock fails is closed, never returned to the pool still holding the lock (fbs `9b1863c`).
 
 The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka exporter is needed. The crawler groups are `igs-ig-crawler-<stage>-<lane>`, the persister's is `igs-ig-persister`, the normalizer's `igs-ig-normalizer` and the downloader's `igs-ig-media-downloader`. All of them carry `kafka.topic_prefix`.
 

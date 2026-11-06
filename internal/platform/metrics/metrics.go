@@ -126,6 +126,7 @@ var (
 	APIRequests          = counterVec("api_requests_total", "API requests.", "route", "code")
 	KafkaProduce         = counterVec("kafka_produce_total", "Produced records.", "topic", "outcome")
 	KafkaCommitted       = counterVec("kafka_commits_total", "Offset commits.", "group", "outcome")
+	KafkaHandlerPanics   = counterVec("kafka_handler_panics_total", "Record handlers that panicked (the record is retried; its partition waits).", "group")
 	ConsumerLag          = gaugeVec("kafka_consumer_lag", "Records behind the end of each topic, per consumer group (leader scheduler).", "group", "topic")
 
 	// Profile discovery (M11).

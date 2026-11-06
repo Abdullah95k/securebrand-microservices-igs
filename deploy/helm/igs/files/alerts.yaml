@@ -300,6 +300,21 @@ groups:
             On-demand work waits. KEDA should be scaling the stage; check its
             max replicas, the lane slots and the AIMD ceiling.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
+      - alert: IgsIgHandlerPanics
+        # A record handler panicked: the consumer turns it into an error, so
+        # the record is retried with backoff and its partition waits behind
+        # it (ported from fbs 907e08a).
+        expr: sum by (group) (increase(igs_kafka_handler_panics_total[10m])) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.group }}: a record handler keeps panicking"
+          description: >-
+            The record is retried with backoff and its partition waits behind
+            it (its lag grows). The handler's log line "kafka: handler
+            panicked" names the topic, partition and offset and has the stack.
+            Fix the bug; the record goes through once it no longer panics.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
       - alert: IgsIgPersisterLag
         expr: max by (topic) (igs:ig_leader:kafka_consumer_lag{group="igs-ig-persister"}) > 50000
         for: 15m
