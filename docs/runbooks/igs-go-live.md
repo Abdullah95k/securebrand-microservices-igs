@@ -27,8 +27,8 @@ Buy exits for where you want to be in a month. Phase 0 found 3 of 10 exits flagg
 |---|---|
 | Kubernetes | 1.30 (what `make chart-check` validates against), with [KEDA](https://keda.sh) (crawlers and the persister scale on Kafka lag); the Prometheus Operator and Grafana sidecar for alerts and the dashboard |
 | Postgres 18 | a database `igs` (schema `ig` is created by the install hook). Partitions are created by `igs-scheduler`. Data is kept forever, so plan storage to grow with the number of profiles ([retention](igs-operations.md#data-retention)) |
-| Kafka | 3 brokers; topics are created by the install hook (`configs/ig/topics.yaml`, sized for 300k profiles; `hooks.topicPartitionsCap` lowers them) |
-| Schema registry | optional (`config.kafka.schema_registry.url`, `hooks.schemas: true`) |
+| Kafka | 3 brokers. **On the shared production Kafka, the platform creates igs's topics** from `configs/ig/topics.yaml`, and igs's topic hook is off (`hooks.topics: false` in `examples/production.yaml`). On a Kafka of igs's own, the install hook creates the missing topics and never changes existing ones ([topics](igs-operations.md#topics-and-schemas)) |
+| Schema registry | optional. On the shared registry the platform registers the subjects, so `hooks.schemas` stays false. igs never registers the `content.*` subjects there |
 | Valkey (or Redis) 7+ | job accounting, leases, checkpoints, rate limits. Plan about 5 GB at 300k profiles ([sizing](igs-operations.md#capacity-and-sizing)) |
 | S3 | two buckets: media and raw captures. Media files stay off until the analysis service exists (D5) |
 | ISP proxies | the exits from step 1 |
@@ -96,8 +96,8 @@ helm upgrade --install igs oci://ghcr.io/abdullah95k/charts/igs --version 1.0.0 
 
 The pre-install hooks:
 1. migrate schema `ig`, seed the query registry and create the partitions;
-2. create the topics;
-3. with `hooks.schemas`, register the schemas.
+2. with `hooks.topics` (off in production: the platform creates the topics), create the missing topics;
+3. with `hooks.schemas` (off in production), register the `ig.*` schemas.
 
 A failing hook stops the install; its Job's log says why.
 

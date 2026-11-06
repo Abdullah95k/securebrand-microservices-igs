@@ -9,5 +9,6 @@ What the igs session has answered for the SecureBrand master session, as files t
 | [`igs-contract-notes.md`](igs-contract-notes.md) | igs's `content.*` draft against the schema plan; ends with the answers to REQ-003 |
 | [`igs-gaps.md`](igs-gaps.md) | igs against the service standard (04), with fixes, efforts and plans |
 | [`igs-contract-review.md`](igs-contract-review.md) | igs's review of the contract draft v0.1 (REQ-012) |
+| [`igs-fixes.md`](igs-fixes.md) | The owner's approved fixes (REQ-008): one row per fix, with its PR, status and evidence |
 
 Written on 5 and 6 November 2026 (Iraq time), from `main` at `d50f3ee` (the pack) and `8377774` (REQ-003 and REQ-012).

@@ -2,8 +2,8 @@
 // and the ig topics).
 //
 //	igsctl migrate up|down|status        schema ig's migrations, registry seed and partitions
-//	igsctl kafka apply                    create/grow topics from configs/ig/topics.yaml
-//	igsctl schemas apply|check            register the ig.v1 schemas (BACKWARD_TRANSITIVE) / dry run
+//	igsctl kafka apply [--apply]          compare configs/ig/topics.yaml with the cluster; --apply creates missing topics
+//	igsctl schemas apply|check            register the ig.v1 schemas (BACKWARD_TRANSITIVE) / dry run; content.* left out
 //	igsctl apikey create --name N --scopes jobs:write,profiles:write,data:read
 //	igsctl apikey revoke --prefix P
 //	igsctl registry list
@@ -30,8 +30,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: igsctl [--config file] <command> [args]
 commands:
   migrate up|down|status
-  kafka apply [--partitions-cap N] [--replicas N]
-  schemas apply | schemas check
+  kafka apply [--apply] [--grow-partitions] [--set-retention] [--include-content] [--partitions-cap N] [--replicas N]
+  schemas apply | schemas check [--include-content]
   apikey create --name NAME [--scopes s1,s2] [--rate N]
   apikey revoke --prefix PREFIX
   registry list | registry set --file query.json | registry import --file registry.yaml [--keep-promoted]
@@ -71,7 +71,7 @@ func main() {
 	case "kafka apply":
 		err = kafkaApply(ctx, cfg, rest)
 	case "schemas apply", "schemas check":
-		err = schemasApply(ctx, cfg, sub == "check")
+		err = schemasApply(ctx, cfg, sub == "check", rest)
 	case "apikey create":
 		err = apikeyCreate(ctx, cfg, rest)
 	case "apikey revoke":

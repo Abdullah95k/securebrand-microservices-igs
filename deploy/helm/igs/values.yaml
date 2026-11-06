@@ -129,19 +129,34 @@ keda:
   authParams: [sasl, username, password]
 
 # Hooks run `igsctl migrate up` (schema ig, the query registry seed,
-# partitions), `igsctl kafka apply` (configs/ig/topics.yaml) and, when
-# enabled, `igsctl schemas apply` before installs and upgrades.
+# partitions), `igsctl kafka apply --apply` (configs/ig/topics.yaml) and,
+# when enabled, `igsctl schemas apply` before installs and upgrades.
+#
+# On a Kafka or Schema Registry shared with other services, the platform
+# creates the topics and registers the subjects: set topics and schemas to
+# false there (examples/production.yaml does).
 hooks:
   migrate: true
+  # Creates the topics that don't exist yet. Existing topics are left
+  # exactly as they are unless topicsGrowPartitions or topicsSetRetention
+  # allows that change (set it for one upgrade, then unset it).
   topics: true
   topicReplicas: 3
   # Caps each topic's partitions (0: configs/ig/topics.yaml's counts, sized
   # for 300k profiles every 3 hours). A one-node rehearsal cluster needs it.
   topicPartitionsCap: 0
+  topicsGrowPartitions: false
+  topicsSetRetention: false
+  # The content.* topics belong to the platform. Only a stack with a Kafka
+  # of its own (a rehearsal, the fake-Instagram soak) creates them.
+  topicsIncludeContent: false
   # `igsctl schemas apply`: registers the ig.v1 schemas with
   # config.kafka.schema_registry.url (BACKWARD_TRANSITIVE). An incompatible
-  # contract change fails the hook, and with it the upgrade.
+  # contract change fails the hook, and with it the upgrade. The content.*
+  # subjects are left out unless schemasIncludeContent (a registry of igs's
+  # own).
   schemas: false
+  schemasIncludeContent: false
   # `igsctl clickhouse migrate`: creates the shared content store's tables
   # (with components.content-writer enabled).
   clickhouse: true

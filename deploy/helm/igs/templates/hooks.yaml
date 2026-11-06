@@ -1,10 +1,15 @@
 {{- $root := . -}}
 {{- $jobs := list -}}
 {{- if .Values.hooks.migrate }}{{ $jobs = append $jobs (dict "name" "migrate" "args" (list "migrate" "up")) }}{{ end -}}
-{{- $topicArgs := list "kafka" "apply" "--replicas" (toString .Values.hooks.topicReplicas) -}}
+{{- $topicArgs := list "kafka" "apply" "--apply" "--replicas" (toString .Values.hooks.topicReplicas) -}}
 {{- if .Values.hooks.topicPartitionsCap }}{{ $topicArgs = concat $topicArgs (list "--partitions-cap" (toString .Values.hooks.topicPartitionsCap)) }}{{ end -}}
+{{- if .Values.hooks.topicsGrowPartitions }}{{ $topicArgs = append $topicArgs "--grow-partitions" }}{{ end -}}
+{{- if .Values.hooks.topicsSetRetention }}{{ $topicArgs = append $topicArgs "--set-retention" }}{{ end -}}
+{{- if .Values.hooks.topicsIncludeContent }}{{ $topicArgs = append $topicArgs "--include-content" }}{{ end -}}
 {{- if .Values.hooks.topics }}{{ $jobs = append $jobs (dict "name" "topics" "args" $topicArgs) }}{{ end -}}
-{{- if .Values.hooks.schemas }}{{ $jobs = append $jobs (dict "name" "schemas" "args" (list "schemas" "apply")) }}{{ end -}}
+{{- $schemaArgs := list "schemas" "apply" -}}
+{{- if .Values.hooks.schemasIncludeContent }}{{ $schemaArgs = append $schemaArgs "--include-content" }}{{ end -}}
+{{- if .Values.hooks.schemas }}{{ $jobs = append $jobs (dict "name" "schemas" "args" $schemaArgs) }}{{ end -}}
 {{- if and .Values.hooks.clickhouse (index .Values.components "content-writer" "enabled") }}{{ $jobs = append $jobs (dict "name" "clickhouse" "args" (list "clickhouse" "migrate")) }}{{ end -}}
 {{- if .Values.paused }}{{ $jobs = list }}{{ end -}}
 {{- range $jobs }}

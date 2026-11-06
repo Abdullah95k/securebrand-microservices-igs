@@ -168,8 +168,12 @@ type World struct {
 	posts    map[int64]*Post
 }
 
-// Epoch is the newest post's time in every world.
-var Epoch = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+// Epoch is the newest post's time in every world: noon UTC of the day
+// before today, so it is 12 to 36 hours old whenever a world is made. A
+// fixed date aged out: igs re-reads posts of the last 7 days
+// (ig.schedule.post_refresh_window), and once the fixed newest post was
+// older than that, the schedule tests found nothing to refresh.
+var Epoch = time.Now().UTC().Truncate(24 * time.Hour).Add(-12 * time.Hour)
 
 // NewWorld generates a world from s.
 func NewWorld(s Spec) *World {
