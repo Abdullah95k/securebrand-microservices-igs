@@ -5,11 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	igtopics "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
 )
@@ -120,5 +123,72 @@ func TestReadKeywordCSV(t *testing.T) {
 		{Term: "موصلي", Language: "ar", Group: "nineveh"}, {Term: "Kalak", Language: "en", Enabled: true}}
 	if !slices.Equal(ks, want) {
 		t.Fatalf("got %+v", ks)
+	}
+}
+
+// The platform's content.* topics and subjects are left out unless asked
+// for (a Kafka or Schema Registry of igs's own); igs's own are all kept.
+func TestPlatformTopicsLeftOut(t *testing.T) {
+	doc, err := loadTopics(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, skipped := ownTopics(doc.Topics, false)
+	if !slices.Equal(skipped, igtopics.Content) {
+		t.Errorf("skipped %v, want the content topics %v", skipped, igtopics.Content)
+	}
+	for _, s := range own {
+		if platformOwned(s.Name) {
+			t.Errorf("%s kept without --include-content", s.Name)
+		}
+	}
+	if len(own)+len(skipped) != len(doc.Topics) {
+		t.Errorf("%d kept + %d skipped of %d", len(own), len(skipped), len(doc.Topics))
+	}
+	all, none := ownTopics(doc.Topics, true)
+	if len(all) != len(doc.Topics) || len(none) != 0 {
+		t.Errorf("--include-content kept %d of %d, skipped %v", len(all), len(doc.Topics), none)
+	}
+
+	schemas := ownSchemas(false)
+	for _, c := range igtopics.Content {
+		if _, ok := schemas[c]; ok {
+			t.Errorf("subject for %s registered without --include-content", c)
+		}
+	}
+	if _, ok := schemas[igtopics.Post]; !ok {
+		t.Errorf("igs's own %s subject left out", igtopics.Post)
+	}
+	if got := len(ownSchemas(true)); got != len(igtopics.ValueSchemas) {
+		t.Errorf("--include-content: %d subjects, want %d", got, len(igtopics.ValueSchemas))
+	}
+}
+
+// The dry run says what would change and that nothing was; an apply names
+// the flag each held change needs.
+func TestPrintTopicDiffs(t *testing.T) {
+	diffs := []kafka.TopicDiff{
+		{Topic: "igs.task.dlq", WantPartitions: 6, WantRetention: 336 * time.Hour, Changes: []string{"create"}},
+		{Topic: "ig.post.v1", Exists: true, HavePartitions: 12, WantPartitions: 48, HaveRetention: 720 * time.Hour,
+			WantRetention: 168 * time.Hour, Changes: []string{"add partitions", "lower retention"},
+			Held: []string{"add partitions", "lower retention"}},
+		{Topic: "ig.job.v1", Exists: true, HavePartitions: 12, WantPartitions: 12, HaveRetention: 168 * time.Hour, WantRetention: 168 * time.Hour},
+	}
+	var dry strings.Builder
+	printTopicDiffs(&dry, diffs, []string{"content.post.v1"}, "", kafka.ApplyOptions{})
+	for _, want := range []string{"would create", "would add partitions, lower retention", "12 -> 48", "720h -> 168h",
+		"unchanged", "skipped: the platform's topic", "dry run: 1 to create, 1 existing with differences, 1 unchanged, 1 skipped. Nothing was changed"} {
+		if !strings.Contains(dry.String(), want) {
+			t.Errorf("dry run output lacks %q:\n%s", want, dry.String())
+		}
+	}
+	diffs[0].Applied = []string{"create"}
+	var applied strings.Builder
+	printTopicDiffs(&applied, diffs, nil, "", kafka.ApplyOptions{Apply: true})
+	for _, want := range []string{"done: create", "held: add partitions, lower retention (needs --grow-partitions and --set-retention)",
+		"applied: 1 created, 0 changed, 1 with changes held back, 1 unchanged, 0 skipped"} {
+		if !strings.Contains(applied.String(), want) {
+			t.Errorf("apply output lacks %q:\n%s", want, applied.String())
+		}
 	}
 }

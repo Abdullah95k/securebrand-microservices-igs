@@ -95,7 +95,7 @@ jobs:
           # image (the runner's are older than Postgres 18 and refuse it).
           IGS_TEST_PG_TOOLS: docker run --rm -i --network host postgres:18-alpine
           IGS_BROWSER_NO_SANDBOX: "1"
-        run: go test -count=1 -timeout 20m ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./internal/content/... ./internal/keywords/... ./cmd/igsctl/...
+        run: go test -count=1 -timeout 20m ./internal/platform/kafka/... ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./internal/content/... ./internal/keywords/... ./cmd/igsctl/...
       - name: igs Phase 0 dry run (fakeig, rotated doc_ids; must say GO)
         run: make igs-phase0-dryrun
 

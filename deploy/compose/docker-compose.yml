@@ -79,7 +79,7 @@ services:
     environment: *igs-env
     volumes:
       - ./local.yaml:/etc/igs/local.yaml:ro
-    entrypoint: ["/usr/local/bin/igsctl", "kafka", "apply", "--partitions-cap", "3", "--replicas", "1"]
+    entrypoint: ["/usr/local/bin/igsctl", "kafka", "apply", "--apply", "--include-content", "--partitions-cap", "3", "--replicas", "1"]
     depends_on:
       redpanda: {condition: service_healthy}
 

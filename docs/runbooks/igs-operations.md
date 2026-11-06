@@ -12,7 +12,7 @@ The binaries:
 
 `igsctl` is the operations CLI.
 
-Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and `igsctl kafka apply` before each install and upgrade. Runbooks for the other jobs:
+Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and, on a Kafka of igs's own, `igsctl kafka apply --apply` before each install and upgrade ([topics and schemas](#topics-and-schemas)). Runbooks for the other jobs:
 - going live (release, secrets, install, canary, ramp): [`igs-go-live.md`](igs-go-live.md);
 - the Phase 0 kit: [`igs-phase0.md`](igs-phase0.md);
 - the probe: [`igs-probe.md`](igs-probe.md);
@@ -301,6 +301,27 @@ When page loads stop carrying the tokens and doc_ids the client needs (JavaScrip
 1. With `ig.capture_raw: failures` (the default), the failing responses are in the raw bucket under `raw-failures/<query>/`.
 2. Fix the parser in `internal/ig/parse` against them. Add the scrubbed response as a golden fixture (`internal/ig/fixtures`), then release.
 3. `IgsIgOptionalFieldDrift` is the quiet version: an optional field went missing far more often than a week ago. Nothing fails, but the data loses the field.
+
+## Topics and schemas
+
+**On the shared production Kafka and Schema Registry, the platform creates igs's topics and registers its subjects.** igs's chart creates none there (`hooks.topics: false`, `hooks.schemas: false` in `examples/production.yaml`). The `content.*` topics and subjects always belong to the platform.
+
+`igsctl kafka apply` compares `configs/ig/topics.yaml` with a cluster:
+
+- **By default it is a dry run.** It prints each topic's partitions and retention, on the cluster and in the file, and what applying would do. Nothing changes.
+- `--apply` creates the topics that don't exist yet. **Existing topics stay exactly as they are**, and the output lists each held change with the flag it needs:
+  - `--grow-partitions` adds partitions (it moves keys, so ordering breaks across the change);
+  - `--set-retention` changes retention, up or down (lowering it deletes records sooner).
+- `content.*` is skipped unless `--include-content`, which is only for a Kafka of igs's own (tests, rehearsals, the fake-Instagram soak).
+- It never deletes a topic, removes partitions or changes a replication factor.
+
+To see the difference on a cluster igs may change, from a pod with igs's configuration:
+
+```bash
+igsctl kafka apply
+```
+
+`igsctl schemas apply` registers the `ig.*` subjects (`<topic>-value`, `BACKWARD_TRANSITIVE`); `schemas check` only checks them. Both leave out the `content.*` subjects unless `--include-content` (a registry of igs's own).
 
 ## Kafka lag
 

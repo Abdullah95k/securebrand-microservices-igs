@@ -50,6 +50,9 @@ hooks:
   topicReplicas: 1
   # One small broker: production's partition counts exceed what it holds.
   topicPartitionsCap: 3
+  # The rehearsal has a Kafka of its own, so it creates the content topics
+  # the normalizer writes.
+  topicsIncludeContent: true
 
 components:
   api: {replicas: 1, pdb: null, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}}
