@@ -44,9 +44,10 @@ func TestIGDefaults(t *testing.T) {
 	if g.ExitPageLoadsPerDay != 0 {
 		t.Fatalf("exit_page_loads_per_day %d, want 0 (off)", g.ExitPageLoadsPerDay)
 	}
-	// Collected data is kept forever (the owner, 2026-11-03).
-	if r := c.Privacy.Retention; r.CommentsDays != 0 || r.MetricsDays != 0 || r.AuthorsInactiveDays != 0 {
-		t.Fatalf("retention %+v: comments, metrics and authors are kept forever", r)
+	// Everything is kept forever (the owner, 2026-11-03 and 2026-11-06):
+	// collected data, media rows and the job log.
+	if r := c.Privacy.Retention; r != (Retention{}) {
+		t.Fatalf("retention %+v: nothing expires by age", r)
 	}
 	if len(g.FingerprintProfiles) == 0 || g.FingerprintProfile != "chrome_152" {
 		t.Fatalf("fingerprints: %s %v", g.FingerprintProfile, g.FingerprintProfiles)
