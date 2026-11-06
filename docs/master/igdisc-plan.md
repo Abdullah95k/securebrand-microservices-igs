@@ -387,10 +387,9 @@ None of the reliabilities below has been measured as precision or recall. They a
 
 **Questions for the master, answered on 6 November (18:15):**
 - **M1. Keyword IDs:** `<group>:<language>:<folded spelling>`, with the folding defined once in the contract.
-  - Contract v1.1.0 adds `contracts.KeywordID(group, language, spelling)`. igdisc uses that helper, not a copy of its own.
-  - The folding: Unicode NFKC; Latin lower-cased; Arabic diacritics and tatweel removed; أ إ آ ٱ → ا, ة → ه, ى → ي, ک → ك, ی → ي; Kurdish letters (ڕ ڵ ۆ ێ ە) kept; spaces collapsed to one.
-  - This differs from igs's display fold (`internal/keywords`), which writes ی and ک. The ID uses the contract's fold only. The matching still uses igs's fold.
-- **M2. Contract additions:** both accepted for v1.1.0: `SOURCE_LOCATION_PAGE = 18`, and `Evidence.content_time = 9`, of type `content.v1.Time`, so the estimate rule (D-013) applies to it.
+  - Contract v1.1.0 (published 6 November, `5e13d2f`) adds `contracts.KeywordID(group, language, spelling)` and `contracts.FoldKeyword`. igdisc uses those helpers, not copies of its own, and computes the ID from the keyword list's stored spelling.
+  - After this session pointed out a mismatch, `FoldKeyword` is now fbs's and igs's `Normalize`. Checked on 6 November: all 393 spellings of the shared list, plus ZWNJ, tatweel, harakat and Arabic-Indic digit cases, fold the same in both. For example, هه‌ولێر and هەولێر both give `erbil:ckb:ههولێر`.
+- **M2. Contract additions:** both are in v1.1.0: `SOURCE_LOCATION_PAGE = 18`, and `Evidence.content_time = 9`, of type `content.v1.Time`, so the estimate rule (D-013) applies to it. v1.1.0 also adds `conformance.Options{Production: true, Canary: true}`, which allows `CAPPED` during the canary week only.
 - **M3. The Google discovery tool:** outside the platform's scope; no session runs it. igdisc doesn't plan on it. If it ever sends Instagram links, they arrive as ordinary candidates with `target_platform: ig`.
 - **M4. The topic:** `discovery.candidate.v1` comes in the platform's first production apply (3 partitions, 7 days, replication 3), once the owner has fixed some GitHub secrets. The master will say when it exists. The platform registers its schema.
 
