@@ -11,6 +11,7 @@
 //	igsctl registry import --file phase0/out/registry.yaml   make every query of a registry file active
 //	igsctl dlq replay [--reason R] [--max N] [--persist]
 //	igsctl discovery keywords seed|import --file F|list|enable ID|disable ID   the shared Iraq place list
+//	igsctl health                          what to check first: schedule, jobs, last data, exits, lag (exit 1 when BAD)
 package main
 
 import (
@@ -41,7 +42,8 @@ commands:
   profiles import --file accounts.txt [--client NAME] [--tier hot|warm|long_tail|auto | --interval 30m] [--paused] [--no-backfill]
   profiles tier --file accounts.txt (--tier hot|warm|long_tail|auto | --interval 30m)
   profiles pause --file accounts.txt | profiles resume --file accounts.txt
-  clickhouse migrate`)
+  clickhouse migrate
+  health`)
 	os.Exit(2)
 }
 
@@ -92,6 +94,8 @@ func main() {
 		err = profilesImport(ctx, cfg, rest)
 	case "clickhouse migrate":
 		err = clickhouseMigrate(ctx, cfg)
+	case "health ":
+		err = healthCmd(ctx, cfg)
 	case "profiles tier":
 		err = profilesTier(ctx, cfg, rest)
 	case "profiles pause", "profiles resume":

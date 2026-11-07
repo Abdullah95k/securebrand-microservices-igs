@@ -88,9 +88,9 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 |---|---|---|---|---|
 | F1 | **Partly** | Prefix `igs_`, 58 metric variables: requests by outcome and query, blocks and rests, items persisted per table, proxy and response bytes, consumer lag, job outcomes, drift, discovery, budget | **No session-pool size gauge** (see C5) | 0.25 day (with C5) |
 | F2 | **Partly** | `slog` JSON. No content, comment text, credentials or cookies | Lines carry exit addresses (D4) and profile references (`u:<username>`) of monitored accounts. Fix: log the user pk and exit names only | 0.5 day |
-| F3 | **Partly** | 29 PrometheusRule alerts, each linked to a runbook anchor (checked by the monitoring consistency test) | Missing from the required list:<br>• "no data for N minutes" (no alert on posts or comments published per interval);<br>• "session pool low" (C5);<br>• "memory near limit" (container memory against its limit).<br>Fix: three alerts | 0.5 day |
+| F3 | **Met** | 35 PrometheusRule alerts, each linked to a runbook anchor (checked by the monitoring consistency test), including "no data" (`IgsIgNoData`), "session pool low" (`IgsIgIdentityPoolLow`) and "memory near limit" (`IgsIgMemoryNearLimit`) (REQ-008 fixes 7 and 19) | - | - |
 | F4 | **Met** | Dashboard "igs / Instagram overview" (`igs-ig-overview.json`), off by default in values | - | - |
-| F5 | **Partly** | `docs/runbooks/igs-operations.md`, "Key signals": each signal with what good looks like | Not a list of read-only **commands** like fbs's `pilot.md` step 4. Fix: `igsctl health`, which prints counts (jobs, lag, blocks, exits resting, identities, last post seen), plus a runbook step with one command per block | 1 day |
+| F5 | **Met** | `igsctl health`: one read-only report (profiles on the schedule, schedule lag, the last hour's jobs, the last data stored, exits resting, consumer lag), with what to do for each line not OK; the runbook's "Health" section explains each line (REQ-008 fix 19) | - | - |
 
 ## G. Testing and CI
 
