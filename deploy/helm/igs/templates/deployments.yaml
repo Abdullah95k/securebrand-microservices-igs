@@ -26,6 +26,9 @@ spec:
         checksum/config: {{ toYaml $root.Values.config | sha256sum }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
+        {{- with merge (deepCopy ($c.podAnnotations | default dict)) ($root.Values.podAnnotations | default dict) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}

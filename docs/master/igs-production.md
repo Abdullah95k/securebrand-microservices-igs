@@ -73,7 +73,7 @@ Outside the platform (a direct connection), igs sets its search path itself, aft
 
 **`proxies`**, key `proxies.yaml`: the ISP exits, as a config layer (`ig.proxy.tiers`, one tier named `isp`); `phase0/proxies.example.yaml` shows the shape.
 - Only the components that reach Instagram mount it: `crawler-profile`, `crawler-post` and `registry-sync`. They wait for the Secret, so they never start without their proxies.
-- The scheduler mounts it as optional. Discovery's hold counts each tier's exits from it, so once the Secret exists, restart the scheduler: `kubectl -n igs rollout restart deployment/igs-scheduler`. Until then, discovery isn't held when most exits rest.
+- The scheduler mounts it as optional. Discovery's hold counts each tier's exits from it, so once the Secret exists, restart the scheduler. Through GitOps, set or change an annotation on its pods: `components.scheduler.podAnnotations` (for example `igs/proxies-added: "2026-11-07"`). `podAnnotations` at the top level applies to every component. Until the restart, discovery isn't held when most exits rest.
 - The migrate hook, the API, the persister, the normalizer, the media services and `crawler-retry` never mount it. igs migrates and starts before the proxies exist.
 - `make igs-chart-check` checks this (`scripts/chart-secrets.py`).
 

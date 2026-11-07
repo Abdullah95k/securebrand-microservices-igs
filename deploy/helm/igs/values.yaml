@@ -208,6 +208,12 @@ api:
 # (docs/runbooks/igs-backups.md).
 paused: false
 
+# Annotations on every component's pods; a component's own podAnnotations
+# win. Changing one restarts the pods, e.g. the scheduler once the proxies
+# Secret exists, through GitOps:
+#   components: {scheduler: {podAnnotations: {igs/proxies-added: "2026-11-07"}}}
+podAnnotations: {}
+
 # One Deployment per component. "lag" lists consumer groups/topics KEDA
 # watches (group and topic names get config.kafka.topic_prefix prepended).
 # Crawler groups are igs-ig-crawler-<stage>-<lane>.
