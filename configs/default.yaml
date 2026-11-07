@@ -524,6 +524,9 @@ ig:
     # held for rests). Running vets carry on.
     hold_when_behind: true
     hold_resting_share: 0.5
+    # Vets send at most this share of each proxy exit's rate (ig.exit_rps),
+    # fleet-wide, so regular collection keeps the rest (D-027); 0: no cap.
+    exit_share: 0.1
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

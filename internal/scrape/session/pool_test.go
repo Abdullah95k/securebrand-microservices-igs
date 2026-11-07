@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,23 +165,28 @@ func TestRateLimitCooldownGrows(t *testing.T) {
 }
 
 type pacer struct {
-	mu   sync.Mutex
-	keys []string
+	mu    sync.Mutex
+	keys  []string
+	rates []float64
 }
 
+// WaitRate records the key and rate. An exit's own key must carry the
+// pool's ExitRPS.
 func (p *pacer) WaitRate(_ context.Context, key string, rps float64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if rps != 0.25 {
+	if !strings.HasSuffix(key, ":"+ShareDiscovery) && rps != 0.25 {
 		return fmt.Errorf("rps %v", rps)
 	}
 	p.keys = append(p.keys, key)
+	p.rates = append(p.rates, rps)
 	return nil
 }
 
 // ispPool is a pool on three ISP exits named by port on one host, as some
 // providers name theirs, resting an exit 10 minutes on a rate limit and 30
-// on a checkpoint, and pacing each exit at 0.25 requests a second.
+// on a checkpoint, and pacing each exit at 0.25 requests a second, a tenth
+// of it for discovery.
 func ispPool(t *testing.T, maxPerTier int) (*Pool, *proxy.Pool, *pacer) {
 	t.Helper()
 	proxies, err := proxy.New(config.Proxy{
@@ -198,7 +205,8 @@ func ispPool(t *testing.T, maxPerTier int) (*Pool, *proxy.Pool, *pacer) {
 	pc := &pacer{}
 	pool, err := NewPool(PoolConfig{BaseURL: "https://www.instagram.com", Profile: "chrome_146", IdentityRPS: 1000, IdentityBurst: 10,
 		MaxRequestsMin: 1000, MaxRequestsMax: 1001, MaxPerTier: maxPerTier, ExitRPS: 0.25, ExitPacer: pc,
-		Rest: map[detect.Class]time.Duration{detect.RateLimited: 10 * time.Minute, detect.Checkpoint: 30 * time.Minute}},
+		Shares: map[string]float64{ShareDiscovery: 0.1},
+		Rest:   map[detect.Class]time.Duration{detect.RateLimited: 10 * time.Minute, detect.Checkpoint: 30 * time.Minute}},
 		proxies, fps, func(transport.Options) (transport.Doer, error) { return transport.NewStd(time.Second), nil })
 	if err != nil {
 		t.Fatal(err)
@@ -344,6 +352,43 @@ func TestExitPacing(t *testing.T) {
 	}
 	if err := d.Wait(ctx); err != nil || len(pc.keys) != 3 {
 		t.Fatalf("direct egress is not paced as an exit: %v %v", pc.keys, err)
+	}
+}
+
+// A request marked as discovery's waits for discovery's share of its exit
+// (a tenth of the exit's rate, its own key) and then for the exit like any
+// other; an unmarked request, or one of a class with no share, waits only
+// for the exit. Direct egress is paced for neither.
+func TestExitShare(t *testing.T) {
+	pool, _, pc := ispPool(t, 8)
+	ctx := context.Background()
+	vet := WithShare(ctx, ShareDiscovery)
+	a, _ := pool.Acquire(ctx, "isp")
+	x := "exit:" + a.Endpoint.Exit()
+	for _, c := range []context.Context{vet, ctx, WithShare(ctx, "other")} {
+		if err := a.Wait(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := []string{x + ":discovery", x, x, x}; !slices.Equal(pc.keys, want) {
+		t.Fatalf("paced %v, want %v", pc.keys, want)
+	}
+	if want := []float64{0.025, 0.25, 0.25, 0.25}; !slices.EqualFunc(pc.rates, want, func(a, b float64) bool { return math.Abs(a-b) < 1e-9 }) {
+		t.Fatalf("rates %v, want %v", pc.rates, want)
+	}
+	d, err := pool.Acquire(ctx, "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Wait(vet); err != nil || len(pc.keys) != 4 {
+		t.Fatalf("direct egress has no exit to share: %v %v", pc.keys, err)
+	}
+	// No share configured for discovery: its requests wait for the exit
+	// alone.
+	pool.cfg.Shares = nil
+	b, _ := pool.Acquire(ctx, "isp")
+	if err := b.Wait(vet); err != nil || pc.keys[len(pc.keys)-1] != "exit:"+b.Endpoint.Exit() || len(pc.keys) != 5 {
+		t.Fatalf("no share: %v %v", pc.keys, err)
 	}
 }
 

@@ -149,7 +149,7 @@ Plans only, not built. Each waits for the owner's approval.
    - A `reject` with a reason already exists in the API. Count rejects per day as a quality metric.
    - Effort: 0.5 day for the metric and the sample export.
 3. **Discovery can't take regular collection's sessions or proxies.** In order of preference:
-   - (a) **A share of each exit for p2.** A separate Valkey rate key gives discovery vets at most 10% of each exit's `exit_rps`. Scheduled and on-demand work keep the rest even when discovery is busy.
+   - (a) **A share of each exit for p2.** A separate Valkey rate key gives discovery vets at most 10% of each exit's `exit_rps`. Scheduled and on-demand work keep the rest even when discovery is busy. **Built 7 Nov** (`ig.discovery.exit_share`; vets only, as backfills share lane p2).
    - (b) **Vets only when the schedule is on time.** The leader issues vets only while schedule lag is under one interval and no exit tier is mostly resting.
    - (c) **When the owner can afford it,** a dedicated proxy tier for discovery (`ig.discovery.tier`). Vets then never touch regular collection's IPs or identities.
 

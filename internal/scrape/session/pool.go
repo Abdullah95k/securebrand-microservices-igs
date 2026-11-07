@@ -35,6 +35,11 @@ type PoolConfig struct {
 	// pods share the exit. 0 or a nil pacer leaves it to identity pacing.
 	ExitRPS   float64
 	ExitPacer ExitPacer
+	// Shares caps a class of requests (WithShare) at a fraction of
+	// ExitRPS on each exit, fleet-wide (key exit:<exit>:<class>): the
+	// class waits for its share and then for the exit like any request.
+	// A class with no share, or a share of 0, is not capped.
+	Shares map[string]float64
 	// Rest rests an exit for the duration when one of its responses has
 	// the class (ig.rate_limit_rest, ig.checkpoint_rest).
 	Rest map[detect.Class]time.Duration
@@ -340,6 +345,17 @@ func (p *Pool) build(ep proxy.Endpoint, fp Fingerprint, maxReq int) (*Identity, 
 	if x := ep.Exit(); x != "" && p.cfg.ExitRPS > 0 && p.cfg.ExitPacer != nil {
 		key, rps := "exit:"+x, p.cfg.ExitRPS
 		id.exitWait = func(ctx context.Context) error { return p.cfg.ExitPacer.WaitRate(ctx, key, rps) }
+		id.shareWait = func(ctx context.Context, class string) error {
+			share := p.cfg.Shares[class]
+			if share <= 0 {
+				return nil
+			}
+			began := time.Now()
+			err := p.cfg.ExitPacer.WaitRate(ctx, key+":"+class, rps*share)
+			metrics.ExitShareRequests.WithLabelValues(class).Inc()
+			metrics.ExitShareWait.WithLabelValues(class).Add(time.Since(began).Seconds())
+			return err
+		}
 	}
 	return id, nil
 }
