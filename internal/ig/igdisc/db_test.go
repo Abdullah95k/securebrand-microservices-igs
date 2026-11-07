@@ -230,3 +230,43 @@ func TestErase(t *testing.T) {
 		t.Errorf("%d rows left, want only 'kept'", n)
 	}
 }
+
+// KeywordsGrown finds the candidates decided below the threshold whose
+// keyword signal would now be higher: evidence that arrived after their
+// decision. Once their stored signal matches, they drop out.
+func TestKeywordsGrown(t *testing.T) {
+	pool := db(t)
+	ctx := context.Background()
+	exec(t, pool, `INSERT INTO discovery_candidates (username, status, vet, signals) VALUES
+		('grew', 'below', '{}', '{"keyword_context": 0.5}'),
+		('same', 'below', '{}', '{"keyword_context": 0.5}'),
+		('never_scored', 'below', '{}', '{}'),
+		('old_evidence', 'below', '{}', '{}'),
+		('registered_one', 'registered', '{}', '{}'),
+		('vetting_one', 'vetting', NULL, NULL)`)
+	ev := func(user, grp string, found string) {
+		exec(t, pool, `INSERT INTO igdisc_evidence (username, keyword_id, keyword, normalized, language, grp, content_id, content_time,
+			via, source_pk, found_at) VALUES ($1, $2 || ':en:x', 'x', 'x', 'en', $2, 'ig:post:' || $2, now(), 'caption', 1, now() - $3::interval)`,
+			user, grp, found)
+	}
+	ev("grew", "baghdad", "0 hours")
+	ev("grew", "basra", "0 hours")
+	ev("same", "erbil", "0 hours")
+	ev("never_scored", "mosul", "1 hour")
+	ev("old_evidence", "kirkuk", "48 hours")
+	ev("registered_one", "baghdad", "0 hours")
+	ev("vetting_one", "baghdad", "0 hours")
+	got, err := KeywordsGrownFunc(pool, 0.5, 1)(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if want := []string{"grew", "never_scored"}; !slices.Equal(got, want) {
+		t.Fatalf("grown %v, want %v", got, want)
+	}
+	exec(t, pool, `UPDATE discovery_candidates SET signals = '{"keyword_context": 1}' WHERE username = 'grew'`)
+	exec(t, pool, `UPDATE discovery_candidates SET signals = '{"keyword_context": 0.5}' WHERE username = 'never_scored'`)
+	if got, err := KeywordsGrown(ctx, pool, 0.5, 1); err != nil || len(got) != 0 {
+		t.Fatalf("after rescoring: %v %v", got, err)
+	}
+}

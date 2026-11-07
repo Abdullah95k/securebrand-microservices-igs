@@ -6,8 +6,8 @@ Instagram keyword discovery, built in the igs repository beside igs's own work. 
 
 | Step | What | Where | Status |
 |---|---|---|---|
-| 1a | igdisc's own code: the keyword index, the recorder, the evidence table (its own migrations), keyword context, erasure; unit and database tests | `internal/ig/igdisc`, `migrations/igdisc`, #65 | built, tested locally |
-| 1b | The hooks into igs's files: the collector hands posts and comments to the recorder, the score's `keyword_context` signal, migrations, erasure, config, an e2e test | a second PR stacked on #65 | in progress |
+| 1a | igdisc's own code: the keyword index, the recorder, the evidence table (its own migrations), keyword context, erasure; unit and database tests | `internal/ig/igdisc`, `migrations/igdisc`, [#65](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/65) | built; tested locally; in review |
+| 1b | The hooks into igs's files, one commit per hook: the score's `keyword_context` signal, the collector's observer, config `ig.igdisc` (off by default), wiring, migrations, erasure, an e2e test, the runbook ([`runbook.md`](runbook.md) once merged) | [#77](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/77), stacked on #65, for the igs session to review | built; the whole e2e package passes locally; in review |
 
 ## Decisions (the owner's)
 
@@ -46,3 +46,4 @@ Answered by the contract v1.0.0:
 - **6 Nov, 18:15:** the master answered M1 to M4 (taken into the plan, §3.6 and §7) and O1 to O4, citing D-027. This session hasn't seen D-027, so O1 to O4 were recorded as waiting for the owner's confirmation.
 - **6 Nov, 18:25:** contract v1.1.0 published (`5e13d2f`). Checked: the two new fields, `KeywordID` and `FoldKeyword` (identical to igs's fold on all 393 list spellings), and the canary option. The check ran in a throwaway copy; igs's `go.mod` is unchanged.
 - **7 Nov:** the owner confirmed D-027 and said to start step 1. igdisc's own code (Track 1) is on #65's branch: the keyword index on igs's matcher (one matcher group per spelling, so a match names its keyword and contract ID), the recorder (a 6-hour window; tags, co-authors, mentions, commenters with `pii_mode: full`; accounts on the schedule or rejected skipped), `ig.igdisc_evidence` with its own goose table, keyword context (distinct places), erasure. The contract v1.1.0 module is now in igs's `go.mod`. Tests pass locally on Postgres 16 (CI uses 18).
+- **7 Nov, later:** the hooks PR is open: [#77](https://github.com/Abdullah95k/securebrand-microservices-igs/pull/77), stacked on #65 (merge #65 first). Checked before pushing: golangci-lint v2.15.0 (0 issues), `go test -race ./...`, the database tests on Postgres 16, and the whole e2e package against local Postgres, Redis and franz-go's in-process Kafka (kfake). Track 1 stays off until `ig.igdisc.enabled` is set.
