@@ -21,8 +21,8 @@ The same image holds every binary. Ops port `:9090` on each (`/metrics`, `/healt
 | `igs-crawler --stages retry` (crawler-retry) | Moves tasks from the 30 s and 5 min retry topics back to work topics when due. | Long-running | 1 | Yes | None |
 | `igs-persister` (persister) | `ig.*` to Postgres schema `ig`. Writes history only when a value changes. Bad records go to `igs.persist.dlq`. | Long-running | 2, KEDA 2 to 8 | Yes | None |
 | `igs-normalizer` (normalizer) | `ig.*` to the shared `content.*` topics, in contract v1.2.0's form (`securebrand-contracts`, REQ-019), with headers `sb-type` and `sb-contract`. Consumer group `igs-ig-normalizer-c1`. Metrics only when a count changed or the day did (memory in Valkey). | Long-running | 2, KEDA 2 to 8 | Yes | Valkey keys `igs:content:metrics:*` (48 h) |
-| `igs-media --roles downloader` (media-downloader) | Downloads media files, but only for jobs that ask (`include_media`, **off**). Announces `ig.media.ready.v1`. | Long-running | 2, KEDA 2 to 12 | Yes | None (S3) |
-| `igs-media --roles janitor` (media-janitor) | Deletes files once analysis acknowledges them (`ig.media.processed.v1`), or after an optional TTL (`media.ttl: 0` means none). | Long-running | 1 | No need | None |
+| `igs-media --roles downloader` (media-downloader) | Downloads media files, but only for jobs that ask (`include_media`, **off**). Announces each stored file on `content.media.ready.v1` (contract v1.2.0). | Long-running | 2, KEDA 2 to 12 | Yes | None (S3) |
+| `igs-media --roles janitor` (media-janitor) | Deletes files once analysis acknowledges them (`content.media.processed.v1`), or at their deadline (`media.ttl`: 72 h by default, at least 24 h), and records it on `content.media.deleted.v1`. | Long-running | 1 | No need | None |
 | `igs-registry-sync` (registry-sync) | Keeps Instagram's GraphQL query IDs current. It reads canary profiles' pages and scripts, then tests and promotes new IDs. | Long-running | 1 (Valkey lock) | No | Registry rows in Postgres |
 | `igsctl` (Helm hook Jobs) | `migrate up/down/status`, `kafka apply`, `schemas apply/check`, `apikey`, `registry`, `dlq replay`, `profiles`, `keywords`. | Jobs and CLI | Per install or upgrade | - | - |
 | `igs-spike` | Phase 0 kit: the probe, `phase0` runs, the tagged-tab test. **Not deployed.** The owner runs it by hand. | One-off | - | - | Local output files |
@@ -99,9 +99,10 @@ Replication is 3 on every topic. Partitions are as in `configs/ig/topics.yaml`.
 | `ig.comment.v1` | Same | **post** media pk | `Comment` | 96 | 168 h | Same |
 | `ig.media.v1` | Same | media ID | `Media` | 24 | 168 h | Same |
 | `ig.highlight.v1` | Same | user pk | `Highlight` | 12 | 168 h | Same |
-| `ig.media.ready.v1` | Media-downloader produces; **analysis** consumes | media ID | `securebrand.common.v1.MediaReady` | 24 | 168 h | (analysis) |
-| `ig.media.processed.v1` | **Analysis** produces; media-janitor consumes | media ID | `common.v1.MediaProcessed` | 24 | 168 h | `igs-ig-media-janitor` |
-| `ig.media.deleted.v1` | Janitor produces | media ID | `common.v1.MediaDeleted` | 12 | 168 h | (none today) |
+| `content.media.v1` | Normalizer produces; the platform's writer consumes | media ID (`ig:media:<uuid>`) | Contract `securebrand.content.v1.Media` | The platform's | 168 h | (the platform's writer) |
+| `content.media.ready.v1` | Media-downloader and janitor (re-announcements) produce; **analysis** consumes | media ID | Contract `securebrand.media.v1.MediaReady` | The platform's | 168 h | (analysis) |
+| `content.media.processed.v1` | **Analysis** produces; media-janitor consumes (igs's media only) | media ID | `media.v1.MediaProcessed` | The platform's | 168 h | `igs-ig-media-janitor` |
+| `content.media.deleted.v1` | Janitor produces | media ID | `media.v1.MediaDeleted` | The platform's | 168 h | (the platform's) |
 | `ig.job.v1` | Scheduler produces | job ID | `common.v1.JobEvent` | 12 | 168 h | (none today) |
 | `ig.erasure.v1` | Scheduler (eraser) produces, for the other services; no igs component consumes it (igs erases through the database) | Subject | `common.v1.Erasure` | 3 | 720 h | (none in igs) |
 | `content.account.v1`, `.account_snapshot.v1`, `.post.v1`, `.comment.v1`, `.metrics.v1` | Normalizer produces; the platform's writer consumes | As `registry/topics.yaml` says: the account ID (`ig:account:<pk>`) for accounts and snapshots; the post ID (`ig:post:<pk>`) for posts, comments and metrics | Contract v1.2.0: `securebrand.content.v1.Account`, `AccountSnapshot`, `Post`, `Comment`, `Metrics`; headers `sb-type`, `sb-contract` | The platform creates them | 168 h | (the platform's writer) |
@@ -287,9 +288,9 @@ Important settings and their defaults (`ig:` section):
 | api | none | `igs.task.profile.*`, `igs.task.post.*` | |
 | scheduler | none | `igs.task.profile.*`, `igs.task.post.*`, `ig.job.v1`, `ig.erasure.v1`, `ig.comment.v1` (deletions its re-reads find) | Describe every `igs-*` group and the topics they read (the lag gauges), and the end offsets of the six entity topics against `igs-ig-persister` (the job finalizer) |
 | persister | The six entity topics: `ig.profile.v1`, `ig.post.v1`, `ig.post_metrics.v1`, `ig.comment.v1`, `ig.media.v1`, `ig.highlight.v1` (`igs-ig-persister`) | `igs.persist.dlq` | |
-| normalizer | The six entity topics (`igs-ig-normalizer-c1`; the earlier `igs-ig-normalizer` is no longer used) | `content.account.v1`, `content.account_snapshot.v1`, `content.post.v1`, `content.comment.v1`, `content.metrics.v1` | |
-| media-downloader | `igs.task.media` (`igs-ig-media-downloader`) | `ig.media.ready.v1` | |
-| media-janitor | `ig.media.processed.v1` (`igs-ig-media-janitor`) | `ig.media.ready.v1` (re-announced), `ig.media.deleted.v1` | |
+| normalizer | The six entity topics (`igs-ig-normalizer-c1`; the earlier `igs-ig-normalizer` is no longer used) | `content.account.v1`, `content.account_snapshot.v1`, `content.post.v1`, `content.comment.v1`, `content.metrics.v1`, `content.media.v1` | |
+| media-downloader | `igs.task.media` (`igs-ig-media-downloader`) | `content.media.ready.v1` | |
+| media-janitor | `content.media.processed.v1` (`igs-ig-media-janitor`) | `content.media.ready.v1` (re-announced), `content.media.deleted.v1` | |
 | registry-sync | none | none | No Kafka user needed |
 
 These keep the shared user:

@@ -47,6 +47,7 @@ const (
 	KindPost            = "post"
 	KindComment         = "comment"
 	KindMetrics         = "metrics"
+	KindMedia           = "media"
 )
 
 // Out is one content event to publish.
@@ -74,6 +75,8 @@ func Record(topic string, value []byte) ([]Out, error) {
 		msg = &igv1.PostMetrics{}
 	case topics.Comment:
 		msg = &igv1.Comment{}
+	case topics.Media:
+		msg = &igv1.Media{}
 	default:
 		return nil, nil
 	}
@@ -94,6 +97,8 @@ func Map(m proto.Message) []Out {
 		return postMetrics(v)
 	case *igv1.Comment:
 		return comment(v)
+	case *igv1.Media:
+		return media(v)
 	}
 	return nil
 }
@@ -116,6 +121,9 @@ func contentHash(m proto.Message) string {
 		v.Envelope, v.Counts = nil, nil
 	case *contentv1.Metrics:
 		v.Envelope = nil
+	case *contentv1.Media:
+		v.Envelope = nil
+		signedURL(v)
 	}
 	b, _ := hashOpts.Marshal(c)
 	sum := sha256.Sum256(b)

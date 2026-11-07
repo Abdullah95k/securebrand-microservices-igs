@@ -47,6 +47,8 @@ func conform(t *testing.T, outs []Out) {
 			err, want = conformance.Comment(m, opt), topics.ContentComment
 		case *contentv1.Metrics:
 			err, want = conformance.Metrics(m, opt), topics.ContentMetrics
+		case *contentv1.Media:
+			err, want = conformance.Media(m, opt), topics.ContentMedia
 		default:
 			t.Fatalf("unexpected %T", o.Msg)
 		}
@@ -402,17 +404,75 @@ func TestSpans(t *testing.T) {
 	}
 }
 
-// Topics igs doesn't map yet (media, highlights) give nothing, and a record
+// Topics igs doesn't map yet (highlights: slice 3) give nothing, and a record
 // that doesn't decode is an error.
 func TestRecord(t *testing.T) {
 	b, _ := proto.Marshal(&igv1.Post{Obs: obs(), MediaPk: 5, OwnerPk: 42, TakenAt: timestamppb.New(at)})
 	if outs, err := Record(topics.Post, b); err != nil || len(outs) != 1 {
 		t.Fatalf("post: %v %v", outs, err)
 	}
-	if outs, err := Record(topics.Media, b); err != nil || outs != nil {
-		t.Errorf("media: %v %v", outs, err)
+	if outs, err := Record(topics.Highlight, b); err != nil || outs != nil {
+		t.Errorf("highlight: %v %v", outs, err)
 	}
 	if _, err := Record(topics.Post, []byte{0xff}); err == nil {
 		t.Error("garbage decoded")
+	}
+}
+
+// Media (REQ-019 slice 2): a post's photo, a carousel child owned by its
+// post, a comment's GIF and a profile picture, each with its type and role;
+// highlight media waits for slice 3. Re-signed CDN URLs keep the hash.
+func TestMediaToContent(t *testing.T) {
+	const id = "0b5c4f0e-1111-5222-8333-444455556666"
+	photo := &igv1.Media{Obs: obs(), MediaId: id, SourceMediaId: "77", Kind: commonv1.MediaKind_MEDIA_KIND_PHOTO, Variant: "original",
+		OwnerType: "post", UserPk: 42, MediaPk: 77, ParentMediaPk: i64(5), Position: 2, SourceUrl: "https://cdn.example.invalid/a.jpg?oe=1",
+		SourceExpiresAt: timestamppb.New(at.Add(time.Hour)), Width: 1080, Height: 1350, Mime: "image/jpeg", AltText: "a photo"}
+	outs := Map(photo)
+	conform(t, outs)
+	m, o := one[*contentv1.Media](t, outs)
+	checkEnvelope(t, m.Envelope, "media", "ig:media:"+id)
+	if o.Key != "ig:media:"+id || m.OwnerId != "ig:post:5" || m.OwnerKind != "post" || m.Type != contentv1.MediaType_MEDIA_TYPE_IMAGE ||
+		m.Role != contentv1.MediaRole_MEDIA_ROLE_CONTENT || m.PlatformKind != "carousel_child" || m.Position != 2 ||
+		m.PlatformMediaId != "77" || m.GetWidth() != 1080 || m.DurationMs != nil || m.AltText != "a photo" {
+		t.Errorf("photo: key %s, %+v", o.Key, m)
+	}
+	resigned := proto.Clone(photo).(*igv1.Media)
+	resigned.SourceUrl, resigned.SourceExpiresAt = "https://cdn.example.invalid/a.jpg?oe=2", timestamppb.New(at.Add(2*time.Hour))
+	if again, _ := one[*contentv1.Media](t, Map(resigned)); again.Envelope.ContentHash != m.Envelope.ContentHash {
+		t.Error("a re-signed URL changed the content hash")
+	}
+	for _, c := range []struct {
+		m           *igv1.Media
+		owner       string
+		typ         contentv1.MediaType
+		role        contentv1.MediaRole
+		publishedAs bool
+	}{
+		{&igv1.Media{Obs: obs(), MediaId: id, Kind: commonv1.MediaKind_MEDIA_KIND_COMMENT_GIF, OwnerType: "comment", UserPk: 42, MediaPk: 5, CommentPk: i64(100)},
+			"ig:comment:100", contentv1.MediaType_MEDIA_TYPE_GIF, contentv1.MediaRole_MEDIA_ROLE_ATTACHMENT, true},
+		{&igv1.Media{Obs: obs(), MediaId: id, Kind: commonv1.MediaKind_MEDIA_KIND_PROFILE_PIC, OwnerType: "profile", UserPk: 42},
+			"ig:account:42", contentv1.MediaType_MEDIA_TYPE_IMAGE, contentv1.MediaRole_MEDIA_ROLE_PROFILE_PICTURE, true},
+		{&igv1.Media{Obs: obs(), MediaId: id, Kind: commonv1.MediaKind_MEDIA_KIND_REEL, OwnerType: "post", UserPk: 42, MediaPk: 9, DurationMs: 15000},
+			"ig:post:9", contentv1.MediaType_MEDIA_TYPE_VIDEO, contentv1.MediaRole_MEDIA_ROLE_CONTENT, true},
+		{&igv1.Media{Obs: obs(), MediaId: id, Kind: commonv1.MediaKind_MEDIA_KIND_HIGHLIGHT, OwnerType: "highlight", UserPk: 42, MediaPk: 9}, "", 0, 0, false},
+	} {
+		outs := Map(c.m)
+		if !c.publishedAs {
+			if len(outs) != 0 {
+				t.Errorf("%v published %v", c.m.Kind, outs)
+			}
+			continue
+		}
+		conform(t, outs)
+		got, _ := one[*contentv1.Media](t, outs)
+		if got.OwnerId != c.owner || got.Type != c.typ || got.Role != c.role {
+			t.Errorf("%v: owner %s type %v role %v", c.m.Kind, got.OwnerId, got.Type, got.Role)
+		}
+	}
+	if id2, ok := NativeMediaID("ig:media:" + id); !ok || id2 != id {
+		t.Errorf("NativeMediaID: %q %v", id2, ok)
+	}
+	if _, ok := NativeMediaID("tt:media:" + id); ok {
+		t.Error("another platform's media ID taken for igs's")
 	}
 }

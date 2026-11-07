@@ -468,5 +468,5 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: Media is deleted at its TTL before the analysis service acknowledged it
-          description: The analysis service is not keeping up with ig.media.ready.v1, or its acks do not arrive.
+          description: The analysis service is not keeping up with content.media.ready.v1, or its acks on content.media.processed.v1 do not arrive.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#media-backlog--ttl-expiries

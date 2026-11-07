@@ -3,7 +3,7 @@
 service: {name: igs, env: dev}
 log: {level: info, format: text}
 media:
-  required_consumers: ["analysis"]
+  required_consumers: ["sb-analysis"]
 ig:
   identity_rps: 20
   identity_burst: 5

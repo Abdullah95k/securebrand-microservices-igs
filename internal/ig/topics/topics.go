@@ -11,17 +11,14 @@ import (
 
 // Public contract.
 const (
-	Profile        = "ig.profile.v1"
-	Post           = "ig.post.v1"
-	PostMetrics    = "ig.post_metrics.v1"
-	Comment        = "ig.comment.v1"
-	Media          = "ig.media.v1"
-	Highlight      = "ig.highlight.v1"
-	MediaReady     = "ig.media.ready.v1"
-	MediaProcessed = "ig.media.processed.v1"
-	MediaDeleted   = "ig.media.deleted.v1"
-	Job            = "ig.job.v1"
-	Erasure        = "ig.erasure.v1"
+	Profile     = "ig.profile.v1"
+	Post        = "ig.post.v1"
+	PostMetrics = "ig.post_metrics.v1"
+	Comment     = "ig.comment.v1"
+	Media       = "ig.media.v1"
+	Highlight   = "ig.highlight.v1"
+	Job         = "ig.job.v1"
+	Erasure     = "ig.erasure.v1"
 )
 
 // The SecureBrand contract's content topics (securebrand-contracts
@@ -35,11 +32,19 @@ const (
 	ContentAccountSnapshot = "content.account_snapshot.v1"
 	ContentMetrics         = "content.metrics.v1"
 	ContentMedia           = "content.media.v1"
+	// The media hand-off to analysis (securebrand.media.v1): igs-media
+	// announces stored files, the consumers acknowledge them, igs-media
+	// records their deletion. They replace igs's ig.media.ready, processed
+	// and deleted topics, which no other service read.
+	ContentMediaReady     = "content.media.ready.v1"
+	ContentMediaProcessed = "content.media.processed.v1"
+	ContentMediaDeleted   = "content.media.deleted.v1"
 )
 
-// Content lists the content topics igs publishes (slice 1 of REQ-019;
-// content.media.v1 follows with slice 2).
-var Content = []string{ContentPost, ContentComment, ContentAccount, ContentAccountSnapshot, ContentMetrics}
+// Content lists the content topics igs publishes or reads (REQ-019
+// slices 1 and 2), in configs/ig/topics.yaml's order.
+var Content = []string{ContentPost, ContentComment, ContentAccount, ContentAccountSnapshot, ContentMetrics, ContentMedia,
+	ContentMediaReady, ContentMediaProcessed, ContentMediaDeleted}
 
 // Internal work queues.
 const (
@@ -119,15 +124,12 @@ func ParseLane(s string) igstaskv1.Lane {
 // (<topic>-value). Records carry plain protobuf and the message type in the
 // igs-type header.
 var ValueSchemas = map[string]string{
-	Profile:        "securebrand/ig/v1/profile.proto",
-	Post:           "securebrand/ig/v1/post.proto",
-	PostMetrics:    "securebrand/ig/v1/post.proto",
-	Comment:        "securebrand/ig/v1/comment.proto",
-	Media:          "securebrand/ig/v1/media.proto",
-	Highlight:      "securebrand/ig/v1/highlight.proto",
-	MediaReady:     "securebrand/common/v1/media.proto",
-	MediaProcessed: "securebrand/common/v1/media.proto",
-	MediaDeleted:   "securebrand/common/v1/media.proto",
-	Job:            "securebrand/common/v1/job.proto",
-	Erasure:        "securebrand/common/v1/erasure.proto",
+	Profile:     "securebrand/ig/v1/profile.proto",
+	Post:        "securebrand/ig/v1/post.proto",
+	PostMetrics: "securebrand/ig/v1/post.proto",
+	Comment:     "securebrand/ig/v1/comment.proto",
+	Media:       "securebrand/ig/v1/media.proto",
+	Highlight:   "securebrand/ig/v1/highlight.proto",
+	Job:         "securebrand/common/v1/job.proto",
+	Erasure:     "securebrand/common/v1/erasure.proto",
 }

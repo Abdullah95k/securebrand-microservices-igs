@@ -21,7 +21,7 @@ config:
     media_bucket: "igs-media"
     raw_bucket: "igs-raw"
   media:
-    required_consumers: ["analysis"]
+    required_consumers: ["sb-analysis"]
   ig:
     base_url: "http://fakeig:8091"
     identity_rps: 20

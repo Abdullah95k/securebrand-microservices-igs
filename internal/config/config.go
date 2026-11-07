@@ -378,8 +378,6 @@ type Media struct {
 	MaxRetryableFailures int           `koanf:"max_retryable_failures"`
 	SweepInterval        time.Duration `koanf:"sweep_interval"`
 	OrphanInterval       time.Duration `koanf:"orphan_interval"`
-	Presign              bool          `koanf:"presign"`
-	PresignTTL           time.Duration `koanf:"presign_ttl"`
 	MaxBytes             int64         `koanf:"max_bytes"`
 }
 
@@ -481,7 +479,7 @@ func (c *Config) Validate() error {
 		errs = append(errs, errors.New("s3.raw_prefix, s3.raw_keep_prefix and s3.raw_sample_prefix must be set and none may start another: an expiry rule on raw_prefix must not reach the kept failures and sample, and each kind keeps a prefix of its own"))
 	}
 	if c.Media.TTL < 0 {
-		errs = append(errs, errors.New("media.ttl must not be negative (0: keep until analysed)"))
+		errs = append(errs, errors.New("media.ttl must not be negative (0: the contract's 72 hours; under 24 hours counts as 24)"))
 	}
 	if c.Scheduler.DefaultInterval <= 0 {
 		errs = append(errs, errors.New("scheduler.default_interval must be > 0"))

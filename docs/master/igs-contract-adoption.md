@@ -76,7 +76,8 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 | Item | PR | Evidence |
 |---|---|---|
 | Plan and re-estimate | this file | v1.2.0 read on 7 Nov; the contract's Go module resolves at v1.2.0 |
-| 1.1 to 1.11 (slice 1) | the slice 1 PR | See below |
+| 1.1 to 1.11 (slice 1) | #112 (merge 0c7e102) | See below |
+| 2.1 and 2.2 (slice 2) | the slice 2 PR | See "Slice 2, as built" |
 
 **Slice 1, as built** (`internal/ig/normalize`, `internal/ig/app/normalizer.go`):
 - **1.1:** `go.mod` requires `securebrand-contracts v1.2.0`. igs's own `securebrand.content.v1` (proto, generated code, embed) is deleted.
@@ -97,3 +98,35 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 1. `content.account_snapshot.v1` must exist on the shared Kafka before the normalizer starts. igs creates no topics there.
 2. Pin the slice 1 commit and set the normalizer back to its chart size.
 3. Check `topic-peek` and `writer-stats`.
+
+**Slice 2, as built** (`internal/ig/normalize/media.go`, `internal/ig/media`):
+- **2.1, `content.media.v1`:** every `ig.media.v1` record becomes a Media keyed by its ID, `ig:media:<uuid>` (igs's UUIDv5 of pk and variant, stable across reads).
+  - **Type and role:** photo and video `CONTENT`; reel `VIDEO`; thumbnail `THUMBNAIL`; cover `COVER`; profile picture `PROFILE_PICTURE`; comment photo, GIF, video and sticker `ATTACHMENT`.
+  - **Owner:** the post (a carousel child's parent, with platform kind `carousel_child`), the comment, or the account.
+  - **Also carried:** size, duration, MIME type, alt text, and the signed CDN URL with its expiry.
+  - The URL and expiry are left out of the content hash, because Instagram re-signs them on every read.
+  - Highlight media waits for slice 3.
+- **2.2, the hand-off (`securebrand.media.v1`):**
+  - **Announcing:** igs-media announces each stored file on `content.media.ready.v1`. The announcement carries:
+    - the owner and its account;
+    - the object, with its hex SHA-256;
+    - `stored_at` and `delete_after`;
+    - `required_consumers` (`sb-analysis`);
+    - provenance;
+    - `attempt`.
+  - **Acknowledgements:** the janitor reads acks on `content.media.processed.v1`.
+    - It skips other collectors' media, which share the topic.
+    - It deletes a file once every required consumer has processed it, failed it for good, or skipped it.
+    - After a retryable failure it announces the file again, at most 3 times.
+  - **Deletions:** recorded on `content.media.deleted.v1`, as `PROCESSED` or `EXPIRED`.
+  - **Old topics:** igs no longer uses `ig.media.ready`, `processed` or `deleted`. No other service read them, and igs deletes no topic.
+- **The deadline:** the contract gives every file one, at least 24 h after storing and 72 h by default (owner R5).
+  - `media.ttl` now defaults to 72 h. 0 means 72 h, and anything under 24 h counts as 24 h, so old values that still say `0s` keep working.
+  - `media.required_consumers` defaults to `sb-analysis`, the registry's name.
+  - The unused presign settings are gone.
+  - Media downloads are off in production (`include_media`), so none of this acts there until analysis exists.
+- **Evidence:**
+  - Unit tests: every kind's type, role and owner, with conformance; the hash under a re-signed URL; the lifetime rule.
+  - End to end: `TestMediaPipeline` crawls fakeig with media on. Every stored file is announced, the announcement passes production conformance with a 72 h deadline, and another platform's ack is ignored. Every deletion is recorded and conformant.
+  - End to end: `TestContentEventsMatchStore` now also checks `content.media.v1`.
+
