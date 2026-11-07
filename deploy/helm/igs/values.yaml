@@ -4,8 +4,10 @@ image:
   # Defaults to the chart's appVersion (the release workflow publishes both).
   tag: ""
   # Image built with `--target browser` (Chromium included). When set, the
-  # components marked `browser: true` (crawlers, registry-sync) use it; set
-  # it together with config.ig.browser.enabled.
+  # components marked `browser: true` (crawlers, registry-sync) run it as
+  # the browser container below, or as their own image with
+  # browserContainer.enabled false; set it together with
+  # config.ig.browser.enabled.
   browserTag: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
@@ -118,11 +120,13 @@ serviceMonitor:
   enabled: false
   interval: 30s
 
-# Alerting and recording rules (files/alerts.yaml) as a PrometheusRule.
-# Requires the Prometheus Operator CRDs. Labels let the Prometheus
-# ruleSelector pick the rule up.
+# Alerting and recording rules (files/alerts.yaml) as a PrometheusRule, on
+# by default (REQ-008 fix 21): an install without its alerts is blind.
+# Needs the Prometheus Operator's CRDs; on a cluster without them, set
+# enabled: false. Labels let the Prometheus ruleSelector pick the rule up
+# (kube-prometheus-stack: release: <its release name>).
 alerts:
-  enabled: false
+  enabled: true
   labels: {}
 
 # Grafana dashboards (files/dashboards/*.json) as ConfigMaps, for the
@@ -358,9 +362,75 @@ components:
     # Room for a headless Chromium when ig.browser is enabled.
     resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
 
+# Chromium in a container of its own beside each component marked
+# `browser: true` (REQ-008 fix 21, B3), with a memory limit of its own, so
+# a heavy page can't take the crawler down with it: the crawler opens a
+# browser context there for each render (config.ig.browser.remote, set by
+# the chart). Used when image.browserTag is set. Off: Chromium starts
+# inside the crawler's container, sharing its limit.
+browserContainer:
+  enabled: true
+  port: 9222
+  resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi}}
+  # Chromium's flags beside the DevTools port and the profile directory:
+  # headless, no sandbox (every capability is dropped), and no traffic of
+  # its own through the identity's paid exit.
+  args:
+    - --headless=new
+    - --no-sandbox
+    - --no-proxy-server
+    - --no-first-run
+    - --no-default-browser-check
+    - --disable-gpu
+    - --disable-extensions
+    - --disable-background-networking
+    - --disable-sync
+    - --disable-dev-shm-usage
+    - --mute-audio
+    - --hide-scrollbars
+    - --window-size=1366,900
+    - --disable-component-update
+    - --disable-domain-reliability
+    - --disable-client-side-phishing-detection
+    - --disable-default-apps
+    - --disable-breakpad
+    - --no-pings
+    - --metrics-recording-only
+    - --disable-field-trial-config
+    - --disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication
+    - --safebrowsing-disable-auto-update
+    - --password-store=basic
+    - --use-mock-keychain
+    - --no-service-autorun
+    - --disable-hang-monitor
+
 networkPolicy:
-  # Restricts ingress to the API port and the metrics port. Egress rules are
-  # environment specific (proxy endpoints for crawlers, CDN for the
-  # downloader) and are left to the cluster operator.
+  # Restricts ingress to the API port and the metrics port.
   enabled: false
   metricsFromNamespace: monitoring
+  # Restricts what igs's pods may reach (REQ-008 fix 21), with fbs's key
+  # names so the platform sets both the same way. Plain NetworkPolicy, by
+  # address and port: no DNS names. Off: everything is reachable. The hook
+  # Jobs are not restricted. Everything not listed here is refused, so set
+  # every list before turning it on (values-production.yaml has
+  # production's).
+  egress:
+    enabled: false
+    # The cluster's DNS (UDP and TCP 53), in this namespace.
+    dnsNamespace: kube-system
+    # The stores, for every component: [{cidr, ports: [{port, endPort}]}].
+    # No ports: every port of the CIDR.
+    services: []
+    # Other namespaces of the cluster, for every component:
+    # [{namespace, ports: [{port, endPort}]}]. A port here is the pod's,
+    # not the Service's. No component calls the schema registry at run
+    # time (only the schemas hook, which is not restricted).
+    namespaces: []
+    # HTTPS (443), for every component: S3 (raw responses, media), the
+    # media CDN and the JavaScript bundles registry-sync reads directly.
+    https: []
+    # The proxy gateway: [{cidr, ports: [{port, endPort}]}], for the
+    # components in proxyComponents only (the crawlers' Chromium goes
+    # through it too).
+    proxies: []
+    proxyComponents: [crawler-profile, crawler-post, crawler-retry, registry-sync]

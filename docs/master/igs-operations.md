@@ -205,6 +205,18 @@ The runbook is `docs/runbooks/igs-backups.md`, and the restore drill is tested i
 
 Inside the cluster, igs also calls Postgres, Kafka, the Schema Registry, Valkey, S3 and ClickHouse.
 
+**Network policy** (REQ-008 fix 21; `networkPolicy` in the chart, fbs's key names). With `networkPolicy.egress.enabled`, igs's pods reach only:
+
+| Pods | May reach | Production |
+|---|---|---|
+| Every igs pod | DNS (UDP and TCP 53) in `dnsNamespace` | `kube-system` |
+| Every igs pod | The stores (`services`: CIDR and ports, or every port) | `10.30.0.0/16` (PgBouncer, Kafka, Valkey), every port; `0.0.0.0/0` on 25060–25080 |
+| Every igs pod | Other namespaces (`namespaces`: name and the pod's ports) | none: only the schemas hook calls the Schema Registry, and it is off |
+| Every igs pod | HTTPS (`https`: CIDRs on 443): Spaces, the media CDN, registry-sync's bundles | `0.0.0.0/0` |
+| `proxyComponents` (the crawlers, crawler-retry, registry-sync) | The proxy gateway (`proxies`: CIDR and ports) | `0.0.0.0/0` on 10000–10999, as fbs's provider. Check against `PROXIES_IGS` |
+
+Plain `networking.k8s.io/v1` policies by address and port, no DNS names, so Cilium needs no DNS proxy. The hook Jobs aren't restricted. No igs pod calls the Kubernetes API. HTTPS to every address means a crawler could reach Instagram without a proxy if its code tried; the code never does (every crawl request goes through an exit). `scripts/chart-egress.py` (in `make igs-chart-check`) checks the production render.
+
 **Proxies.**
 - Tiers are set in `proxies.yaml` (`ig.proxy.tiers`); the values themselves are secret.
 - The Phase 0 runs used the pilot's 10 ISP IPs; a residential tier was within 10% on every cost.

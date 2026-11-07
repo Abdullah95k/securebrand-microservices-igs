@@ -366,11 +366,15 @@ Instagram rotates the doc_ids of its GraphQL operations with its deploys. Sympto
 
 When page loads stop carrying the tokens and doc_ids the client needs (JavaScript-only pages), the crawlers can bootstrap through headless Chromium:
 - set `ig.browser.enabled: true` and `image.browserTag`;
-- the components marked `browser: true` then use the browser image;
+- the components marked `browser: true` (the crawlers, registry-sync) then get a `chromium` container of their own beside them (`browserContainer`, on by default; REQ-008 fix 21). It runs the browser image with its own memory limit, 1 GiB by default, so a heavy page can't take the crawler down with it;
+- each render opens a browser context in that Chromium, with the identity's cookies, user agent and exit, and closes it afterwards (`ig.browser.remote`, which the chart sets);
+- with `browserContainer.enabled: false`, Chromium starts inside the crawler's container instead, sharing its limit;
 - `ig.browser.max_share` and `max_concurrent` bound how much traffic it takes.
 
 - `IgsIgBrowserFallbackSaturated`: more page loads need it than the caps allow; those bootstraps fail and their tasks retry. Raise the caps (and the crawlers' memory) or find what changed in the page.
-- `IgsIgBrowserFallbackFailing`: Chromium does not start (check the pod's logs; the chart sets `no_sandbox`, since pods drop every capability) or the rendered page has no tokens either. That is a new wall: capture the page on the probe.
+- `IgsIgBrowserFallbackFailing`: Chromium isn't answering, or the rendered page has no tokens either.
+  - Chromium: check the `chromium` container's logs and restarts. Was it `OOMKilled`? Then raise `browserContainer.resources.limits.memory`. The chart runs it without its sandbox, since pods drop every capability.
+  - No tokens: that is a new wall. Capture the page on the probe.
 
 ## Schema drift
 
@@ -426,6 +430,16 @@ igsctl kafka apply
 ```
 
 `igsctl schemas apply` registers the `ig.*` subjects (`<topic>-value`, `BACKWARD_TRANSITIVE`); `schemas check` only checks them. Both leave out the `content.*` subjects unless `--include-content` (a registry of igs's own).
+
+## Network policy
+
+In production igs's pods reach only what `networkPolicy.egress` lists (REQ-008 fix 21; the list is in [igs-operations.md §6](../master/igs-operations.md#6-network)). Something missing from it looks like a store or exit that does not answer: connections time out, nothing is refused.
+
+- **Every request through the exits fails** (`igs_ig_requests_total{class="transport"}` climbs while the other classes stay flat; the crawler logs dial timeouts): the proxy gateway's host or ports aren't in `networkPolicy.egress.proxies`. Compare them with the proxies Secret's endpoints and add the missing ports.
+- **A pod can't reach Postgres, Kafka or Valkey** after the platform moved a store: add its address to `networkPolicy.egress.services`.
+- **A new component crawls through the exits:** add it to `networkPolicy.egress.proxyComponents`; `make igs-chart-check` fails until the pods that mount the proxies and the pods that may reach them are the same.
+
+To check whether the policy is the cause, set `networkPolicy.egress.enabled: false` for a moment through the platform's Argo CD application and see whether the symptom goes.
 
 ## Valkey unavailable
 

@@ -238,6 +238,12 @@ type Browser struct {
 	// NoSandbox runs Chromium without its sandbox, for containers that do
 	// not allow it (it is always off as root).
 	NoSandbox bool `koanf:"no_sandbox"`
+	// Remote is the DevTools address (http://127.0.0.1:9222) of a Chromium
+	// already running beside the process, in a container of its own with
+	// its own memory limit (the chart's browser container): each render
+	// opens a browser context there instead of starting a Chromium. Binary
+	// is then not needed.
+	Remote string `koanf:"remote"`
 }
 
 // AIMD tunes the fleet ceiling controller (internal/scrape/ratelimit).

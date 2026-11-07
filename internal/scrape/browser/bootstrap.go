@@ -28,7 +28,10 @@ var (
 // load adds to, capped at a small burst) and MaxConcurrent run at once; a
 // capped call fails at once rather than holding a crawl slot.
 type Bootstrapper struct {
-	Binary         string
+	Binary string
+	// Remote, when set, is a running Chromium's DevTools address
+	// (config.Browser.Remote): renders open a browser context there.
+	Remote         string
 	AcceptLanguage string
 	Timeout        time.Duration
 	MaxShare       float64
@@ -51,9 +54,12 @@ type Bootstrapper struct {
 // NewBootstrapper returns a fallback for cfg, or an error when no browser
 // binary is found.
 func NewBootstrapper(cfg config.Browser, acceptLanguage string, hooks session.Hooks) (*Bootstrapper, error) {
-	bin, err := FindBinary(cfg.Binary)
-	if err != nil {
-		return nil, err
+	var bin string
+	if cfg.Remote == "" {
+		var err error
+		if bin, err = FindBinary(cfg.Binary); err != nil {
+			return nil, err
+		}
 	}
 	n := max(cfg.MaxConcurrent, 1)
 	timeout := cfg.Timeout
@@ -62,7 +68,7 @@ func NewBootstrapper(cfg config.Browser, acceptLanguage string, hooks session.Ho
 	}
 	// The burst lets the first pages of a fresh pod through; the credit
 	// then grows by MaxShare per HTML load.
-	return &Bootstrapper{Binary: bin, AcceptLanguage: acceptLanguage, Timeout: timeout, MaxShare: cfg.MaxShare, NoSandbox: cfg.NoSandbox,
+	return &Bootstrapper{Binary: bin, Remote: cfg.Remote, AcceptLanguage: acceptLanguage, Timeout: timeout, MaxShare: cfg.MaxShare, NoSandbox: cfg.NoSandbox,
 		Rules: detect.DefaultRules(), Hooks: hooks,
 		sem: make(chan struct{}, n), credit: float64(n), burst: float64(n), render: Render}, nil
 }
@@ -163,7 +169,7 @@ func (b *Bootstrapper) Bootstrap(ctx context.Context, id *session.Identity, rawU
 // hints, its cookies, media blocked.
 func (b *Bootstrapper) options(id *session.Identity, rawURL string) (Options, error) {
 	opts := Options{URL: rawURL, UserAgent: id.FP.UserAgent, AcceptLanguage: b.AcceptLanguage,
-		Cookies: id.Doer.Cookies(id.Base), NoSandbox: b.NoSandbox, BlockMedia: true,
+		Cookies: id.Doer.Cookies(id.Base), NoSandbox: b.NoSandbox, BlockMedia: true, Remote: b.Remote,
 		Hints: HintsFrom(id.FP.SecChUa, id.FP.SecChUaPlatform, id.FP.SecChUaMobile)}
 	if id.Endpoint.URL != "" {
 		p, err := url.Parse(id.Endpoint.URL)

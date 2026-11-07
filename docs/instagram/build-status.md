@@ -257,3 +257,8 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
 
   `igsctl health` prints, in one read-only pass, what to check first: profiles on the schedule, how late the schedule is, the last hour's jobs, when data was last stored, the exits resting and the consumers' lag. It shows times in Iraq time and exits 1 when something is BAD. The runbook's new "Health" section explains each line.
 - **2026-11-07 (REQ-008 fix 20, topic sizes):** igs's topics file now holds the topics as the platform created them in production: 99 partitions for 10,000 profiles, down from 915 for 300,000. Crawl tasks are kept 24 h, like fbs's. The chart's default autoscaling maxima follow the partitions (crawler-profile 6, crawler-post 12, persister and normalizer 12, media downloader 3), and a test keeps every values file within them. At this size the proxy exits, not the pods, set the pace.
+- **2026-11-07 (REQ-008 fix 21, chart defaults):**
+  - **The browser fallback's Chromium** now runs in a container of its own beside each crawler, with its own memory limit, so a heavy page can't take a crawler down with it. Each render opens an isolated browser context there with the identity's cookies, user agent and exit.
+  - **Alerts** are on by default.
+  - **Hook Jobs** already had resources (fix 12).
+  - **Egress rules** (on in production): every igs pod may reach only DNS, the private network of the stores, the managed services' public ports and HTTPS (Spaces, the media CDN). The crawlers and registry-sync may also reach the proxy gateway. The key names are fbs's, so the platform sets both services the same way. The proxy ports (10000–10999) are fbs's provider's: they must be checked when igs's proxies arrive.

@@ -119,3 +119,17 @@ envFrom:
 - name: tmp
   emptyDir: {}
 {{- end -}}
+
+{{/*
+igs.egressPorts renders a NetworkPolicy's ports from [{port, endPort}]
+(TCP; endPort makes a range).
+*/}}
+{{- define "igs.egressPorts" -}}
+{{- range . }}
+- protocol: TCP
+  port: {{ required "a port" .port }}
+  {{- with .endPort }}
+  endPort: {{ . }}
+  {{- end }}
+{{- end }}
+{{- end -}}
