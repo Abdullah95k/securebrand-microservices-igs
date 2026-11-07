@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igdisc"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/suppress"
@@ -149,6 +150,13 @@ func (e *Eraser) eraseAuthor(ctx context.Context, key []byte, stats map[string]i
 				return err
 			}
 		}
+		// So does Instagram keyword discovery (before comment_authors, which
+		// links the key to the person's user pk, goes).
+		n, err := igdisc.EraseAuthor(ctx, tx, key)
+		if err != nil {
+			return fmt.Errorf("igdisc_evidence: %w", err)
+		}
+		stats["igdisc_evidence"] += n
 		tag, err := tx.Exec(ctx, `DELETE FROM comment_authors WHERE author_key = $1`, key)
 		stats["authors_deleted"] += tag.RowsAffected()
 		return err
@@ -176,6 +184,14 @@ func (e *Eraser) eraseProfile(ctx context.Context, pk int64, stats map[string]in
 	}
 	stats["media_deleted"] += n
 	return pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+		// Instagram keyword discovery's evidence about the account and found
+		// on its posts; first, while its profile row and candidate still
+		// hold its username.
+		n, err := igdisc.EraseProfile(ctx, tx, pk)
+		if err != nil {
+			return fmt.Errorf("igdisc_evidence: %w", err)
+		}
+		stats["igdisc_evidence"] = n
 		for _, q := range []struct{ name, sql string }{
 			{"comments", `DELETE FROM comments WHERE owner_pk = $1`},
 			{"comment_edits", `DELETE FROM comment_edits WHERE owner_pk = $1`},
