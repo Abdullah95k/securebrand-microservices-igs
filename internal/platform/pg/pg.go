@@ -184,7 +184,7 @@ func connect(ctx context.Context, o *options, check func(*pgxpool.Pool) error) (
 		if err != nil {
 			return nil, fmt.Errorf("pg: connect: %w", err)
 		}
-		err = check(pool)
+		err = waiting(func() error { return check(pool) })
 		if err == nil {
 			return pool, nil
 		}
@@ -200,6 +200,32 @@ func connect(ctx context.Context, o *options, check func(*pgxpool.Pool) error) (
 		}
 		wait = min(2*wait, retryMax)
 	}
+}
+
+// slowLog is how long a connection attempt runs before it is logged as
+// waiting, and then again each time: a ping can wait minutes in a busy
+// pooler's queue without failing, and the log should say why the binary
+// isn't up yet.
+var slowLog = 10 * time.Second
+
+// waiting runs attempt, logging at INFO every slowLog while it runs.
+func waiting(attempt func() error) error {
+	done := make(chan struct{})
+	go func() {
+		began := time.Now()
+		t := time.NewTicker(slowLog)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				slog.Info("pg: still waiting for the database", "for", time.Since(began).Round(time.Second))
+			}
+		}
+	}()
+	defer close(done)
+	return attempt()
 }
 
 // OpenSchema creates a pool whose connections all use schema as their
