@@ -14,7 +14,7 @@ All of these must hold:
 | 2 | igs's proxies exist: 10 ISP IPs plus 3 spares, in the Secret `proxies` (key `proxies.yaml`, tier `isp`, a `static_list` of endpoints; `phase0/proxies.example.yaml` shows the shape) | the owner buys them; the platform creates the Secret |
 | 3 | The proxies' ports are in `networkPolicy.egress.proxies` (production allows 10000–10999). Ports outside that range need the range changed first: a blocked port only shows as timeouts ([network policy](igs-operations.md#network-policy)) | the platform, when it writes the Secret |
 | 4 | Three public accounts that post often, as `config.ig.registry_sync.canary_pages` in the platform's private Argo CD application. Without them registry-sync refuses to run, so it can't follow doc_id rotations. **Done:** the owner chose them (D-033), and the platform set them on 7 Nov | done |
-| 5 | PostgreSQL has room: 12 or more connections free (35 of 50 were in use at 09:35Z on 7 Nov). The pilot adds about 6 to 9 server connections (section 5) | the master |
+| 5 | PostgreSQL has room. **Done:** `max_connections` is 200 since 7 Nov, 11:32Z (D-037), up from 50; the pilot adds about 6 to 9 server connections (section 5) | done |
 
 The owner keeps two files on their own machine, one username or profile link per line, both cut from their list of 348 Phase 0 accounts:
 - `pilot-first-50.txt`: 50 of them, mixed rather than the 50 most active, so the first two hours show ordinary accounts as well as busy ones;
@@ -32,7 +32,7 @@ In the platform's Argo CD application for igs (`gitops/services/igs.yaml`), in o
   - crawler-retry 1;
   - registry-sync 1.
 
-  Keep `keda.enabled: false` for the pilot. Each crawler pod runs up to 240 tasks at once, so the 10 exits set the pace, not the pod count. KEDA's production minimums (crawler-profile 2, crawler-post 4) and its scaling of the persister and normalizer would add database connections the shared server doesn't have. KEDA comes back after the pilot, with the connection limit the owner decides.
+  Keep `keda.enabled: false` for the pilot, so the 48 hours run on the same pods from start to end and their memory, CPU and connections compare cleanly. Each crawler pod runs up to 240 tasks at once, so the 10 exits set the pace, not the pod count. KEDA comes back after the pilot; with PostgreSQL at 200 connections (D-037), connections no longer hold it back.
 - **Restart the scheduler** so it reads the new proxies file (discovery's hold counts the exits): `components.scheduler.podAnnotations: {igs/proxies-added: "<date>"}`.
 - **Nothing else.** These stay as they are:
   - the pace: `exit_rps` 0.25, `identity_rps` 0.33;
@@ -110,7 +110,7 @@ kubectl -n igs exec -i deploy/igs-api -- igsctl profiles resume --file - < pilot
 - **Server connections:** igs holds about 3 while idle.
   - Collecting, each crawler and persister pod touches the database more often than every 10 seconds, so each keeps about one server connection warm.
   - Expect about 8 to 10 in all, and up to about 12 in bursts. crawler-retry needs none: it only moves tasks between topics.
-- **If the server nears full**, lower crawler-post to 1. The exits, not the pods, set the pace, so collection barely slows.
+- **Room:** with `max_connections` at 200 (D-037) this fits easily. If the server ever nears full, lower crawler-post to 1. The exits, not the pods, set the pace, so collection barely slows.
 
 ## 6. Tests during the run
 
