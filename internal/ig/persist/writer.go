@@ -189,14 +189,17 @@ func emptyNil(b []byte) []byte {
 }
 
 // Posts upserts posts and maintains post_index and post_owners. A post
-// gone from Instagram only changes its status. The reels tab is the only
+// gone from Instagram only changes its status. A post whose page is walled
+// (status_reason login_wall) is stored from the grid's fields, its counts
+// NULL, unless it is stored already: then only its status changes
+// (REQ-008 fix 15). The reels tab is the only
 // source of a reel's views, so a post read from its page keeps the views
 // stored, or takes them from the newest metrics sample that has them.
 func (w *Writer) Posts(ctx context.Context, posts []*igv1.Post) error {
 	posts = latest(posts, func(p *igv1.Post) string { return strconv.FormatInt(p.MediaPk, 10) })
 	start := time.Now()
 	var rows [][]any
-	var gone []*igv1.Post
+	var gone, walled []*igv1.Post
 	var months []time.Time
 	var owners [][]any
 	for _, p := range posts {
@@ -204,6 +207,11 @@ func (w *Writer) Posts(ctx context.Context, posts []*igv1.Post) error {
 			continue
 		}
 		if p.Status == igv1.PostStatus_POST_STATUS_UNAVAILABLE {
+			if p.StatusReason == "login_wall" && p.Shortcode != "" && p.OwnerPk != 0 {
+				walled = append(walled, p)
+				months = append(months, p.TakenAt.AsTime())
+				continue
+			}
 			gone = append(gone, p)
 			continue
 		}
@@ -267,12 +275,43 @@ func (w *Writer) Posts(ctx context.Context, posts []*igv1.Post) error {
 				}
 			}
 			for _, p := range gone {
-				tag, err := tx.Exec(ctx, `UPDATE posts SET status = 'unavailable', last_seen_at = $3
-					WHERE taken_at = $1 AND media_pk = $2 AND last_seen_at <= $3`, p.TakenAt.AsTime(), p.MediaPk, observed(p.Obs))
+				tag, err := tx.Exec(ctx, `UPDATE posts SET status = 'unavailable', status_reason = $4, last_seen_at = $3
+					WHERE taken_at = $1 AND media_pk = $2 AND last_seen_at <= $3`, p.TakenAt.AsTime(), p.MediaPk, observed(p.Obs),
+					nilIfEmpty(p.StatusReason))
 				if err != nil {
 					return err
 				}
 				written += tag.RowsAffected()
+			}
+			for _, p := range walled {
+				ph := make([]string, len(postCols))
+				for i := range ph {
+					ph[i] = "$" + strconv.Itoa(i+1)
+				}
+				tag, err := tx.Exec(ctx, `INSERT INTO posts AS t (`+strings.Join(postCols, ",")+`) VALUES (`+strings.Join(ph, ",")+`)
+					ON CONFLICT (taken_at, media_pk) DO UPDATE SET status = 'unavailable', status_reason = EXCLUDED.status_reason,
+						last_seen_at = EXCLUDED.last_seen_at
+					WHERE t.last_seen_at <= EXCLUDED.last_seen_at`, postRow(p)...)
+				if err != nil {
+					return err
+				}
+				written += tag.RowsAffected()
+				// Counts the reels tab gave before the post's row existed.
+				if _, err := tx.Exec(ctx, `UPDATE posts p SET like_count = CASE WHEN m.counts_hidden THEN NULL ELSE m.like_count END,
+						comment_count = m.comment_count, play_count = m.play_count
+					FROM (SELECT like_count, comment_count, play_count, counts_hidden FROM post_metrics
+						WHERE media_pk = $2 ORDER BY captured_at DESC LIMIT 1) m
+					WHERE p.taken_at = $1 AND p.media_pk = $2 AND p.status_reason = 'login_wall'`, p.TakenAt.AsTime(), p.MediaPk); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO post_index (media_pk, owner_pk, taken_at, shortcode) VALUES ($1, $2, $3, $4)
+					ON CONFLICT DO NOTHING`, p.MediaPk, p.OwnerPk, p.TakenAt.AsTime(), p.Shortcode); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO post_owners (media_pk, user_pk, role) VALUES ($1, $2, 'owner')
+					ON CONFLICT DO NOTHING`, p.MediaPk, p.OwnerPk); err != nil {
+					return err
+				}
 			}
 			return nil
 		})
@@ -380,7 +419,11 @@ func (w *Writer) Metrics(ctx context.Context, ms []*igv1.PostMetrics) error {
 					play_count = COALESCE(m.play_count, p.play_count)
 				FROM tmp_pm m
 				WHERE m.taken_at IS NOT NULL AND p.taken_at = m.taken_at AND p.media_pk = m.media_pk
-				  AND p.last_seen_at <= m.captured_at
+				  AND (p.last_seen_at <= m.captured_at
+				   -- A walled post's row has no counts of its own: the newest
+				   -- sample (from the reels tab) gives them, whenever it comes.
+				   OR (p.status_reason = 'login_wall' AND NOT EXISTS (SELECT 1 FROM post_metrics q
+						WHERE q.media_pk = m.media_pk AND q.captured_at > m.captured_at)))
 				  AND (p.like_count IS DISTINCT FROM CASE WHEN m.counts_hidden THEN NULL ELSE COALESCE(m.like_count, p.like_count) END
 				   OR p.comment_count IS DISTINCT FROM COALESCE(m.comment_count, p.comment_count)
 				   OR p.play_count IS DISTINCT FROM COALESCE(m.play_count, p.play_count))`)
@@ -422,12 +465,15 @@ func (w *Writer) Comments(ctx context.Context, cs []*igv1.Comment) error {
 	start := time.Now()
 	rows := make([][]any, 0, len(cs))
 	var months []time.Time
+	var postTaken []time.Time
+	var postMedia []int64
 	authors := map[string][]any{}
 	for _, c := range cs {
 		if c.PostTakenAt == nil || c.CommentPk == 0 {
 			continue
 		}
 		months = append(months, c.PostTakenAt.AsTime())
+		postTaken, postMedia = append(postTaken, c.PostTakenAt.AsTime()), append(postMedia, c.MediaPk)
 		rows = append(rows, commentRow(c))
 		if a := c.Author; a != nil && len(a.AuthorKey) > 0 && !c.Redacted {
 			seen := observed(c.Obs)
@@ -493,8 +539,14 @@ func (w *Writer) Comments(ctx context.Context, cs []*igv1.Comment) error {
 				}
 			}
 			r.Close()
-			if err := r.Err(); err != nil || len(authors) == 0 {
+			if err := r.Err(); err != nil {
 				return err
+			}
+			if err := recount(ctx, tx, postTaken, postMedia); err != nil {
+				return err
+			}
+			if len(authors) == 0 {
+				return nil
 			}
 			arows := make([][]any, 0, len(authors))
 			for _, a := range authors {
@@ -543,15 +595,38 @@ func MarkDeleted(ctx context.Context, db *pgxpool.Pool, cs []*igv1.Comment) (int
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	tag, err := db.Exec(ctx, `UPDATE comments c SET status = 'deleted', deleted_at = d.at
-		FROM unnest($1::timestamptz[], $2::bigint[], $3::bigint[], $4::timestamptz[]) AS d(taken, media, id, at)
-		WHERE c.taken_at = d.taken AND c.media_pk = d.media AND c.comment_pk = d.id
-		  AND c.status = 'visible' AND NOT c.redacted AND c.last_seen_at < d.at`, taken, media, ids, at)
+	var n int64
+	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE comments c SET status = 'deleted', deleted_at = d.at
+			FROM unnest($1::timestamptz[], $2::bigint[], $3::bigint[], $4::timestamptz[]) AS d(taken, media, id, at)
+			WHERE c.taken_at = d.taken AND c.media_pk = d.media AND c.comment_pk = d.id
+			  AND c.status = 'visible' AND NOT c.redacted AND c.last_seen_at < d.at`, taken, media, ids, at)
+		if err != nil {
+			return err
+		}
+		n = tag.RowsAffected()
+		return recount(ctx, tx, taken, media)
+	})
 	if err != nil {
 		return 0, err
 	}
-	metrics.CommentChanges.WithLabelValues("deleted").Add(float64(tag.RowsAffected()))
-	return tag.RowsAffected(), nil
+	metrics.CommentChanges.WithLabelValues("deleted").Add(float64(n))
+	return n, nil
+}
+
+// recount sets posts.comments_collected, a post's visible top-level
+// comments stored, for the posts given (REQ-008 fix 15). A post not stored
+// yet is counted by the finalizer at the job's end.
+func recount(ctx context.Context, tx pgx.Tx, taken []time.Time, media []int64) error {
+	if len(media) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE posts p SET comments_collected = n.n
+		FROM (SELECT d.taken, d.media, (SELECT count(*) FROM comments c WHERE c.taken_at = d.taken AND c.media_pk = d.media
+				AND c.depth = 0 AND c.status = 'visible') AS n
+			FROM (SELECT DISTINCT * FROM unnest($1::timestamptz[], $2::bigint[])) AS d(taken, media)) n
+		WHERE p.taken_at = n.taken AND p.media_pk = n.media AND p.comments_collected IS DISTINCT FROM n.n`, taken, media)
+	return err
 }
 
 // Media upserts media metadata. A newer sighting refreshes the signed

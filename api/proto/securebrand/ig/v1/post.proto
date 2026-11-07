@@ -71,7 +71,10 @@ message CarouselChild {
 
 // Post is published on ig.post.v1, keyed by media_pk, once its detail (the
 // post page) was read, so taken_at is always set. A grid item alone
-// produces no record.
+// produces no record, except a post whose page is walled for logged-out
+// readers: it is published from what the grid gave (id, shortcode, time,
+// type), with status UNAVAILABLE, status_reason login_wall and its counts
+// unset (REQ-008 fix 15).
 message Post {
   securebrand.common.v1.Observation obs = 1;
   int64 media_pk = 2;
@@ -113,6 +116,10 @@ message Post {
   optional bool has_audio = 31;
   string permalink = 32;
   PostStatus status = 33;
+  // Why the status is UNAVAILABLE: "login_wall" (the post page is walled for
+  // logged-out readers; the post may still exist) or "not_found" (gone:
+  // deleted, archived or made private). Empty when VISIBLE.
+  string status_reason = 34;
 }
 
 // PostMetrics is published on ig.post_metrics.v1 when a post's counts

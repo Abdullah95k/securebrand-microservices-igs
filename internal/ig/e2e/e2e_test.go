@@ -405,31 +405,51 @@ func checkTruth(t *testing.T, s *Stack, truth fakeig.ProfileTruth) {
 	}
 
 	type row struct {
-		likes, comments, plays *int64
-		pinned                 *bool
-		children               *int32
-		status                 string
+		likes, comments, plays, collected *int64
+		pinned                            *bool
+		children                          *int32
+		status                            string
+		reason                            *string
+		mediaType                         int16
 	}
 	stored := map[int64]row{}
-	rows, err := db.Query(ctx, `SELECT media_pk, like_count, comment_count, play_count, is_pinned, child_count, status FROM posts WHERE owner_pk = $1 AND kind <> 'highlight'`, truth.PK)
+	rows, err := db.Query(ctx, `SELECT media_pk, like_count, comment_count, play_count, is_pinned, child_count, status,
+		status_reason, media_type, comments_collected FROM posts WHERE owner_pk = $1 AND kind <> 'highlight'`, truth.PK)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for rows.Next() {
 		var pk int64
 		var r row
-		if err := rows.Scan(&pk, &r.likes, &r.comments, &r.plays, &r.pinned, &r.children, &r.status); err != nil {
+		if err := rows.Scan(&pk, &r.likes, &r.comments, &r.plays, &r.pinned, &r.children, &r.status, &r.reason, &r.mediaType,
+			&r.collected); err != nil {
 			t.Fatal(err)
 		}
 		stored[pk] = r
 	}
 	rows.Close()
-	want := 0
+	want, walled := 0, 0
 	for _, pt := range truth.Posts {
 		r, ok := stored[pt.PK]
 		if pt.Gated {
-			if ok {
-				t.Errorf("%s: gated post %d stored", truth.Username, pt.PK)
+			// A walled post is stored from the grid's fields, unavailable,
+			// with no counts (REQ-008 fix 15). A walled reel has the counts
+			// the reels tab gave.
+			walled++
+			mt := int16(1)
+			var likes, comments, plays *int64
+			switch {
+			case pt.Video:
+				mt, likes, comments, plays = 2, pt.Likes, &pt.CommentCount, pt.Plays
+			case pt.Carousel > 0:
+				mt = 8
+			}
+			if !ok || r.status != "unavailable" || r.reason == nil || *r.reason != "login_wall" || !eqPtr(r.likes, likes) ||
+				!eqPtr(r.comments, comments) || !eqPtr(r.plays, plays) || r.collected != nil || r.mediaType != mt ||
+				r.pinned == nil || *r.pinned != pt.Pinned {
+				t.Errorf("%s: walled post %d: stored %v, %s (%v), type %d, likes %v/%v comments %v/%v plays %v/%v collected %v",
+					truth.Username, pt.PK, ok, r.status, show(r.reason), r.mediaType, show(r.likes), show(likes), show(r.comments),
+					show(comments), show(r.plays), show(plays), show(r.collected))
 			}
 			continue
 		}
@@ -446,10 +466,14 @@ func checkTruth(t *testing.T, s *Stack, truth fakeig.ProfileTruth) {
 		if pt.Carousel > 0 && (r.children == nil || int(*r.children) != pt.Carousel) {
 			t.Errorf("%s: carousel %d has %v children, want %d", truth.Username, pt.PK, r.children, pt.Carousel)
 		}
+		// The persister keeps each post's visible top-level comments counted.
+		if len(pt.Comments) > 0 && (r.collected == nil || *r.collected != int64(len(pt.Comments))) {
+			t.Errorf("%s: post %d: %v comments counted, want %d", truth.Username, pt.PK, show(r.collected), len(pt.Comments))
+		}
 		checkComments(t, s, truth.Username, pt)
 	}
-	if len(stored) != want {
-		t.Errorf("%s: %d posts stored, want %d", truth.Username, len(stored), want)
+	if len(stored) != want+walled {
+		t.Errorf("%s: %d posts stored, want %d and %d walled", truth.Username, len(stored), want, walled)
 	}
 	var media int
 	if err := db.QueryRow(ctx, `SELECT count(DISTINCT coalesce(parent_media_pk, media_pk)) FROM media WHERE user_pk = $1 AND owner_type = 'post'`,
@@ -499,7 +523,7 @@ func checkComments(t *testing.T, s *Stack, user string, pt fakeig.PostTruth) {
 
 func eqPtr(a, b *int64) bool { return (a == nil && b == nil) || (a != nil && b != nil && *a == *b) }
 
-func show(p *int64) any {
+func show[T any](p *T) any {
 	if p == nil {
 		return "nil"
 	}

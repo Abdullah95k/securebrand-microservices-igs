@@ -469,6 +469,23 @@ A job ends `partial` when posts failed, or when a grid ended before the job's ag
 
 `IgsIgJobsPartial` fires when a quarter of jobs end so. The job's completeness (`GET /v1/jobs/{id}`) says which posts and grids. If the grids end at the same depth everywhere, it is the depth limit: raise it with the owner (C1's recordings) rather than with retries.
 
+**Walled posts** (REQ-008 fix 15). About 2.6% of post pages show only a login wall to logged-out readers. After three fresh identities see the wall, igs:
+- stores and publishes the post from what the grid gave: its ID, shortcode, time, type and pinned flag, with status `unavailable` and `status_reason` `login_wall`;
+- leaves its counts empty, never 0. A walled reel still gets the views, likes and comment count the reels tab serves;
+- reads none of its comments (`comments_state` `none`), and publishes no media;
+- counts it in the job's `posts_gated`, and `posts_walled_published` when it was published. A post already stored keeps what was read before.
+
+Walled posts get no refreshes. If a later full run reads the page, the post becomes `visible`. A post that is gone (deleted, archived or made private) has `status_reason` `not_found`. On `content.post.v1`, a walled post isn't `is_deleted`: its extras say `"status": "unavailable", "status_reason": "login_wall"`.
+
+**Per-post comment coverage** (REQ-008 fix 15). When a job ends, each visible post it read gets `posts.comments_state` (in the API as `comments_state`):
+- `complete`: the read went from the first comment page to the last, or the post has no comments;
+- `truncated`: a login wall stopped the read;
+- `partial`: the job's comment cap (`max_comments_per_post`) stopped it, or it didn't finish (a failed task, a cancelled job);
+- `none`: never read (walled posts, and posts read before this fix);
+- a scheduled refresh reads only the comments since the last read, so it keeps the last state (`none` becomes `partial`); a skipped post (unchanged, or comments not asked for) keeps its state too.
+
+`posts.comments_collected` is the post's visible top-level comments stored. The persister keeps it current as comments arrive or are marked deleted. Logged out, Instagram serves no replies, while its comment count includes them: compare the two only as information. The job's completeness gains `posts_capped`.
+
 ## Schedule
 
 The planner runs each scheduled profile at its tier's interval, and its profile query every `ig.schedule.profile_refresh` (24 h). The post refresh re-reads the comments and counts of posts from the last `ig.schedule.post_refresh_window` (7 days), `post_refresh_per_run` posts at a time; each post's refreshes start at its profile's interval and double.

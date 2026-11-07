@@ -54,10 +54,11 @@ func TestAPIJobsAndReads(t *testing.T) {
 	}
 	since := time.Now().Add(-365 * 24 * time.Hour)
 	truth, _ := s.World.Truth(p.Username, since)
-	want := 0
+	// Walled posts are listed too, unavailable (REQ-008 fix 15).
+	want, walled := len(truth.Posts), 0
 	for _, pt := range truth.Posts {
-		if !pt.Gated {
-			want++
+		if pt.Gated {
+			walled++
 		}
 	}
 	// A highlight's items are posts too (kind highlight).
@@ -84,6 +85,19 @@ func TestAPIJobsAndReads(t *testing.T) {
 		if posts[i].TakenAt.After(posts[i-1].TakenAt) {
 			t.Fatalf("posts out of order at %d", i)
 		}
+	}
+	for _, x := range posts {
+		if x.Status == "unavailable" {
+			walled--
+			if x.StatusReason == nil || *x.StatusReason != "login_wall" || (x.MediaType != 2 && (x.LikeCount != nil || x.CommentCount != nil)) {
+				t.Errorf("walled post %d: %+v", x.MediaPK, x)
+			}
+		} else if x.CommentCount != nil && *x.CommentCount > 0 && (x.CommentsCollected == nil || *x.CommentsCollected == 0) {
+			t.Errorf("post %d: %d comments, none counted as collected", x.MediaPK, *x.CommentCount)
+		}
+	}
+	if walled != 0 {
+		t.Errorf("%d walled posts not listed as unavailable", walled)
 	}
 	var withComments api.Post
 	for _, x := range posts {

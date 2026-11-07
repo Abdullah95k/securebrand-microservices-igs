@@ -29,7 +29,14 @@ const (
 	PostComplete  = "complete"
 	PostTruncated = "truncated"
 	PostSkipped   = "skipped" // unchanged since the last scrape, or no comments
-	PostFailed    = "failed"
+	// PostCapped: the read stopped at the job's comment cap.
+	PostCapped = "capped"
+	// PostUpdated: a scheduled read of the comments since the last one,
+	// which reached its stop.
+	PostUpdated = "updated"
+	// PostGated: the post page was walled for every identity tried.
+	PostGated  = "gated"
+	PostFailed = "failed"
 )
 
 func key(job, name string) string { return redisx.KeyPrefix + "{job:" + job + "}:" + name }

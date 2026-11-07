@@ -151,6 +151,33 @@ func TestCommentDeleted(t *testing.T) {
 	}
 }
 
+// A walled post (REQ-008 fix 15) is published from the grid's fields as
+// unavailable, not deleted, with no counts; a gone one is deleted.
+func TestWalledPost(t *testing.T) {
+	outs := Map(&igv1.Post{Obs: obs("w1"), MediaPk: 11, Shortcode: "WAL1", OwnerPk: 42, TakenAt: timestamppb.New(at),
+		MediaType: igv1.MediaType_MEDIA_TYPE_VIDEO, ProductType: "clips", Status: igv1.PostStatus_POST_STATUS_UNAVAILABLE,
+		StatusReason: "login_wall"})
+	p := one[*contentv1.Post](t, outs, topics.ContentPost)
+	var x map[string]any
+	if err := json.Unmarshal([]byte(p.ExtrasJson), &x); err != nil {
+		t.Fatal(err)
+	}
+	if p.IsDeleted || p.Likes != nil || p.Comments != nil || p.Views != nil || p.Kind != "reel" ||
+		p.Url != "https://www.instagram.com/p/WAL1/" || x["status"] != "unavailable" || x["status_reason"] != "login_wall" {
+		t.Fatalf("walled post %+v, extras %v", p, x)
+	}
+	for _, o := range outs {
+		if o.Topic == topics.ContentMetrics {
+			t.Fatalf("a walled post published metrics: %+v", o.Msg)
+		}
+	}
+	gone := one[*contentv1.Post](t, Map(&igv1.Post{Obs: obs("w2"), MediaPk: 11, OwnerPk: 42, TakenAt: timestamppb.New(at),
+		Status: igv1.PostStatus_POST_STATUS_UNAVAILABLE, StatusReason: "not_found"}), topics.ContentPost)
+	if !gone.IsDeleted {
+		t.Fatalf("gone post %+v, want deleted", gone)
+	}
+}
+
 // Highlight items are posts of kind highlight.
 func TestHighlightItemsArePosts(t *testing.T) {
 	outs := Map(&igv1.Highlight{Obs: obs("h1"), HighlightId: 17, UserPk: 42, Title: "Trips",

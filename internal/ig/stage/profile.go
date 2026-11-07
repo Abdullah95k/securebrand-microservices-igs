@@ -522,7 +522,7 @@ func (s *ProfileStage) gridPage(ctx context.Context, t *igstaskv1.Task, id *sess
 		}
 		children = append(children, task.NewPost(t, commonv1.CrawlMode_CRAWL_MODE_FULL, &igstaskv1.PostScope{
 			MediaPk: it.MediaPK, Shortcode: it.Shortcode, OwnerPk: owner, TakenAt: it.TakenAt, Pinned: it.Pinned,
-			Permalink: permalink(d.base(), it.Shortcode, it.ProductType),
+			Permalink: permalink(d.base(), it.Shortcode, it.ProductType), MediaType: it.MediaType, ProductType: it.ProductType,
 		}))
 		st.PostsSeen++
 		if !taken.IsZero() {

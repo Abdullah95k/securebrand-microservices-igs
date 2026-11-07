@@ -44,8 +44,16 @@ type Post struct {
 	VideoDurationMS      *int64          `json:"video_duration_ms,omitempty"`
 	MediaIDs             []string        `json:"media_ids,omitempty"`
 	Status               string          `json:"status"`
-	FirstSeenAt          time.Time       `json:"first_seen_at"`
-	LastSeenAt           time.Time       `json:"last_seen_at"`
+	// Why the post is unavailable: login_wall (its page is walled for
+	// logged-out readers; only the grid's fields are known) or not_found.
+	StatusReason *string `json:"status_reason,omitempty"`
+	// Comment coverage, as of the post's last read (REQ-008 fix 15):
+	// complete, partial, truncated or none; and the visible top-level
+	// comments stored. Logged out, replies are not served.
+	CommentsState     string    `json:"comments_state"`
+	CommentsCollected *int64    `json:"comments_collected,omitempty"`
+	FirstSeenAt       time.Time `json:"first_seen_at"`
+	LastSeenAt        time.Time `json:"last_seen_at"`
 	// Kind is post, video, reel or highlight (an item of HighlightID).
 	Kind        string `json:"kind"`
 	HighlightID *int64 `json:"highlight_id,omitempty"`
@@ -54,14 +62,15 @@ type Post struct {
 const selectPost = `SELECT media_pk, shortcode, permalink, owner_pk, taken_at, media_type, product_type, caption, caption_edited,
 	hashtags, mentions, accessibility_caption, location, usertags, coauthors, music, topics, ai_label, like_count, counts_hidden,
 	comment_count, commenting_disabled, play_count, is_pinned, child_count, video_duration_ms, media_ids, status,
-	first_seen_at, last_seen_at, kind, highlight_id FROM posts`
+	first_seen_at, last_seen_at, kind, highlight_id, status_reason, comments_state, comments_collected FROM posts`
 
 func scanPost(row pgx.CollectableRow) (*Post, error) {
 	var p Post
 	err := row.Scan(&p.MediaPK, &p.Shortcode, &p.Permalink, &p.OwnerPK, &p.TakenAt, &p.MediaType, &p.ProductType, &p.Caption,
 		&p.CaptionEdited, &p.Hashtags, &p.Mentions, &p.AccessibilityCaption, &p.Location, &p.Usertags, &p.Coauthors, &p.Music,
 		&p.Topics, &p.AILabel, &p.LikeCount, &p.CountsHidden, &p.CommentCount, &p.CommentingDisabled, &p.PlayCount, &p.IsPinned,
-		&p.ChildCount, &p.VideoDurationMS, &p.MediaIDs, &p.Status, &p.FirstSeenAt, &p.LastSeenAt, &p.Kind, &p.HighlightID)
+		&p.ChildCount, &p.VideoDurationMS, &p.MediaIDs, &p.Status, &p.FirstSeenAt, &p.LastSeenAt, &p.Kind, &p.HighlightID,
+		&p.StatusReason, &p.CommentsState, &p.CommentsCollected)
 	return &p, err
 }
 
