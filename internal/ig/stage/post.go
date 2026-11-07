@@ -117,7 +117,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 				return classOutcome(t, detect.SchemaDrift, fmt.Sprint(rep.Missing), st.Cursor, c)
 			}
 			metrics.ParseTotal.WithLabelValues("post", "1", "ok").Inc()
-			pageRef = d.keepRaw(ctx, "post_page", pl.HTML, map[string]any{"shortcode": sc.Shortcode})
+			pageRef = d.keepRaw(ctx, "post_page", parse.ParserPost, pl.HTML, map[string]any{"shortcode": sc.Shortcode})
 			out, stop := s.publish(ctx, t, sc, res, pageRef, c)
 			if stop {
 				return out

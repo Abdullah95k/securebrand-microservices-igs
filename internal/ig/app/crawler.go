@@ -27,6 +27,7 @@ import (
 	igdetect "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/stage"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
@@ -230,8 +231,9 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		}
 	}
 	if o.RawS3 != nil && g.CaptureRaw != "none" {
-		sink := rawsink.New(o.RawS3, cfg.S3.RawBucket, cfg.S3.RawPrefix, cfg.S3.RawKeepPrefix)
-		gql.Raw, gql.CaptureAll = sink, g.CaptureRaw == "all"
+		sink := rawsink.New(o.RawS3, cfg.S3.RawBucket, rawsink.Options{Prefix: cfg.S3.RawPrefix, KeepPrefix: cfg.S3.RawKeepPrefix,
+			SamplePrefix: cfg.S3.RawSamplePrefix, All: g.CaptureRaw == "all", Sample: g.RawSample, Versions: parse.VersionOf})
+		gql.Raw = sink
 		c.Components = append(c.Components, func(ctx context.Context) error { return sink.Run(ctx, time.Minute) })
 	}
 	kcfg, err := clients.Kafka(cfg, "-igs-crawler")

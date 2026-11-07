@@ -1926,16 +1926,16 @@ entities:
     notes: 'Tested 5 Nov: every visit redirected to the login page. Stays out of igs.'
   - name: raw responses
     meaning: Each answer igs received
-    type: 'zstd JSONL line: at, query, class, vars, body or text'
+    type: 'zstd JSONL line: at, query, doc_id, parser, parser_version, class, vars, body or text'
     example: '-'
     present: always
     present_pct: null
     source: every request
-    stored_at: 'S3 raw bucket raw/ (all, capture_raw: all) and raw-failures/'
+    stored_at: 'S3 raw bucket: failures under raw-failures/, a 1% sample under raw-sample/ (both kept), the rest under raw/ (capture_raw: all; 30 days on the platform''s bucket)'
     published_at: Observation.raw_ref = s3://bucket/key#line
     history: snapshots
     personal_data: true
-    notes: 'No parser version on the line (it''s on the event). Kept forever (raw_payload_days: 0).'
+    notes: Each line names its parser and parser version (REQ-008 fix 17).
 not_available_logged_out:
 - replies to comments (only the reply count is served)
 - views on photos and carousels; shares, saves and reposts on everything
@@ -2027,8 +2027,8 @@ answers:
   - 'Bio: yes. Every bio link (URL and title): yes. Website: as the first bio link (no separate external_url is served). Linked Facebook page: the name only; the ID is dropped today, fix planned.'
   - No history in Postgres beyond the latest; each change is a new event version.
   Raw responses:
-  - 'Every answer, not just failures (capture_raw: all): zstd-compressed JSON lines in the raw S3 bucket (raw/, and raw-failures/). Each event''s raw_ref points at its line (s3://bucket/key#line).'
-  - 'Kept forever (raw_payload_days: 0). The line has no parser version (it''s on the event).'
+  - 'Every answer, not just failures (capture_raw: all): zstd-compressed JSON lines in the raw S3 bucket. Each event''s raw_ref points at its line (s3://bucket/key#line).'
+  - 'Failures (raw-failures/) and a 1% sample (raw-sample/) are kept forever; the rest (raw/) for 30 days on the platform''s bucket (D-004). Each line names its query, doc_id, parser and parser version (REQ-008 fix 17).'
   - 'Measured sizes on the wire: page load 132 to 138 KB, post page 117 to 119 KB, grid page 10 KB (12 posts) or 24 KB (50), comments 4 to 9 KB, profile 5 to 6 KB, reels page 16 KB (50 reels).'
   Volumes (per account per day):
   - 'Posts: about 2.1 (measured: 269,703 posts from 348 accounts over a year).'

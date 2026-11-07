@@ -83,7 +83,8 @@ Outside the platform (a direct connection), igs sets its search path itself, aft
 
 - **Kafka:** creates no topic and registers no schema (`hooks.topics` and `hooks.schemas` are off). It reads and writes the topics the platform created in `infra/production/kafka.tf`.
 - **S3:** creates no bucket, sets no lifecycle rule, and keeps to its prefixes:
-  - `igs/keep/` in `S3_BUCKET_RAW`: raw failures, kept;
+  - `igs/keep/failures/` in `S3_BUCKET_RAW`: raw failures, kept;
+  - `igs/keep/sample/` in `S3_BUCKET_RAW`: a 1% sample of the other raw responses, kept (D-004);
   - `igs/30d/` in `S3_BUCKET_RAW`: the other raw responses. A platform rule may expire them after 30 days;
   - `igs/` in `S3_BUCKET_MEDIA`: media files, deleted by igs once the analysis service acknowledged them. igs's orphan sweep lists and deletes under `igs/` only.
 - **Postgres:** schema `ig` in `POSTGRES_DATABASE`, created and migrated by the pre-install/upgrade hook (`igsctl migrate up`).

@@ -43,10 +43,12 @@ config:
     db: 2
   s3:
     # The platform's shared buckets (S3_BUCKET_RAW, S3_BUCKET_MEDIA): igs
-    # keeps to its prefixes and creates no bucket. Raw failures are kept
-    # under igs/keep/; the other raw responses go under igs/30d/, which
-    # the platform may expire after 30 days; media files under igs/.
-    raw_keep_prefix: igs/keep/
+    # keeps to its prefixes and creates no bucket. Raw failures and a 1%
+    # sample are kept for good under igs/keep/ (D-004); the other raw
+    # responses go under igs/30d/, which the platform may expire after 30
+    # days; media files under igs/.
+    raw_keep_prefix: igs/keep/failures/
+    raw_sample_prefix: igs/keep/sample/
     raw_prefix: igs/30d/
     media_prefix: igs/
     manage_buckets: false

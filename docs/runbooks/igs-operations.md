@@ -151,7 +151,15 @@ igs keeps what it collects forever (the owner, 2026-11-03): profiles and their s
 - A post's likes, comments and views (`post_metrics`) and a comment's likes and replies (`comment_metrics`) are kept each time they change.
 - A post, comment or highlight item that disappears is marked `unavailable` or `deleted`, never removed.
 
-**Raw responses are kept** (`ig.capture_raw: all`, architecture §2.5): every GraphQL answer and post page goes to the raw bucket as zstd JSONL (`raw/<query>/<yyyy/mm/dd/hh>/...`, failures under `raw-failures/`). Every event carries the reference of the response it came from (`raw_ref`: `s3://bucket/key#line`), so a parser fix or a new field can be applied to past data without collecting again. They take about as much as the proxy traffic before compression, a fifth to a tenth of it after: plan the raw bucket for 0.1 to 0.5 GB a day per 1,000 long-tail profiles, more with hot and warm ones.
+**Raw responses are kept** (`ig.capture_raw: all`, architecture §2.5): every GraphQL answer and post page goes to the raw bucket as zstd JSONL, `<prefix><query>/<yyyy/mm/dd/hh>/...`. Every event carries the reference of the response it came from (`raw_ref`: `s3://bucket/key#line`), so a parser fix or a new field can be applied to past data without collecting again. Following D-004, each kind has a prefix of its own:
+
+| Kind | Prefix (igs's bucket / the platform's) | Kept |
+|---|---|---|
+| Failures: any class but OK, and answers a parser found drifted | `s3.raw_keep_prefix`: `raw-failures/` / `igs/keep/failures/` | for good |
+| A sample of the OK answers (`ig.raw_sample`, 1%) | `s3.raw_sample_prefix`: `raw-sample/` / `igs/keep/sample/` | for good |
+| The other OK answers (`capture_raw: all`) | `s3.raw_prefix`: `raw/` / `igs/30d/` | until a bucket rule expires them (30 days on the platform's bucket) |
+
+Each line holds `at`, `query`, `doc_id` (GraphQL answers), `parser` and `parser_version` (the version of the parser that read it, 0 if unknown), `class`, `vars`, and `body` (JSON) or `text` (HTML). A re-parse picks the lines a fixed parser affects by `parser` and `parser_version`. With `capture_raw: failures`, failures and the sample are still kept. They take about as much as the proxy traffic before compression, a fifth to a tenth of it after: plan the raw bucket for 0.1 to 0.5 GB a day per 1,000 long-tail profiles, more with hot and warm ones.
 
 Nothing expires by age, the job log included (the owner, 6 November 2026): `jobs_days` and `media_rows_days` are 0. A media row stays after its file is deleted, as the record of what was downloaded. Plan Postgres for about 8,000 jobs a day per 1,000 long-tail profiles (a few KB each).
 
@@ -347,9 +355,18 @@ When page loads stop carrying the tokens and doc_ids the client needs (JavaScrip
 
 `IgsIgSchemaDrift` fires when responses of a query miss required fields. Instagram changed the shape.
 
-1. With `ig.capture_raw: failures` (the default), the failing responses are in the raw bucket under `raw-failures/<query>/`.
+1. The failing responses are in the raw bucket under `s3.raw_keep_prefix` (`raw-failures/<query>/`, or `igs/keep/failures/<query>/` on the platform's bucket), whatever `ig.capture_raw` is, short of `none`.
 2. Fix the parser in `internal/ig/parse` against them. Add the scrubbed response as a golden fixture (`internal/ig/fixtures`), then release.
 3. `IgsIgOptionalFieldDrift` is the quiet version: an optional field went missing far more often than a week ago. Nothing fails, but the data loses the field.
+
+## Raw responses not kept
+
+`IgsIgRawResponsesNotKept` fires when a crawler did not keep raw responses.
+
+1. **Why:** uploads to the raw bucket fail (`igs_raw_upload_failures_total`, with the crawler logging `rawsink: upload failed`). A failed object waits in the pod and is tried again every minute, so its `raw_ref`s still come good once S3 answers. `igs_raw_backlog_bytes` shows what waits.
+2. **`reason="backlog"`:** the waiting bytes reached 256 MB. New responses get no `raw_ref`, rather than one that might never be written. Crawling and publishing go on.
+3. **`reason="lost"`:** a crawler stopped (a rollout, an eviction) while S3 refused its uploads, and gave up after 20 s. Each object is logged (`rawsink: object never written; its references dangle`), so the `raw_ref`s naming it are known. A crawler killed outright (OOM) loses up to a minute of lines without that log.
+4. **What to do:** check the raw bucket and the crawlers' access to it (credentials, the bucket's existence, the S3 endpoint). Nothing needs replaying; the data itself was published.
 
 ## Topics and schemas
 

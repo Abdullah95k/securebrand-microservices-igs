@@ -20,3 +20,27 @@ const (
 	ReelsVersion      = 1
 	HighlightsVersion = 1
 )
+
+// ParserPost names the post page's parser on raw lines; the others are the
+// registry's parser names (configs/ig/queries.seed.yaml).
+const ParserPost = "post"
+
+// VersionOf is the version of the parser named (a registry query's parser,
+// or ParserPost), stamped on each raw response line; 0 when unknown.
+func VersionOf(parser string) int {
+	switch parser {
+	case "profile":
+		return ProfileVersion
+	case "grid":
+		return GridVersion
+	case ParserPost:
+		return PostVersion
+	case "comments":
+		return CommentsVersion
+	case "reels":
+		return ReelsVersion
+	case "highlights":
+		return HighlightsVersion
+	}
+	return 0
+}

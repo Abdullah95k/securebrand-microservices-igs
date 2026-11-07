@@ -22,8 +22,20 @@ import (
 // request's template values (page_id, feedback_id, ...) so they can be
 // parsed again with their context.
 type RawSink interface {
-	// Capture keeps one response and returns its reference.
-	Capture(ctx context.Context, query string, cls detect.Class, body []byte, vars map[string]any) string
+	// Capture offers one response and returns its reference, or "" when
+	// the sink does not keep it (rawsink keeps failures, a sample and,
+	// with capture_raw all, the rest).
+	Capture(ctx context.Context, r Raw) string
+}
+
+// Raw is one response offered to a RawSink.
+type Raw struct {
+	Query  string // registry name, or a page load's name (post_page)
+	DocID  string
+	Parser string // the parser that reads it (registry.Query.Parser)
+	Class  detect.Class
+	Body   []byte
+	Vars   map[string]any
 }
 
 // Request is one logical GraphQL call.
@@ -67,9 +79,9 @@ type Client struct {
 	GlobalRPS   int
 	// Builder writes the platform's request (internal/fb/client.Builder
 	// for fbs).
-	Builder    RequestBuilder
-	Raw        RawSink
-	CaptureAll bool
+	Builder RequestBuilder
+	// Raw is offered every response; it decides which to keep.
+	Raw RawSink
 	// Ceiling, when set, replaces GlobalRPS with the fleet ceiling AIMD
 	// publishes; Outcomes receives every response (class, lane, wire
 	// bytes) for AIMD and the traffic budget.
@@ -96,10 +108,11 @@ func (c *Client) Parsed(resp *Response, ok bool) {
 	if c.Breakers != nil && resp.Query.DocID != "" {
 		c.Breakers.Observe(breakerKey(resp.Query), !ok)
 	}
-	// Also with CaptureAll: that copy is under raw/ as OK, and the drifted
-	// ones belong under raw-failures/ where replay looks first.
+	// Also when the OK copy was kept: the drifted ones belong with the
+	// failures, kept for good, where replay looks first.
 	if !ok && c.Raw != nil && resp.Class == detect.OK {
-		c.Raw.Capture(context.Background(), resp.Query.Name, detect.SchemaDrift, resp.Body, resp.Vars)
+		c.Raw.Capture(context.Background(), Raw{Query: resp.Query.Name, DocID: resp.Query.DocID, Parser: resp.Query.Parser,
+			Class: detect.SchemaDrift, Body: resp.Body, Vars: resp.Vars})
 	}
 }
 
@@ -219,8 +232,8 @@ func (c *Client) do(ctx context.Context, id *session.Identity, q registry.Query,
 	}
 	metrics.Requests.WithLabelValues(q.Name, cls.String(), tier).Inc()
 	var ref string
-	if c.Raw != nil && (c.CaptureAll || cls != detect.OK) {
-		ref = c.Raw.Capture(ctx, q.Name, cls, tr.Body, req.Vars)
+	if c.Raw != nil {
+		ref = c.Raw.Capture(ctx, Raw{Query: q.Name, DocID: q.DocID, Parser: q.Parser, Class: cls, Body: tr.Body, Vars: req.Vars})
 	}
 	return &Response{Query: q, Parts: parts, Body: tr.Body, Status: tr.Status, ContentType: ct, Class: cls,
 		Reason: reason, Errors: errs, Elapsed: elapsed, Vars: req.Vars, BytesIn: tr.BytesIn, BytesOut: tr.BytesOut, RawRef: ref}, nil

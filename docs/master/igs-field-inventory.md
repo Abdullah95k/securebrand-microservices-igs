@@ -304,7 +304,7 @@ Nothing about discovery is published to Kafka today. `discovery.candidate.v1` do
 | `erasure events` | A person's or profile's data erased | message | - | rare | API | `erasure_requests`; `suppression` | `ig.erasure.v1` | versions | yes | Dormant unless used. |
 | `live, playlists, community posts` | - | - | - | unknown | - | not stored | not published | - | no | Not on Instagram (live: not collected). |
 | `tagged tab` | Posts others tagged the account in | - | - | logged_in_only | the profile's tagged tab | not stored | not published | - | no | Tested 5 Nov: every visit redirected to the login page. Stays out of igs. |
-| `raw responses` | Each answer igs received | zstd JSONL line: at, query, class, vars, body or text | - | always | every request | S3 raw bucket `raw/` (all, `capture_raw: all`) and `raw-failures/` | `Observation.raw_ref` = `s3://bucket/key#line` | snapshots | yes | No parser version on the line (it's on the event). Kept forever (`raw_payload_days: 0`). |
+| `raw responses` | Each answer igs received | zstd JSONL line: at, query, doc_id, parser, parser_version, class, vars, body or text | - | always | every request | S3 raw bucket: failures under `raw-failures/`, a 1% sample under `raw-sample/` (both kept), the rest under `raw/` (`capture_raw: all`; 30 days on the platform's bucket) | `Observation.raw_ref` = `s3://bucket/key#line` | snapshots | yes | Each line names its parser and parser version (REQ-008 fix 17). |
 
 ## 3. Answers
 
@@ -379,8 +379,8 @@ Nothing about discovery is published to Kafka today. `discovery.candidate.v1` do
 
 ### 11. Raw responses
 
-- Every answer, not just failures (`capture_raw: all`): zstd-compressed JSON lines in the raw S3 bucket (`raw/`, and `raw-failures/`). Each event's `raw_ref` points at its line (`s3://bucket/key#line`).
-- Kept forever (`raw_payload_days: 0`). The line has no parser version (it's on the event).
+- Every answer, not just failures (`capture_raw: all`): zstd-compressed JSON lines in the raw S3 bucket. Each event's `raw_ref` points at its line (`s3://bucket/key#line`).
+- Failures (`raw-failures/`) and a 1% sample (`raw-sample/`) are kept forever; the rest (`raw/`) for 30 days on the platform's bucket (D-004). Each line names its query, doc_id, parser and parser version (REQ-008 fix 17).
 - Measured sizes on the wire: page load 132 to 138 KB, post page 117 to 119 KB, grid page 10 KB (12 posts) or 24 KB (50), comments 4 to 9 KB, profile 5 to 6 KB, reels page 16 KB (50 reels).
 
 ### 12. Volumes (per account per day)

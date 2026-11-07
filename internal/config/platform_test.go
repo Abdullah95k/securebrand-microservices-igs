@@ -140,6 +140,9 @@ func TestS3PrefixesValidated(t *testing.T) {
 		{"media prefix without slash", func(s *S3) { s.MediaPrefix = "igs" }, "s3.media_prefix"},
 		{"keep inside raw", func(s *S3) { s.RawPrefix, s.RawKeepPrefix = "igs/", "igs/keep/" }, "s3.raw_prefix"},
 		{"same prefix", func(s *S3) { s.RawPrefix, s.RawKeepPrefix = "igs/raw/", "igs/raw/" }, "s3.raw_prefix"},
+		{"sample inside raw", func(s *S3) { s.RawPrefix, s.RawSamplePrefix = "igs/30d/", "igs/30d/sample/" }, "s3.raw_sample_prefix"},
+		{"failures inside the sample", func(s *S3) { s.RawSamplePrefix, s.RawKeepPrefix = "igs/keep/", "igs/keep/failures/" }, "s3.raw_sample_prefix"},
+		{"no sample prefix", func(s *S3) { s.RawSamplePrefix = "" }, "s3.raw_sample_prefix"},
 	} {
 		c, err := Load("")
 		if err != nil {
@@ -151,7 +154,7 @@ func TestS3PrefixesValidated(t *testing.T) {
 		}
 	}
 	c, _ := Load("")
-	c.S3.RawPrefix, c.S3.RawKeepPrefix, c.S3.MediaPrefix = "igs/30d/", "igs/keep/", "igs/"
+	c.S3.RawPrefix, c.S3.RawKeepPrefix, c.S3.RawSamplePrefix, c.S3.MediaPrefix = "igs/30d/", "igs/keep/failures/", "igs/keep/sample/", "igs/"
 	if err := c.Validate(); err != nil {
 		t.Errorf("the platform's prefixes: %v", err)
 	}

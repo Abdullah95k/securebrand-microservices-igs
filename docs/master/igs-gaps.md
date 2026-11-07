@@ -78,7 +78,7 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 | E5 | **Met** | A comment is keyed by its post on `ig.comment.v1` and `content.comment.v1`; others by their own ID | - | - |
 | E6 | **Met** | Counts are optional in protos and nullable in tables. Hidden likes are stored as NULL with `counts_hidden` | (`is_business` is a plain bool, so "unknown" reads as `false`; an added optional field is in the field inventory's "Planned") | 0.25 day |
 | E7 | **Partly** | Caption and comment edits: the old text goes to `post_edits` and `comment_edits`, and a new version is published. Post deletion: `unavailable` when a re-read (within 7 days) finds it gone | **Comment deletions are never detected or published** (the persister supports `deleted`, but no stage emits it). Posts older than 7 days are never re-read, so their deletion is never seen. Bio and link history is only in the event stream (Postgres keeps the latest). Fix: after a **complete** comment re-read (every page; collected equals reported), publish the comments not returned as deleted; a re-read at 30 days for deletion, like fbs; optionally a `profile_edits` table. **Comment deletions and the 30-day re-read: done (REQ-008 fix 14).** | 2 days |
-| E8 | **Partly** | Every raw response kept forever (`capture_raw: all`, no bucket lifecycle) in `igs-raw` (`raw/`, `raw-failures/`), with `raw_ref` on each event | The raw line has **no parser version** (it's on the event). There's no re-parse tool. Fix: Plans, raw responses | 0.25 day for the version; 2 days for re-parse |
+| E8 | **Partly** | Failures and a 1% sample kept forever, the rest for 30 days (D-004), each kind under a prefix of its own; every line names its query, doc_id, parser and parser version; failed uploads are tried again, so a `raw_ref` has its object (REQ-008 fix 17) | There's no re-parse tool yet | 2 days for re-parse |
 | E9 | **Partly** | Bio, every bio link (URL and title) and the website (first link) are captured from the first read | The **linked Facebook page's ID is dropped**, and its name is put in `content.account.v1 Link.url`. Fix: keep the ID (added ig field and column); publish it as a link with platform and ID | 0.5 day |
 | E10 | **Partly** | Per job: counters, completeness (posts complete or truncated, median and minimum ratio, comments reported or collected) and errors on `ig.job.v1`; truncation reasons in `crawl_cursors` | Per item: `posts.comments_state` and `comments_collected` are never written. **Walled posts (2.6%) publish nothing.** Nothing goes to a shared coverage topic. Fix: write per-post comment coverage; publish walled posts from grid fields with reason `gated`; `collection.coverage.v1` with E2. **Per-post coverage and walled posts: done (REQ-008 fix 15; the reason is `login_wall`). `collection.coverage.v1` comes with contract v1.0.0 (REQ-019).** | 1.5 days |
 
@@ -173,15 +173,15 @@ Plans only, not built. Each waits for the owner's approval.
 
 ### 3. Raw responses
 
-**Kept today:**
-- **every** answer, as zstd JSON lines `{at, query, class, vars, body|text}` in `igs-raw` (`raw/`, and `raw-failures/` for failed parses);
-- no lifecycle rule, so kept forever;
-- every event's `raw_ref` = `s3://bucket/key#line`.
+**Kept today** (REQ-008 fix 17, D-004):
+- **every** answer, as zstd JSON lines `{at, query, doc_id, parser, parser_version, class, vars, body|text}`;
+- failures (`raw-failures/`, `igs/keep/failures/`) and a 1% sample (`raw-sample/`, `igs/keep/sample/`) kept forever; the rest (`raw/`, `igs/30d/`) for 30 days on the platform's bucket;
+- every event's `raw_ref` = `s3://bucket/key#line`; an upload that fails is tried again, so the object exists.
 
 Estimated growth: 2 to 4 GB a day per 1,000 accounts.
 
 **Kept for re-parsing (the plan):**
-1. Add the parser version and doc ID to every line, so a re-parse knows which lines a fixed parser affects. Effort: 0.25 day.
+1. Add the parser version and doc ID to every line, so a re-parse knows which lines a fixed parser affects. **Done** (REQ-008 fix 17).
 2. `igsctl raw reparse --query Q --from T1 --to T2 [--parser-below N]`:
    - reads the lines and runs the current parser;
    - publishes the results as new `ig.*` versions (mode `recrawl`, the original observation time kept in the event);

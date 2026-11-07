@@ -69,14 +69,18 @@ type IG struct {
 	// KeepIdentities keeps a stopping crawler's idle identities (cookies
 	// and tokens, never proxy credentials) in Valkey this long, for the next
 	// pod on the same exits; 0 = off.
-	KeepIdentities time.Duration  `koanf:"keep_identities"`
-	CaptureRaw     string         `koanf:"capture_raw"`
-	Proxy          Proxy          `koanf:"proxy"`
-	QueryBreaker   breaker.Config `koanf:"query_breaker"`
-	AIMD           AIMD           `koanf:"aimd"`
-	Browser        Browser        `koanf:"browser"`
-	Detect         detect.Config  `koanf:"detect"`
-	Limits         IGLimits       `koanf:"limits"`
+	KeepIdentities time.Duration `koanf:"keep_identities"`
+	CaptureRaw     string        `koanf:"capture_raw"`
+	// RawSample is the share of OK responses kept for good under
+	// s3.raw_sample_prefix (D-004: failures and 1% kept forever), with
+	// capture_raw all or failures.
+	RawSample    float64        `koanf:"raw_sample"`
+	Proxy        Proxy          `koanf:"proxy"`
+	QueryBreaker breaker.Config `koanf:"query_breaker"`
+	AIMD         AIMD           `koanf:"aimd"`
+	Browser      Browser        `koanf:"browser"`
+	Detect       detect.Config  `koanf:"detect"`
+	Limits       IGLimits       `koanf:"limits"`
 	// RegistrySync follows Instagram's doc_id rotations (igs-registry-sync):
 	// canary_pages are public profiles (usernames) with regular posts,
 	// comments, reels and highlights.
@@ -318,6 +322,9 @@ func (c *Config) validateIG() []error {
 	case "all", "failures", "none":
 	default:
 		errs = append(errs, fmt.Errorf("ig.capture_raw %q must be all, failures or none", g.CaptureRaw))
+	}
+	if g.RawSample < 0 || g.RawSample > 1 {
+		errs = append(errs, errors.New("ig.raw_sample must be in [0, 1]"))
 	}
 	if _, err := detect.DefaultRules().Apply(g.Detect); err != nil {
 		errs = append(errs, fmt.Errorf("ig.detect: %w", err))
