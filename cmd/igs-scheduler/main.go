@@ -49,7 +49,7 @@ func main() {
 }
 
 func runScheduler(ctx context.Context, cfg *config.Config) error {
-	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema)
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
 	if err != nil {
 		return err
 	}

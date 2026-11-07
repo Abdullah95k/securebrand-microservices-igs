@@ -41,7 +41,7 @@ func main() {
 }
 
 func runCrawler(ctx context.Context, cfg *config.Config, stages []string) error {
-	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema)
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
 	if err != nil {
 		return err
 	}

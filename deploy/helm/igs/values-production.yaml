@@ -11,8 +11,8 @@
 #     (ig.proxy.tiers, tier name isp; phase0/proxies.example.yaml shows
 #     the shape);
 #   - Secret igs-keys, key IGS_IG__PRIVACY__AUTHOR_HMAC_KEY: igs's own key
-#     for the authors' HMAC (32+ random characters, never fbs's). The
-#     platform's Secret has no such key.
+#     for the authors' HMAC, made once by the platform's setup (32 random
+#     bytes as 64 hex characters) and never changed.
 # Nothing here is a secret. Replace every <...> with the platform's value.
 
 image:
@@ -32,6 +32,10 @@ secretEnv:
 config:
   service: {name: igs, env: prod}
   log: {level: info, format: json}
+  # The platform's Valkey has no VALKEY_DB key: by its convention igs uses
+  # logical database 2.
+  redis:
+    db: 2
   s3:
     # The platform's shared buckets (S3_BUCKET_RAW, S3_BUCKET_MEDIA): igs
     # keeps to its prefixes and creates no bucket. Raw failures are kept
@@ -65,7 +69,10 @@ config:
       vet_in_flight: 50
       max_new_per_day: 0         # no cap in production (owner, 6 Nov 2026)
     registry_sync:
-      canary_pages: ["<canary-1>", "<canary-2>", "<canary-3>"]
+      # Three real public accounts: the platform sets them in its own
+      # (private) Argo CD application, as config.ig.registry_sync.
+      # canary_pages[0], [1] and [2]. Real accounts never go in this file.
+      canary_pages: []
 
 hooks:
   # The platform creates igs's topics (infra/production/kafka.tf) and
@@ -77,13 +84,14 @@ hooks:
 
 keda:
   # The lag triggers read the brokers from the pods' KAFKA_BROKERS and log
-  # in with the platform's Kafka user.
+  # in with the platform's Kafka user. The brokers' certificate is signed by
+  # the platform's own CA (KAFKA_CA_CERT).
   bootstrapServersFromEnv: KAFKA_BROKERS
   authSecret: platform-credentials
-  authKeys: {username: KAFKA_USER, password: KAFKA_PASSWORD}
-  # KEDA's spelling of KAFKA_SASL_MECHANISM and KAFKA_TLS.
-  sasl: "<scram_sha512>"
-  tls: "<enable>"
+  authKeys: {username: KAFKA_USER, password: KAFKA_PASSWORD, ca: KAFKA_CA_CERT}
+  # KEDA's spelling of KAFKA_SASL_MECHANISM (SCRAM-SHA-256) and KAFKA_TLS.
+  sasl: scram_sha256
+  tls: enable
 
 alerts:
   enabled: true

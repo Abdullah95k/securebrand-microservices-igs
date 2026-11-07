@@ -1,9 +1,17 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The platform's credentials Secret (platform-credentials) reaches igs as
@@ -146,5 +154,72 @@ func TestS3PrefixesValidated(t *testing.T) {
 	c.S3.RawPrefix, c.S3.RawKeepPrefix, c.S3.MediaPrefix = "igs/30d/", "igs/keep/", "igs/"
 	if err := c.Validate(); err != nil {
 		t.Errorf("the platform's prefixes: %v", err)
+	}
+}
+
+// The platform's Valkey and Kafka present certificates signed by its own CA
+// (DigitalOcean's project CA), handed over as PEM in VALKEY_CA_CERT and
+// KAFKA_CA_CERT: igs trusts it, and a value that is no certificate stops
+// it at start.
+func TestPlatformCA(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "synthetic project CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign}
+	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+	leafKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	leafDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: big.NewInt(2),
+		DNSNames: []string{"valkey.platform.svc", "k1.platform.svc"}, NotBefore: time.Now().Add(-time.Hour),
+		NotAfter: time.Now().Add(time.Hour), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}, caCert, &leafKey.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, _ := x509.ParseCertificate(leafDER)
+	caPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+
+	env := map[string]string{PlatformEnv: "true", "POSTGRES_HOST": "pg", "POSTGRES_DATABASE": "igs", "POSTGRES_USER": "igs",
+		"POSTGRES_PASSWORD": "x", "KAFKA_BROKERS": "k1.platform.svc:25073", "KAFKA_USER": "igs", "KAFKA_PASSWORD": "kpass", "KAFKA_SASL_MECHANISM": "SCRAM-SHA-256",
+		"KAFKA_TLS": "true", "KAFKA_CA_CERT": caPEM, "VALKEY_HOST": "valkey.platform.svc", "VALKEY_PORT": "25061",
+		"VALKEY_TLS": "true", "VALKEY_CA_CERT": caPEM, "POSTGRES_SSLMODE": "require", "POSTGRES_CA_CERT": caPEM, "S3_ENDPOINT": "s3:9000", "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s",
+		"S3_BUCKET_RAW": "r", "S3_BUCKET_MEDIA": "m"}
+	for k, v := range env {
+		t.Setenv(k, v)
+	}
+	c, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Postgres.CAPEM != strings.TrimSpace(caPEM) {
+		t.Error("POSTGRES_CA_CERT not read")
+	}
+	if c.Kafka.SASL.Mechanism != "scram-sha-256" {
+		t.Errorf("kafka sasl %q, want scram-sha-256", c.Kafka.SASL.Mechanism)
+	}
+	for name, tc := range map[string]struct {
+		tls  TLS
+		host string
+	}{"valkey": {c.Redis.TLS, "valkey.platform.svc"}, "kafka": {c.Kafka.TLS, "k1.platform.svc"}} {
+		cfg, err := tc.tls.Config()
+		if err != nil || cfg == nil {
+			t.Fatalf("%s: tls %v", name, err)
+		}
+		if _, err := leaf.Verify(x509.VerifyOptions{Roots: cfg.RootCAs, DNSName: tc.host}); err != nil {
+			t.Errorf("%s: the platform CA's certificate is not trusted: %v", name, err)
+		}
+	}
+	if _, err := (TLS{Enabled: true, CAPEM: "not a certificate"}).Config(); err == nil {
+		t.Error("a CA that is no PEM certificate was accepted")
+	}
+	// An empty POSTGRES_CA_CERT means none was given: no verification.
+	t.Setenv("POSTGRES_CA_CERT", "")
+	if c, err := Load(""); err != nil || c.Postgres.CAPEM != "" {
+		t.Errorf("an empty POSTGRES_CA_CERT: %q, %v", c.Postgres.CAPEM, err)
 	}
 }

@@ -23,7 +23,14 @@ What the platform needs to build and install igs (REQ-008 fix 11a; the master's 
 | Image keys | `image.repository`, `image.tag` (`image.browserTag` stays empty) |
 | Command | `helm upgrade --install igs deploy/helm/igs -n igs -f deploy/helm/igs/values-production.yaml --set image.repository=<registry>/igs --set image.tag=<sha>` |
 
-The values file has five placeholders to fill: the image (above), the three canary profiles for `igs-registry-sync`, and KEDA's spelling of the Kafka SASL mechanism and TLS (`keda.sasl`, `keda.tls`, for example `scram_sha512` and `enable`).
+The values file has two placeholders left to fill:
+- the image (above), which the platform sets from its pin;
+- the three canary profiles for `igs-registry-sync`. These are real accounts, so the platform sets them in its own (private) Argo CD application, as `config.ig.registry_sync.canary_pages[0]`, `[1]` and `[2]`, never in this repository.
+
+From the platform's answers (7 November 2026):
+- KEDA logs in with SCRAM-SHA-256 over TLS (`keda.sasl: scram_sha256`, `keda.tls: enable`);
+- KEDA trusts the platform's CA through `keda.authKeys.ca: KAFKA_CA_CERT`;
+- igs uses Valkey's logical database 2 (`config.redis.db: 2`).
 
 ## Secrets igs reads (namespace `igs`)
 
@@ -31,17 +38,23 @@ The values file has five placeholders to fill: the image (above), the three cana
 
 | Keys | igs uses them for |
 |---|---|
-| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_SSLMODE` | its database (schema `ig`; the migrate hook creates it, so the user needs DDL rights there) |
-| `KAFKA_BROKERS`, `KAFKA_USER`, `KAFKA_PASSWORD`, `KAFKA_SASL_MECHANISM`, `KAFKA_TLS` | Kafka; KEDA's lag triggers use `KAFKA_BROKERS`, `KAFKA_USER` and `KAFKA_PASSWORD` too |
-| `VALKEY_HOST` and `VALKEY_PORT`, or `VALKEY_ADDR`, or `VALKEY_URL`; `VALKEY_PASSWORD`, `VALKEY_TLS`, `VALKEY_DB` | Valkey. **The exact `VALKEY_*` names were not given**: igs accepts any of these spellings. Please confirm which the Secret has |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_SSLMODE`, `POSTGRES_CA_CERT` | its database (schema `ig`; the migrate hook creates it, so the user needs DDL rights there) |
+| `KAFKA_BROKERS`, `KAFKA_USER`, `KAFKA_PASSWORD`, `KAFKA_SASL_MECHANISM`, `KAFKA_TLS`, `KAFKA_CA_CERT` | Kafka. KEDA's lag triggers use `KAFKA_BROKERS`, `KAFKA_USER`, `KAFKA_PASSWORD` and `KAFKA_CA_CERT` too |
+| `VALKEY_HOST`, `VALKEY_PORT`, `VALKEY_PASSWORD`, `VALKEY_TLS`, `VALKEY_CA_CERT` | Valkey, in logical database 2. igs also accepts `VALKEY_ADDR`, `VALKEY_URL` and `VALKEY_DB` |
 | `S3_ENDPOINT` (a host or an `https://` URL), `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_RAW`, `S3_BUCKET_MEDIA` | raw responses and media files |
 | `S3_BUCKET_BACKUPS` | read, not used yet: igs runs no backup job of its own |
 | `SCHEMA_REGISTRY_URL` | the registry; igs registers no shared subject |
 | `CONTRACT_VERSION` | recorded; used when igs adopts the contract (REQ-019) |
 
+`POSTGRES_CA_CERT`, `KAFKA_CA_CERT` and `VALKEY_CA_CERT` hold the platform's own CA (DigitalOcean's project CA) as PEM:
+- **Kafka and Valkey:** igs trusts the CA besides the system roots, and checks the host name as usual.
+- **Postgres** (`sslmode` `require`): igs checks that the server's certificate chains to the CA, but not its host name (as libpq's `verify-ca` does), until the platform confirms the certificate names the private host.
+- **An empty value** means no CA was given: Postgres then encrypts without checking the server, as `require` does.
+- **A value that is no PEM certificate** stops the pod at start.
+
 **`proxies`**, key `proxies.yaml`: the ISP exits, as a config layer (`ig.proxy.tiers`, one tier named `isp`); `phase0/proxies.example.yaml` shows the shape.
 
-**`igs-keys`**, key `IGS_IG__PRIVACY__AUTHOR_HMAC_KEY`: igs's own key for the authors' HMAC (32 or more random characters, never fbs's). `platform-credentials` has no such key, and igs won't start in production without one. **Open question:** the platform adds this Secret, or the key goes into `platform-credentials` under that name.
+**`igs-keys`**, key `IGS_IG__PRIVACY__AUTHOR_HMAC_KEY`: igs's own key for the authors' HMAC, never fbs's. The platform's setup makes it once (32 random bytes as 64 hex characters, platform PR #11) and protects it so it never changes. igs won't start in production without it.
 
 ## What igs does and doesn't do on shared stores
 

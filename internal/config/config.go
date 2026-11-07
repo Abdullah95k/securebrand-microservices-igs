@@ -117,6 +117,10 @@ type Postgres struct {
 	DSN      string `koanf:"dsn"`
 	ReadDSN  string `koanf:"read_dsn"`
 	MaxConns int32  `koanf:"max_conns"`
+	// CAPEM is the server's CA as PEM text (the platform's
+	// POSTGRES_CA_CERT): with TLS on, the server's certificate must chain
+	// to it (pg.WithCA). Empty: not given.
+	CAPEM string `koanf:"ca_pem"`
 }
 
 type Redis struct {
