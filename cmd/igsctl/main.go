@@ -42,7 +42,6 @@ commands:
   profiles import --file accounts.txt [--client NAME] [--tier hot|warm|long_tail|auto | --interval 30m] [--paused] [--no-backfill]
   profiles tier --file accounts.txt (--tier hot|warm|long_tail|auto | --interval 30m)
   profiles pause --file accounts.txt | profiles resume --file accounts.txt
-  clickhouse migrate
   health`)
 	os.Exit(2)
 }
@@ -92,8 +91,6 @@ func main() {
 		err = discoveryKeywords(ctx, cfg, rest)
 	case "profiles import":
 		err = profilesImport(ctx, cfg, rest)
-	case "clickhouse migrate":
-		err = clickhouseMigrate(ctx, cfg)
 	case "health ":
 		err = healthCmd(ctx, cfg)
 	case "profiles tier":

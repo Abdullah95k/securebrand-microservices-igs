@@ -14,8 +14,7 @@ import (
 // platform gives it its own user (REQ-008 fix 22b; PostgreSQL at 200
 // connections, D-037). The scheduler and the migrate hook keep the owner
 // (igs): the scheduler's maintenance creates and drops partitions, which
-// only the tables' owner may do. The normalizer and content-writer use no
-// PostgreSQL. The names are the platform's (<service><role>): DigitalOcean
+// only the tables' owner may do. The normalizer uses no PostgreSQL. The names are the platform's (<service><role>): DigitalOcean
 // allows only lowercase letters, digits, "-" and "." in user names.
 var roles = map[string]string{
 	"api":           "igsapi",

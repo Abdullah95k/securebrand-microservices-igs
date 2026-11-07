@@ -50,6 +50,9 @@ func TestTopicsMatchTheirConfig(t *testing.T) {
 	for _, t := range TaskTopics() {
 		want[t] = true
 	}
+	for _, t := range Content {
+		want[t] = true
+	}
 	got := applied(t)
 	for n := range want {
 		if !got[n] {

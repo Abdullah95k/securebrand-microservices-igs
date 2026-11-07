@@ -108,12 +108,8 @@ var (
 	ProfilesByTier = gaugeVec("profiles_scheduled", "Enabled profiles on the schedule, by tier.", "tier")
 	// Normalized counts ig.* records mapped to content.* by
 	// igs-normalizer (outcome ok or undecodable).
-	Normalized = counterVec("normalized_total", "ig.* records mapped to the content contract, by topic and outcome.", "topic", "outcome")
-	// ContentWritten counts rows igs-content-writer inserted into the
-	// shared store per table (outcome ok), and records it skipped
-	// (undecodable, by topic).
-	ContentWritten = counterVec("content_written_total", "Rows written to the shared content store, by table and outcome.", "table", "outcome")
-	BreakerState   = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
+	Normalized   = counterVec("normalized_total", "ig.* records mapped to the content contract, by topic and outcome.", "topic", "outcome")
+	BreakerState = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
 	// RateLimitStoreErrors and RateLimitWaiting: the fleet-wide rate limit
 	// fails closed, so a request waits while Valkey does not answer.
 	RateLimitStoreErrors = counterVec("ratelimit_store_errors_total", "Fleet-wide rate limit checks Valkey did not answer (the request waited and tried again), by key kind.", "kind")

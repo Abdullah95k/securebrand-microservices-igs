@@ -147,12 +147,7 @@ func loadTopics(replicas, partitionsCap int) (topicDoc, error) {
 // platformOwned reports a topic the shared platform owns: igs never creates,
 // changes or registers it on a shared cluster (the content.* topics).
 func platformOwned(topic string) bool {
-	for _, t := range igtopics.Content {
-		if t == topic {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(topic, "content.")
 }
 
 // kafkaApply compares configs/ig/topics.yaml with the cluster. By default it

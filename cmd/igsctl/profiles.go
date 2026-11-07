@@ -12,7 +12,6 @@ import (
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/clients"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	chstore "github.com/abdullah95k/securebrand-microservices-igs/internal/content/clickhouse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	igapi "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
@@ -185,22 +184,4 @@ func profilesTier(ctx context.Context, cfg *config.Config, args []string) error 
 	printJSON(map[string]any{"tier": pl.Tier, "interval": pl.Interval.String(), "adaptive": pl.Adaptive, "changed": n,
 		"not_registered": int64(len(refs)) - n, "invalid": invalid})
 	return nil
-}
-
-// clickhouseMigrate creates or updates the shared content store's tables
-// (migrations/clickhouse), for one server or, with clickhouse.cluster, a
-// replicated cluster.
-func clickhouseMigrate(ctx context.Context, cfg *config.Config) error {
-	if len(cfg.ClickHouse.Addr) == 0 {
-		return errors.New("clickhouse.addr is not set")
-	}
-	conn, err := chstore.Open(ctx, cfg.ClickHouse)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close() }()
-	c := cfg.ClickHouse
-	applied, err := chstore.Up(ctx, conn, chstore.Options{Cluster: c.Cluster, StoragePolicy: c.StoragePolicy, ColdAfter: c.ColdAfter})
-	printJSON(map[string]any{"database": c.Database, "applied": applied})
-	return err
 }
