@@ -35,6 +35,12 @@ type PoolConfig struct {
 	// pods share the exit. 0 or a nil pacer leaves it to identity pacing.
 	ExitRPS   float64
 	ExitPacer ExitPacer
+	// ExitKey prefixes each exit's pacing key; "" is "exit:", the key
+	// every crawler shares. A pool with a key of its own (registry-sync's)
+	// keeps its own pace on each exit instead of queueing for the
+	// crawlers' slots: the fleet-wide pacer has no queue, so a few
+	// requests among dozens of crawler sessions waited minutes each.
+	ExitKey string
 	// Shares caps a class of requests (WithShare) at a fraction of
 	// ExitRPS on each exit, fleet-wide (key exit:<exit>:<class>): the
 	// class waits for its share and then for the exit like any request.
@@ -343,7 +349,11 @@ func (p *Pool) build(ep proxy.Endpoint, fp Fingerprint, maxReq int) (*Identity, 
 		id.resting = func() bool { return p.proxies.IsOpen(ep) }
 	}
 	if x := ep.Exit(); x != "" && p.cfg.ExitRPS > 0 && p.cfg.ExitPacer != nil {
-		key, rps := "exit:"+x, p.cfg.ExitRPS
+		prefix := p.cfg.ExitKey
+		if prefix == "" {
+			prefix = "exit:"
+		}
+		key, rps := prefix+x, p.cfg.ExitRPS
 		id.exitWait = func(ctx context.Context) error { return p.cfg.ExitPacer.WaitRate(ctx, key, rps) }
 		id.shareWait = func(ctx context.Context, class string) error {
 			share := p.cfg.Shares[class]

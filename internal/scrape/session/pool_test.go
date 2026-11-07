@@ -447,3 +447,38 @@ func TestRestingExitSendsNothing(t *testing.T) {
 		t.Fatalf("load on a resting exit: %+v %v sent=%v", pl, err, sent)
 	}
 }
+
+// A pool with an exit key of its own (registry-sync's) paces each exit on
+// that key, not on the crawlers' shared "exit:" key, so its few requests
+// don't queue among dozens of crawler sessions for the same slots.
+func TestExitKeyOfItsOwn(t *testing.T) {
+	proxies, err := proxy.New(config.Proxy{
+		Tiers:   []config.ProxyTier{{Name: "isp", Kind: "static_list", Endpoints: []string{"http://isp.example:10001"}}},
+		Breaker: breaker.Config{Cooldown: time.Minute},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fpBytes, _ := configs.FS.ReadFile("fingerprints.yaml")
+	fps, err := LoadFingerprints(fpBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc := &pacer{}
+	pool, err := NewPool(PoolConfig{BaseURL: "https://www.instagram.com", Profile: "chrome_146", IdentityRPS: 1000, IdentityBurst: 10,
+		MaxRequestsMin: 1000, MaxRequestsMax: 1001, MaxPerTier: 2, ExitRPS: 0.25, ExitPacer: pc, ExitKey: "exit-registry-sync:"},
+		proxies, fps, func(transport.Options) (transport.Doer, error) { return transport.NewStd(time.Second), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := pool.Acquire(context.Background(), "isp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := id.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"exit-registry-sync:" + id.Endpoint.Exit()}; !slices.Equal(pc.keys, want) {
+		t.Fatalf("paced %v, want %v", pc.keys, want)
+	}
+}

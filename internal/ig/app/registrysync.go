@@ -63,11 +63,17 @@ func NewRegistrySync(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, 
 		MaxRequestsMin: g.IdentityMaxRequestsMin, MaxRequestsMax: g.IdentityMaxRequestsMax,
 		MaxPerTier: len(rc.CanaryPages) + 2,
 	}
-	// The sync shares the crawlers' exits: it keeps to their pacing and
-	// rests (with Valkey; without it, to its own).
+	// The sync shares the crawlers' exits and their rests (with Valkey;
+	// without it, its own), but keeps its own pace on each exit, a fifth of
+	// the crawlers' (registrySyncExitShare): in the pacer's free-for-all
+	// with dozens of crawler sessions per exit, each of its checks waited
+	// about 80 seconds, and every run hit its timeout while the crawlers
+	// read (pilot, 7 Nov 2026). Its few requests a run add at most a fifth
+	// to an exit's rate, for the minutes a run lasts.
 	sync := func(ctx context.Context) error { <-ctx.Done(); return nil }
 	if rdb != nil {
-		pc.ExitRPS, pc.ExitPacer = g.ExitRPS, ratelimit.NewRedis(rdb)
+		pc.ExitRPS, pc.ExitPacer = g.ExitRPS*registrySyncExitShare, ratelimit.NewRedis(rdb)
+		pc.ExitKey = "exit-registry-sync:"
 		pc.Rest = map[detect.Class]time.Duration{detect.RateLimited: g.RateLimitRest, detect.Checkpoint: g.CheckpointRest}
 		if g.ShareExitRests {
 			proxies.ShareRests(ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix))
@@ -99,3 +105,7 @@ func NewRegistrySync(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, 
 	}
 	return s, reg, sync, nil
 }
+
+// registrySyncExitShare is registry-sync's own pace on each exit, as a
+// share of ig.exit_rps.
+const registrySyncExitShare = 0.2
