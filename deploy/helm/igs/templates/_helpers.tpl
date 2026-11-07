@@ -53,17 +53,30 @@ root, proxies (the component's proxies value).
 {{- end }}
 {{- end -}}
 
+{{/*
+igs.envFrom: platform-credentials, then the component's own credentials
+Secret (REQ-008 fix 22b; a key it holds replaces the shared one for this
+component only), then secretEnv. Args: dict root, credentials (a Secret
+name or "").
+*/}}
 {{- define "igs.envFrom" -}}
-{{- if or .Values.secretEnv.existingSecret .Values.platformCredentials.existingSecret }}
+{{- $root := .root -}}
+{{- with $root }}
+{{- if or .Values.secretEnv.existingSecret .Values.platformCredentials.existingSecret $.credentials }}
 envFrom:
   {{- if .Values.platformCredentials.existingSecret }}
   - secretRef:
       name: {{ .Values.platformCredentials.existingSecret }}
   {{- end }}
+  {{- with $.credentials }}
+  - secretRef:
+      name: {{ . }}
+  {{- end }}
   {{- if .Values.secretEnv.existingSecret }}
   - secretRef:
       name: {{ .Values.secretEnv.existingSecret }}
   {{- end }}
+{{- end }}
 {{- end }}
 {{- end -}}
 

@@ -36,7 +36,7 @@ spec:
           command: ["/usr/local/bin/igsctl"]
           args: {{- toYaml .args | nindent 12 }}
           env: {{- include "igs.env" $hook | nindent 12 }}
-          {{- include "igs.envFrom" $root | nindent 10 }}
+          {{- include "igs.envFrom" (dict "root" $root "credentials" "") | nindent 10 }}
           securityContext: {{- toYaml $root.Values.securityContext | nindent 12 }}
           {{- with $root.Values.hooks.resources }}
           resources: {{- toYaml . | nindent 12 }}

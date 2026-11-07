@@ -105,7 +105,7 @@ Replication is 3 on every topic. Partitions are as in `configs/ig/topics.yaml`.
 | `ig.media.processed.v1` | **Analysis** produces; media-janitor consumes | media ID | `common.v1.MediaProcessed` | 24 | 168 h | `igs-ig-media-janitor` |
 | `ig.media.deleted.v1` | Janitor produces | media ID | `common.v1.MediaDeleted` | 12 | 168 h | (none today) |
 | `ig.job.v1` | Scheduler produces | job ID | `common.v1.JobEvent` | 12 | 168 h | (none today) |
-| `ig.erasure.v1` | Scheduler (eraser) produces; persister consumes | Subject | `common.v1.Erasure` | 6 | 720 h | `igs-ig-persister` |
+| `ig.erasure.v1` | Scheduler (eraser) produces, for the other services; no igs component consumes it (igs erases through the database) | Subject | `common.v1.Erasure` | 3 | 720 h | (none in igs) |
 | `content.post.v1`, `.comment.v1`, `.account.v1`, `.metrics.v1`, `.media.v1` | Normalizer produces; content-writer consumes | `instagram:<native id>` (a comment's key is its post) | igs's draft `securebrand.content.v1` messages | 48, 96, 24, 96, 24 | 168 h | `igs-content-writer` |
 
 **Schema Registry.**
@@ -271,6 +271,49 @@ Important settings and their defaults (`ig:` section):
 - `proxies.yaml`, a file holding `ig.proxy.tiers`;
 - the KEDA Kafka authentication secret;
 - TLS certificate files, if used.
+
+### Credentials per component
+
+(REQ-008 fix 22b.) Every component reads the platform's shared credentials (`platform-credentials`). The platform can give a component its own: a Secret named in `components.<name>.credentialsSecret`, with the same key names, read after `platform-credentials`. A key it holds replaces the shared one for that component only.
+
+- **Object store keys** (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) aren't required for a component to start. With the platform's credentials, a component reads its key from those two variables only, and only the components below open the object store. One opened without a key stops at once and names the variables.
+- **Kafka users** (`KAFKA_USER`, `KAFKA_PASSWORD`): the platform's DigitalOcean ACLs match a topic family by prefix (`ig.*` doesn't cover `igs.*`), so each family is named on its own below. The names are production's, where `kafka.topic_prefix` is empty.
+- **PostgreSQL** stays one user (`igs`) in production: each extra user is its own PgBouncer pool holding its own server connections, and the shared database has too few.
+
+**Kafka, per component:**
+
+| Component | Reads (consumer groups) | Writes | Also |
+|---|---|---|---|
+| crawler-profile | `igs.task.profile.p0`, `.p1`, `.p2` (`igs-ig-crawler-profile-p0`, `-p1`, `-p2`) | `igs.task.*`: child tasks, retries, the DLQ. `ig.profile.v1`, `ig.post.v1`, `ig.post_metrics.v1`, `ig.comment.v1`, `ig.media.v1`, `ig.highlight.v1` | |
+| crawler-post | `igs.task.post.p0`, `.p1`, `.p2` (`igs-ig-crawler-post-p0`, `-p1`, `-p2`) | Same as crawler-profile | |
+| crawler-retry | `igs.task.retry.30s`, `.5m` (`igs-ig-retry-relay`) | `igs.task.*`: each task back to its own topic | |
+| api | none | `igs.task.profile.*`, `igs.task.post.*` | |
+| scheduler | none | `igs.task.profile.*`, `igs.task.post.*`, `ig.job.v1`, `ig.erasure.v1`, `ig.comment.v1` (deletions its re-reads find) | Describe every `igs-*` group and the topics they read (the lag gauges), and the end offsets of the six entity topics against `igs-ig-persister` (the job finalizer) |
+| persister | The six entity topics: `ig.profile.v1`, `ig.post.v1`, `ig.post_metrics.v1`, `ig.comment.v1`, `ig.media.v1`, `ig.highlight.v1` (`igs-ig-persister`) | `igs.persist.dlq` | |
+| normalizer | The six entity topics (`igs-ig-normalizer`) | `content.post.v1`, `content.comment.v1`, `content.account.v1`, `content.metrics.v1`, `content.media.v1` | |
+| media-downloader | `igs.task.media` (`igs-ig-media-downloader`) | `ig.media.ready.v1` | |
+| media-janitor | `ig.media.processed.v1` (`igs-ig-media-janitor`) | `ig.media.ready.v1` (re-announced), `ig.media.deleted.v1` | |
+| registry-sync | none | none | No Kafka user needed |
+| content-writer (off in production) | `content.*` (`igs-content-writer`) | none | |
+
+These keep the shared user:
+- `igsctl`'s DLQ replay reads `igs.task.dlq` or `igs.persist.dlq` (`igs-ig-dlq-replay`, `igs-ig-persist-dlq-replay`) and writes the tasks or records back;
+- the hooks;
+- KEDA, which reads the groups' lag.
+
+No igs component reads `ig.erasure.v1`: it is for the other services. igs applies erasures through the database and the suppression list.
+
+**Spaces, per component** (the buckets are `S3_BUCKET_RAW` and `S3_BUCKET_MEDIA`, igs under its prefixes):
+
+| Component | Bucket | Access |
+|---|---|---|
+| crawler-profile, crawler-post | raw (`igs/30d/`, `igs/keep/`) | Write. Each also checks that the bucket exists at start |
+| media-downloader | media (`igs/`) | Read, write and delete: it uploads, removes a failed upload, and signs the URLs analysis downloads with (`media.presign`), which need read |
+| media-janitor | media (`igs/`) | List and delete: acknowledged media, the TTL sweep, orphans |
+| scheduler | media (`igs/`) | Delete: erasure requests remove the media files |
+| every other component | none | crawler-retry included: the retry relay reads nothing from Instagram (`app.Fetches`) |
+
+`igsctl backup` (the backups bucket) is an operator's tool and keeps the shared key.
 
 Are any logged?
 - Proxy credentials are redacted in logs.

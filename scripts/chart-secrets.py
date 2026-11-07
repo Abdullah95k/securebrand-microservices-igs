@@ -98,17 +98,38 @@ def check_soak(helm):
     return errs
 
 
+def check_credentials(helm):
+    """A component's credentialsSecret comes after platform-credentials (its
+    keys win) and before secretEnv, on that component's pods only; hooks
+    never read it."""
+    errs = []
+    values = os.path.join(CHART, "values-production.yaml")
+    with open(values) as f:
+        v = yaml.safe_load(f)
+    platform, own = v["platformCredentials"]["existingSecret"], v["secretEnv"]["existingSecret"]
+    out = subprocess.run([helm, "template", "igs", CHART, "-n", "igs", "-f", values,
+                          "--set", "components.persister.credentialsSecret=igs-persister-credentials"],
+                         check=True, capture_output=True, text=True).stdout
+    for kind, name, spec in pods([d for d in yaml.safe_load_all(out) if d]):
+        refs = [e["secretRef"]["name"] for e in spec["containers"][0].get("envFrom", []) if "secretRef" in e]
+        want = [platform, "igs-persister-credentials", own] if (kind, name) == ("Deployment", "persister") else [platform, own]
+        if refs != want:
+            errs.append(f"credentials {kind} {name}: envFrom {refs}, want {want}")
+    return errs
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--helm", default="helm")
     a = ap.parse_args()
-    errs = check_production(a.helm) + check_soak(a.helm)
+    errs = check_production(a.helm) + check_soak(a.helm) + check_credentials(a.helm)
     for e in errs:
         print(e, file=sys.stderr)
     if errs:
         sys.exit(1)
     print("chart secrets: production mounts the proxies in the crawlers and registry-sync only "
-          "(the scheduler optional, hooks none); the soak names only its own Secrets")
+          "(the scheduler optional, hooks none); the soak names only its own Secrets; a component's "
+          "credentials Secret comes after platform-credentials, on that component only")
 
 
 if __name__ == "__main__":

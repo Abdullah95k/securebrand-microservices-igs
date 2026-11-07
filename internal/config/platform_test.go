@@ -116,6 +116,12 @@ func TestPlatformCredentialsVariants(t *testing.T) {
 		!strings.Contains(err.Error(), "POSTGRES_PASSWORD") {
 		t.Errorf("a missing password: %v", err)
 	}
+	// A component given no object-store key (REQ-008 fix 22b) still loads,
+	// with no key at all, not the config file's development one.
+	c, err = apply(map[string]string{"VALKEY_ADDR": "v:6379", "S3_ACCESS_KEY": "", "S3_SECRET_KEY": ""})
+	if err != nil || c.S3.AccessKey != "" || c.S3.SecretKey != "" || c.S3.RawBucket != "r" {
+		t.Errorf("no S3 key: key %q, bucket %q, %v", c.S3.AccessKey, c.S3.RawBucket, err)
+	}
 	if _, err = apply(nil); err == nil || !strings.Contains(err.Error(), "VALKEY_HOST") {
 		t.Errorf("no Valkey address: %v", err)
 	}

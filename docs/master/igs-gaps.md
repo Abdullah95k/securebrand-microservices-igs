@@ -115,7 +115,7 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 
 | # | Status | Evidence | Gap and fix | Effort |
 |---|---|---|---|---|
-| I1 | **Partly** | One database user for igs. The API can use a read-only DSN (`IGS_POSTGRES__READ_DSN`). The chart exposes no database | Every igs binary shares one Postgres credential, and one Valkey, Kafka and S3 credential. Fix: a role per component (the persister writes content; the scheduler writes schedule and jobs; the API reads), and S3 keys per bucket | 1 day |
+| I1 | **Partly** | The API can use a read-only DSN (`IGS_POSTGRES__READ_DSN`). The chart exposes no database. Each component can have its own Kafka user and Spaces key (`components.<name>.credentialsSecret`, REQ-008 fix 22b); `igs-operations.md` lists what each needs | The platform hasn't made the users and keys yet (planned in its `kafka.tf`). PostgreSQL stays one user while the shared database has too few connections; a role per component follows as SQL | 0.5 day |
 | I2 | **Met** | Egress policies (REQ-008 fix 21, `networkPolicy.egress`, fbs's key names): every pod to DNS, the stores, listed namespaces and HTTPS; the crawlers, crawler-retry and registry-sync to the proxy gateway too. On in `values-production.yaml` with the platform's addresses (`igs-operations.md` §6) | - | - |
 | I3 | **Met** | Go modules pinned; Dependabot for the Go modules, the Actions and the base images; `govulncheck` and Trivy over both images on every change and weekly, failing on a fixable HIGH or CRITICAL (REQ-008 fix 22) | - | - |
 | I4 | **Met** | API keys per client, hashed, with scopes and rate limits (`api_clients`); author identity only with `pii:read`; admin scopes for registry, discovery and erasure | - | - |

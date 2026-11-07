@@ -455,6 +455,17 @@ The `security` workflow (REQ-008 fix 22) runs on every change, on main and on Su
 
 Dependabot opens weekly pull requests for the Go modules, the Actions and the base images (`.github/dependabot.yml`). Each runs CI and these checks; merge it when they pass.
 
+## Credentials per component
+
+(REQ-008 fix 22b.) To give a component its own Kafka user or Spaces key:
+1. Create the Secret `igs-<component>-credentials` in the namespace igs. It holds only the keys that differ from `platform-credentials`, with the same names: `KAFKA_USER` and `KAFKA_PASSWORD`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`. [igs-operations.md, "Credentials per component"](../master/igs-operations.md#credentials-per-component) lists what each component needs.
+2. Set `components.<component>.credentialsSecret: igs-<component>-credentials` in the platform's Argo CD application. The component's pods restart and read it after `platform-credentials`.
+3. Check the component's log for Kafka authorization errors (`TOPIC_AUTHORIZATION_FAILED`, `GROUP_AUTHORIZATION_FAILED`) or S3 `AccessDenied` in its first minutes. Then check its work in `igsctl health`.
+
+To undo, unset `credentialsSecret`: the component goes back to the shared credentials.
+
+Once every component that uses the object store has its own key, the shared `S3_ACCESS_KEY` and `S3_SECRET_KEY` can leave `platform-credentials`. igs doesn't need them there: a component opens the store only with a key.
+
 ## Network policy
 
 In production igs's pods reach only what `networkPolicy.egress` lists (REQ-008 fix 21; the list is in [igs-operations.md §6](../master/igs-operations.md#6-network)). Something missing from it looks like a store or exit that does not answer: connections time out, nothing is refused.
