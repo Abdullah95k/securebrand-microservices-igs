@@ -12,9 +12,12 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/breaker"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/transport"
@@ -168,6 +171,8 @@ type pacer struct {
 	mu    sync.Mutex
 	keys  []string
 	rates []float64
+	// shareErr fails every wait on a share's key.
+	shareErr error
 }
 
 // WaitRate records the key and rate. An exit's own key must carry the
@@ -177,6 +182,9 @@ func (p *pacer) WaitRate(_ context.Context, key string, rps float64) error {
 	defer p.mu.Unlock()
 	if !strings.HasSuffix(key, ":"+ShareDiscovery) && rps != 0.25 {
 		return fmt.Errorf("rps %v", rps)
+	}
+	if strings.HasSuffix(key, ":"+ShareDiscovery) && p.shareErr != nil {
+		return p.shareErr
 	}
 	p.keys = append(p.keys, key)
 	p.rates = append(p.rates, rps)
@@ -383,11 +391,33 @@ func TestExitShare(t *testing.T) {
 	if err := d.Wait(vet); err != nil || len(pc.keys) != 4 {
 		t.Fatalf("direct egress has no exit to share: %v %v", pc.keys, err)
 	}
+	// A share's wait that fails (Valkey not answering until the task's
+	// time ran out, or the task cancelled) sends nothing and counts no
+	// request; the time waited is still counted.
+	sent := func() float64 {
+		var m dto.Metric
+		_ = metrics.ExitShareRequests.WithLabelValues(ShareDiscovery).Write(&m)
+		return m.GetCounter().GetValue()
+	}
+	before, n := sent(), len(pc.keys)
+	pc.shareErr = context.DeadlineExceeded
+	if err := a.Wait(vet); !errors.Is(err, context.DeadlineExceeded) || len(pc.keys) != n {
+		t.Fatalf("a failed share wait: %v, paced %v", err, pc.keys[n:])
+	}
+	if got := sent(); got != before {
+		t.Fatalf("a failed share wait counted %v requests", got-before)
+	}
+	pc.shareErr = nil
+	if err := a.Wait(vet); err != nil || sent() != before+1 {
+		t.Fatalf("a share wait let through counts one request: %v %v", err, sent()-before)
+	}
+
 	// No share configured for discovery: its requests wait for the exit
 	// alone.
 	pool.cfg.Shares = nil
 	b, _ := pool.Acquire(ctx, "isp")
-	if err := b.Wait(vet); err != nil || pc.keys[len(pc.keys)-1] != "exit:"+b.Endpoint.Exit() || len(pc.keys) != 5 {
+	n = len(pc.keys)
+	if err := b.Wait(vet); err != nil || pc.keys[len(pc.keys)-1] != "exit:"+b.Endpoint.Exit() || len(pc.keys) != n+1 {
 		t.Fatalf("no share: %v %v", pc.keys, err)
 	}
 }

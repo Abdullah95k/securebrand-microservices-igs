@@ -255,7 +255,7 @@ Discovery ranks below regular collection (the owner, 6 November 2026). Each vett
 - It covers vets only: discovery's sightings come from what regular collection already reads and send nothing. Backfills, also lane p2, are not capped by it.
 - `igs_exit_share_wait_seconds_total{class="discovery"}` rising faster than `igs_exit_share_requests_total` means vets queue for their share: discovery is held back by the cap, as intended. To let it go faster, raise `exit_share` (at most 1); `0` removes the cap.
 - Discovery's ceiling follows: exits × `exit_rps` × `exit_share` requests a second. With 10 exits at 0.25 and 0.1, that is 0.25 a second, about 21,600 vet requests a day.
-- A vet waiting for its share keeps its crawler slot in lane p2, which backfills also use. `vet_in_flight` (50, fleet-wide) bounds that, against 96 p2 slots per crawler pod. If backfills of new profiles queue behind vets, lower `vet_in_flight`.
+- A vet waiting for its share keeps its crawler slot in lane p2, which backfills also use, and its identity. `vet_in_flight` bounds that. Set it to about 2 per exit: production runs 20 for 10 exits. More in flight doesn't vet faster, since the share is the limit; it only holds more slots and identities idle. When exits are added, raise it with them.
 - With `exit_rps: 0` (no exit pacing), there is no share either.
 
 ### The place list
