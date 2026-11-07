@@ -35,10 +35,11 @@ func WithCA(pem string) Option {
 			}
 			t = t.Clone()
 			// Go's own check also matches the host name; verifyChain checks
-			// the chain alone, as libpq's verify-ca does.
+			// the chain alone, as libpq's verify-ca does. VerifyConnection
+			// runs on every handshake, a resumed session's too.
 			t.InsecureSkipVerify = true
 			t.RootCAs = roots
-			t.VerifyPeerCertificate = verifyChain(roots)
+			t.VerifyConnection = func(cs tls.ConnectionState) error { return verifyChain(roots, cs.PeerCertificates) }
 			return t
 		}
 		c.ConnConfig.TLSConfig = apply(c.ConnConfig.TLSConfig)
@@ -50,28 +51,18 @@ func WithCA(pem string) Option {
 }
 
 // verifyChain checks that the server's certificate chains to roots.
-func verifyChain(roots *x509.CertPool) func([][]byte, [][]*x509.Certificate) error {
-	return func(raw [][]byte, _ [][]*x509.Certificate) error {
-		if len(raw) == 0 {
-			return errors.New("pg: the server sent no certificate")
-		}
-		certs := make([]*x509.Certificate, len(raw))
-		for i, r := range raw {
-			c, err := x509.ParseCertificate(r)
-			if err != nil {
-				return fmt.Errorf("pg: server certificate: %w", err)
-			}
-			certs[i] = c
-		}
-		inter := x509.NewCertPool()
-		for _, c := range certs[1:] {
-			inter.AddCert(c)
-		}
-		if _, err := certs[0].Verify(x509.VerifyOptions{Roots: roots, Intermediates: inter}); err != nil {
-			return fmt.Errorf("pg: the server's certificate is not from the given CA: %w", err)
-		}
-		return nil
+func verifyChain(roots *x509.CertPool, certs []*x509.Certificate) error {
+	if len(certs) == 0 {
+		return errors.New("pg: the server sent no certificate")
 	}
+	inter := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		inter.AddCert(c)
+	}
+	if _, err := certs[0].Verify(x509.VerifyOptions{Roots: roots, Intermediates: inter}); err != nil {
+		return fmt.Errorf("pg: the server's certificate is not from the given CA: %w", err)
+	}
+	return nil
 }
 
 func parse(dsn string, maxConns int32, opts []Option) (*pgxpool.Config, error) {

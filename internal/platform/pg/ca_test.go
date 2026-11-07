@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -59,16 +60,23 @@ func TestWithCA(t *testing.T) {
 		t.Fatal(err)
 	}
 	tc := c.ConnConfig.TLSConfig
-	if tc == nil || tc.VerifyPeerCertificate == nil {
+	if tc == nil || tc.VerifyConnection == nil {
 		t.Fatal("sslmode require with a CA: no verification set")
 	}
-	if err := tc.VerifyPeerCertificate([][]byte{leaf}, nil); err != nil {
+	peer := func(der []byte) tls.ConnectionState {
+		c, err := x509.ParseCertificate(der)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tls.ConnectionState{PeerCertificates: []*x509.Certificate{c}}
+	}
+	if err := tc.VerifyConnection(peer(leaf)); err != nil {
 		t.Errorf("the CA's server certificate refused: %v", err)
 	}
-	if err := tc.VerifyPeerCertificate([][]byte{otherLeaf}, nil); err == nil {
+	if err := tc.VerifyConnection(peer(otherLeaf)); err == nil {
 		t.Error("a certificate from another CA accepted")
 	}
-	if err := tc.VerifyPeerCertificate(nil, nil); err == nil {
+	if err := tc.VerifyConnection(tls.ConnectionState{}); err == nil {
 		t.Error("no certificate accepted")
 	}
 
@@ -77,11 +85,11 @@ func TestWithCA(t *testing.T) {
 	if err := WithCA(caPEM)(c); err != nil {
 		t.Fatal(err)
 	}
-	if c.ConnConfig.TLSConfig == nil || c.ConnConfig.TLSConfig.VerifyPeerCertificate == nil {
+	if c.ConnConfig.TLSConfig == nil || c.ConnConfig.TLSConfig.VerifyConnection == nil {
 		t.Error("sslmode prefer: the TLS attempt does not verify")
 	}
 	for _, f := range c.ConnConfig.Fallbacks {
-		if f.TLSConfig != nil && f.TLSConfig.VerifyPeerCertificate == nil {
+		if f.TLSConfig != nil && f.TLSConfig.VerifyConnection == nil {
 			t.Error("sslmode prefer: a TLS fallback does not verify")
 		}
 	}
@@ -91,7 +99,7 @@ func TestWithCA(t *testing.T) {
 		t.Errorf("sslmode disable with a CA: TLS %v, %v", c.ConnConfig.TLSConfig, err)
 	}
 	c = parsed("require")
-	if err := WithCA("  \n")(c); err != nil || c.ConnConfig.TLSConfig.VerifyPeerCertificate != nil {
+	if err := WithCA("  \n")(c); err != nil || c.ConnConfig.TLSConfig.VerifyConnection != nil {
 		t.Errorf("an empty CA changed the TLS settings (%v)", err)
 	}
 	if err := WithCA("not a certificate")(parsed("require")); err == nil {
