@@ -46,11 +46,19 @@ From the platform's answers (7 November 2026):
 | `SCHEMA_REGISTRY_URL` | the registry; igs registers no shared subject |
 | `CONTRACT_VERSION` | recorded; used when igs adopts the contract (REQ-019) |
 
-`POSTGRES_CA_CERT`, `KAFKA_CA_CERT` and `VALKEY_CA_CERT` hold the platform's own CA (DigitalOcean's project CA) as PEM:
-- **Kafka and Valkey:** igs trusts the CA besides the system roots, and checks the host name as usual.
-- **Postgres** (`sslmode` `require`): igs checks that the server's certificate chains to the CA, but not its host name (as libpq's `verify-ca` does), until the platform confirms the certificate names the private host.
-- **An empty value** means no CA was given: Postgres then encrypts without checking the server, as `require` does.
+`POSTGRES_CA_CERT`, `KAFKA_CA_CERT` and `VALKEY_CA_CERT` hold root certificates as PEM: Let's Encrypt's roots for Postgres and Valkey, DigitalOcean's project CA for Kafka.
+- **Kafka and Valkey:** igs trusts these roots besides the system ones, and checks the host name.
+- **Postgres:** igs honours `POSTGRES_SSLMODE`:
+  - `verify-full` (the platform's): the server's certificate must chain to `POSTGRES_CA_CERT` and name the host dialled;
+  - `verify-ca`, or `require` with a CA given: the chain only, whatever host it names.
+- **An empty value** means no CA was given: the system roots apply, and `require` encrypts without checking the server.
 - **A value that is no PEM certificate** stops the pod at start.
+
+**igs needs a direct Postgres connection, or a pool in session mode, not a transaction-mode pool:**
+- the scheduler's leader lock is a session advisory lock;
+- igs's connections keep prepared statements.
+
+igs sends no startup parameters: it sets its schema (`search_path` `ig`) with a `SET` after connecting.
 
 **`proxies`**, key `proxies.yaml`: the ISP exits, as a config layer (`ig.proxy.tiers`, one tier named `isp`); `phase0/proxies.example.yaml` shows the shape.
 

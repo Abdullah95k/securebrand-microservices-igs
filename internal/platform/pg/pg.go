@@ -9,16 +9,21 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Option changes how a pool connects.
 type Option func(*pgxpool.Config) error
 
-// WithCA makes connections that use TLS (sslmode require, or verify-ca)
-// check the server's certificate chain against the CA in pem, the
-// platform's own (POSTGRES_CA_CERT): verify-ca, the chain and not the host
-// name. An empty pem means no CA was given and changes nothing; a DSN with
+// WithCA makes TLS connections trust the root certificates in pem (the
+// platform's POSTGRES_CA_CERT) and honours the DSN's sslmode:
+//   - verify-full: the server's certificate must chain to pem and name the
+//     host dialled;
+//   - verify-ca, or require with a CA given (as libpq does with a root
+//     file): it must chain to pem, whatever host it names.
+//
+// An empty pem means no CA was given and changes nothing; a DSN with
 // sslmode disable stays without TLS.
 func WithCA(pem string) Option {
 	return func(c *pgxpool.Config) error {
@@ -34,11 +39,16 @@ func WithCA(pem string) Option {
 				return nil
 			}
 			t = t.Clone()
-			// Go's own check also matches the host name; verifyChain checks
-			// the chain alone, as libpq's verify-ca does. VerifyConnection
-			// runs on every handshake, a resumed session's too.
-			t.InsecureSkipVerify = true
 			t.RootCAs = roots
+			// pgx's own verify-ca check reads the roots it was given (none):
+			// replaced below.
+			t.VerifyPeerCertificate = nil
+			if !t.InsecureSkipVerify {
+				// verify-full: Go checks the chain and the host name.
+				return t
+			}
+			// verify-ca, or require: the chain alone, as libpq does.
+			// VerifyConnection runs on every handshake, a resumed one's too.
 			t.VerifyConnection = func(cs tls.ConnectionState) error { return verifyChain(roots, cs.PeerCertificates) }
 			return t
 		}
@@ -107,7 +117,12 @@ func OpenSchema(ctx context.Context, dsn string, maxConns int32, schema string, 
 	if err != nil {
 		return nil, err
 	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	// Set after connecting, not as a startup parameter: a connection proxy
+	// in front of the server may refuse startup parameters.
+	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "SET search_path TO "+pgx.Identifier{schema}.Sanitize())
+		return err
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("pg: connect: %w", err)
