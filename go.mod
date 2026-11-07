@@ -3,6 +3,8 @@ module github.com/abdullah95k/securebrand-microservices-igs
 go 1.27.3
 
 require (
+	github.com/ClickHouse/clickhouse-go/v2 v2.49.0
+	github.com/abdullah95k/securebrand-contracts v1.2.0
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bogdanfinn/fhttp v0.7.2
 	github.com/bogdanfinn/tls-client v1.17.1
@@ -25,7 +27,6 @@ require (
 	github.com/tidwall/gjson v1.20.0
 	github.com/twmb/franz-go v1.22.2
 	github.com/twmb/franz-go/pkg/kadm v1.19.0
-	github.com/twmb/franz-go/pkg/kfake v0.0.0-20261022190701-123ec885bc97
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/net v0.62.0
@@ -36,7 +37,6 @@ require (
 
 require (
 	github.com/ClickHouse/ch-go v0.74.0 // indirect
-	github.com/ClickHouse/clickhouse-go/v2 v2.49.0 // indirect
 	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/bdandy/go-errors v1.2.2 // indirect
 	github.com/bdandy/go-socks4 v1.2.3 // indirect

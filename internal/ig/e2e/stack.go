@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
@@ -32,7 +31,6 @@ import (
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
-	chstore "github.com/abdullah95k/securebrand-microservices-igs/internal/content/clickhouse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
@@ -42,6 +40,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/normalize"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
@@ -300,36 +299,15 @@ func (s *Stack) StartScheduler() {
 	s.start("scheduler", loops...)
 }
 
-// StartNormalizer runs igs-normalizer (ig.* -> content.*).
+// StartNormalizer runs igs-normalizer (ig.* -> the contract's content.*),
+// with the volume rule in memory.
 func (s *Stack) StartNormalizer(t *testing.T) {
 	t.Helper()
-	c, err := igapp.NewNormalizer(s.Cfg, s.Producer)
+	c, err := igapp.NewNormalizer(s.Cfg, s.Producer, &normalize.MemVolume{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.start("normalizer", c.Run)
-}
-
-// StartContentWriter runs igs-content-writer into the ClickHouse database
-// ch (testenv.ClickHouse) after applying its schema.
-func (s *Stack) StartContentWriter(t *testing.T, ch config.ClickHouse) driver.Conn {
-	t.Helper()
-	ctx := context.Background()
-	conn, err := chstore.Open(ctx, ch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	if _, err := chstore.Up(ctx, conn, chstore.Options{}); err != nil {
-		t.Fatal(err)
-	}
-	kcfg := kafka.ClientConfig{Brokers: s.Cfg.Kafka.Brokers, ClientID: "igs-e2e-content", TopicPrefix: s.Cfg.Kafka.TopicPrefix}
-	c, err := chstore.NewConsumer(kcfg, chstore.Conn{C: conn}, ch.BatchSize, ch.Linger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.start("content-writer", c.Run)
-	return conn
 }
 
 // ReadTopic returns every record of a topic (base name) from its start,

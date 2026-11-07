@@ -7,7 +7,7 @@ What igs keeps, how each part is backed up, how to restore it, and the drill tha
 | Store | What it holds | Backed up? |
 |---|---|---|
 | Postgres, schema `ig` | The system of record: profiles, posts (including highlight items), comments, edit history, metrics, schedule and tiers, the query registry, discovery candidates, erasure records | **Yes.** Continuous backups with point-in-time restore, plus a daily dump of schema `ig` |
-| ClickHouse, the content database | The shared content store that analysis reads | **Yes.** Native `BACKUP` to object storage |
+| ClickHouse, the content database | The platform's shared content store, filled by the platform's writer from `content.*` | **The platform's to back up.** igs writes none of it (see below) |
 | Object storage: the raw bucket and the media bucket | Every raw response (kept forever), and media until the analysis acknowledges it | **Yes.** Versioning on, replicated to a second bucket |
 | Secrets | Proxy credentials, API keys, S3 and database passwords, `ig.privacy.author_hmac_key` | **Yes.** In the secret store, with an offline copy kept by the owner |
 | Kafka | Records in transit, kept 7 days (`ig.*`, `content.*`) or 3 days (tasks) | **No.** It is a pipe. Its retention is what bridges a restore (see below) |
@@ -76,31 +76,16 @@ docker run --rm -i --network host postgres:18-alpine pg_dump --format=custom --s
 
 ## ClickHouse
 
-Back up the content database to object storage with ClickHouse's own `BACKUP`: a full backup weekly (Sunday 04:00), and an incremental one on the other days, based on the last full one. On a cluster, add `ON CLUSTER '<cluster>'`.
+Since REQ-019, igs publishes `content.*` in the contract's form and the platform's writer fills the platform's ClickHouse. Its backups are the platform's.
 
-```sql
-BACKUP DATABASE content TO S3('https://<bucket-endpoint>/clickhouse/full-2026-11-08', '<key>', '<secret>');
-BACKUP DATABASE content TO S3('https://<bucket-endpoint>/clickhouse/inc-2026-11-09', '<key>', '<secret>') SETTINGS base_backup = S3('https://<bucket-endpoint>/clickhouse/full-2026-11-08', '<key>', '<secret>');
-```
+What igs can do after a ClickHouse loss is publish again what it still has:
+- **Within the `ig.*` topics' 7 days:** stop `igs-normalizer`, move its group `igs-ig-normalizer-c1` back to the loss's time, and start it. The same observation gets the same `event_id`, so whatever the writer kept is not doubled.
 
-**To restore:**
+  ```bash
+  rpk group seek igs-ig-normalizer-c1 --to 1794186000
+  ```
 
-1. Stop `igs-content-writer`, and the other collectors' writers if they share the database.
-2. Restore the database:
-
-   ```sql
-   RESTORE DATABASE content FROM S3('https://<bucket-endpoint>/clickhouse/inc-2026-11-09', '<key>', '<secret>');
-   ```
-
-3. Move the writer's group back to the backup's time (this one was taken at 04:00 on 9 November, 01:00 UTC), as for Postgres:
-
-   ```bash
-   rpk group seek igs-content-writer --to 1794186000
-   ```
-
-4. Start the writer. Its tables keep the newest version of each row and collapse repeats, so replaying adds nothing twice.
-
-The content database holds only what the normalizer derived from igs's topics. A ClickHouse loss older than Kafka's 7 days therefore leaves a gap that only a backup fills. Keep the backups.
+- **Older than that:** the platform's backup. igs's store has every observation, but igs has no tool yet that re-publishes from it.
 
 ## Object storage
 
@@ -108,7 +93,7 @@ The content database holds only what the normalizer derived from igs's topics. A
   - turn on versioning;
   - replicate to a second bucket in another region;
   - lifecycle: keep current objects forever, and delete replaced (noncurrent) versions after 30 days.
-- **Backups bucket** (dumps and ClickHouse backups): a different account or key from the one igs writes with, so a leaked igs key cannot delete the backups.
+- **Backups bucket** (the dumps): a different account or key from the one igs writes with, so a leaked igs key cannot delete the backups.
 
 ## The drill
 
@@ -136,20 +121,5 @@ psql igs_drill -c "SELECT (SELECT count(*) FROM ig.profiles) AS profiles, (SELEC
 ```bash
 dropdb igs_drill
 ```
-
-**Quarterly:**
-
-1. Restore the newest ClickHouse backup under another name:
-
-   ```sql
-   RESTORE DATABASE content AS content_drill FROM S3('https://<bucket-endpoint>/clickhouse/inc-2026-11-09', '<key>', '<secret>');
-   ```
-
-2. Compare `SELECT count() FROM content_drill.posts FINAL` with the live database.
-3. Drop the copy:
-
-   ```sql
-   DROP DATABASE content_drill;
-   ```
 
 **Write the timings here after the first drill on the server:** how long the dump, the restore and the replay took, and at what size. They are the recovery time to plan for.

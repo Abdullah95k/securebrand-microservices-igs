@@ -28,9 +28,9 @@ config:
     region: "<region>"
     media_bucket: "<igs-media-bucket>"
     raw_bucket: "<igs-raw-bucket>"
-  # The shared content store (architecture §6). Set it and enable
-  # components.content-writer once the ClickHouse cluster exists; the
-  # password comes from IGS_CLICKHOUSE__PASSWORD in the igs-env Secret.
+  # igs's earlier content store, used only by igsctl clickhouse migrate
+  # (hooks.clickhouse). The platform's ClickHouse reads the content.*
+  # topics itself; the password comes from IGS_CLICKHOUSE__PASSWORD.
   clickhouse:
     addr: ["<clickhouse-host>:9000"]
     database: securebrand

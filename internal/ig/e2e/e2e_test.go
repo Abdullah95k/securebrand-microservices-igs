@@ -10,16 +10,19 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"google.golang.org/protobuf/proto"
 
+	contracts "github.com/abdullah95k/securebrand-contracts"
+	"github.com/abdullah95k/securebrand-contracts/conformance"
+	contentv1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/content/v1"
+
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
-	contentv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/content/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/testenv"
 )
 
 const (
@@ -188,9 +191,11 @@ func TestHighlightsOutlastRefusedRuns(t *testing.T) {
 	}
 }
 
-// igs-normalizer publishes every entity the persister stores to the shared
-// content contract: each post (highlight items as posts of kind
-// highlight), comment and account, with the envelope.
+// igs-normalizer publishes what the persister stores in the contract's form
+// (securebrand-contracts v1.2.0, REQ-019): each post (highlight items wait
+// for slice 3), comment, account and account snapshot, every record with
+// the sb-type and sb-contract headers, and every record passing the
+// contract's conformance check as production runs it.
 func TestContentEventsMatchStore(t *testing.T) {
 	sp := spec()
 	sp.Profiles = 2
@@ -202,52 +207,54 @@ func TestContentEventsMatchStore(t *testing.T) {
 		ids = append(ids, s.Crawl(t, p.Username, full, lim, nil))
 	}
 	s.Wait(t, 2*time.Minute, ids...)
-	natives := func(topic string, kind func([]byte) (string, string)) map[string]string {
-		got := map[string]string{}
+	opt := conformance.Options{Production: true}
+	read := func(topic string, msg func() proto.Message, check func(proto.Message) error) []proto.Message {
+		var out []proto.Message
 		for _, r := range s.ReadTopic(t, topic, 3*time.Second) {
-			id, k := kind(r.Value)
-			got[id] = k
+			m := msg()
+			if err := proto.Unmarshal(r.Value, m); err != nil {
+				t.Fatalf("%s: %v", topic, err)
+			}
+			if got, want := kafka.HeaderValue(r, igapp.HeaderSBType), string(proto.MessageName(m)); got != want {
+				t.Errorf("%s: sb-type %q, want %q", topic, got, want)
+			}
+			if got := kafka.HeaderValue(r, igapp.HeaderSBContract); got != contracts.Version {
+				t.Errorf("%s: sb-contract %q, want %q", topic, got, contracts.Version)
+			}
+			if err := check(m); err != nil {
+				t.Errorf("%s: not conformant: %v", topic, err)
+			}
+			out = append(out, m)
 		}
-		return got
+		return out
 	}
-	posts := natives(topics.ContentPost, func(b []byte) (string, string) {
-		var p contentv1.Post
-		if err := proto.Unmarshal(b, &p); err != nil || p.Envelope.GetPlatform() != "instagram" || p.Envelope.GetVersion() == 0 ||
-			p.Envelope.GetCollector() != "igs" || p.AccountId == "" {
-			t.Fatalf("content post %+v %v", &p, err)
-		}
-		return p.Envelope.NativeId, p.Kind
-	})
-	comments := natives(topics.ContentComment, func(b []byte) (string, string) {
-		var c contentv1.Comment
-		if err := proto.Unmarshal(b, &c); err != nil || c.PostId == "" {
-			t.Fatalf("content comment %+v %v", &c, err)
-		}
-		return c.Envelope.NativeId, ""
-	})
-	accounts := natives(topics.ContentAccount, func(b []byte) (string, string) {
-		var a contentv1.Account
-		if err := proto.Unmarshal(b, &a); err != nil {
-			t.Fatal(err)
-		}
-		return a.Envelope.NativeId, a.Handle
-	})
+	posts := map[string]bool{}
+	for _, m := range read(topics.ContentPost, func() proto.Message { return &contentv1.Post{} },
+		func(m proto.Message) error { return conformance.Post(m.(*contentv1.Post), opt) }) {
+		posts[m.(*contentv1.Post).GetEnvelope().GetNativeId()] = true
+	}
+	comments := map[string]bool{}
+	for _, m := range read(topics.ContentComment, func() proto.Message { return &contentv1.Comment{} },
+		func(m proto.Message) error { return conformance.Comment(m.(*contentv1.Comment), opt) }) {
+		comments[m.(*contentv1.Comment).GetEnvelope().GetNativeId()] = true
+	}
+	accounts := map[string]string{}
+	for _, m := range read(topics.ContentAccount, func() proto.Message { return &contentv1.Account{} },
+		func(m proto.Message) error { return conformance.Account(m.(*contentv1.Account), opt) }) {
+		a := m.(*contentv1.Account)
+		accounts[a.GetEnvelope().GetNativeId()] = a.GetHandle()
+	}
+	snapshots := read(topics.ContentAccountSnapshot, func() proto.Message { return &contentv1.AccountSnapshot{} },
+		func(m proto.Message) error { return conformance.AccountSnapshot(m.(*contentv1.AccountSnapshot), opt) })
+	metrics := read(topics.ContentMetrics, func() proto.Message { return &contentv1.Metrics{} },
+		func(m proto.Message) error { return conformance.Metrics(m.(*contentv1.Metrics), opt) })
 	count := func(q string) int {
 		var n int
 		_ = s.DB.QueryRow(context.Background(), q).Scan(&n)
 		return n
 	}
-	highlights := 0
-	for _, k := range posts {
-		if k == "highlight" {
-			highlights++
-		}
-	}
-	if want := count(`SELECT count(*) FROM posts`); len(posts) != want || want == 0 {
+	if want := count(`SELECT count(*) FROM posts WHERE kind <> 'highlight'`); len(posts) != want || want == 0 {
 		t.Errorf("%d content posts, the store has %d", len(posts), want)
-	}
-	if want := count(`SELECT count(*) FROM posts WHERE kind = 'highlight'`); highlights != want || want == 0 {
-		t.Errorf("%d content highlight items, the store has %d", highlights, want)
 	}
 	if want := count(`SELECT count(*) FROM comments`); len(comments) != want || want == 0 {
 		t.Errorf("%d content comments, the store has %d", len(comments), want)
@@ -257,53 +264,8 @@ func TestContentEventsMatchStore(t *testing.T) {
 			t.Errorf("no content account for %s: %v", p.Username, accounts)
 		}
 	}
-}
-
-// The whole path to the shared store: a crawl, igs-normalizer and
-// igs-content-writer leave in ClickHouse every post (highlight items
-// included), comment and account the persister stored in Postgres.
-// Needs IGS_TEST_CLICKHOUSE_ADDR.
-func TestContentStoreMatchesPostgres(t *testing.T) {
-	ch := testenv.ClickHouse(t)
-	sp := spec()
-	sp.Profiles = 2
-	s := Start(t, Options{Spec: sp})
-	s.StartNormalizer(t)
-	conn := s.StartContentWriter(t, ch)
-	lim := s.Limits()
-	var ids []string
-	for _, p := range s.World.Profiles() {
-		ids = append(ids, s.Crawl(t, p.Username, full, lim, nil))
-	}
-	s.Wait(t, 2*time.Minute, ids...)
-	ctx := context.Background()
-	pg := func(q string) uint64 {
-		var n int64
-		_ = s.DB.QueryRow(ctx, q).Scan(&n)
-		return uint64(n)
-	}
-	chCount := func(q string) uint64 {
-		var n uint64
-		_ = conn.QueryRow(ctx, q).Scan(&n)
-		return n
-	}
-	pairs := []struct{ ch, pg string }{
-		{"SELECT count() FROM posts FINAL WHERE platform = 'instagram'", "SELECT count(*) FROM posts"},
-		{"SELECT count() FROM posts FINAL WHERE kind = 'highlight'", "SELECT count(*) FROM posts WHERE kind = 'highlight'"},
-		{"SELECT count() FROM comments FINAL WHERE is_deleted = 0", "SELECT count(*) FROM comments"},
-		{"SELECT count() FROM accounts FINAL", "SELECT count(*) FROM profiles"},
-	}
-	for _, p := range pairs {
-		want := pg(p.pg)
-		var got uint64
-		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(500 * time.Millisecond) {
-			if got = chCount(p.ch); got == want || time.Now().After(deadline) {
-				break
-			}
-		}
-		if got != want || want == 0 {
-			t.Errorf("%s = %d; Postgres has %d", p.ch, got, want)
-		}
+	if len(snapshots) == 0 || len(metrics) == 0 {
+		t.Errorf("%d account snapshots and %d metrics, want some of each", len(snapshots), len(metrics))
 	}
 }
 

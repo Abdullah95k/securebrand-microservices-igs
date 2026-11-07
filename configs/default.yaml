@@ -292,8 +292,9 @@ scheduler:
     stretch_tiers: [T4, T3, T2]
     projection_span: 1h
 
-# The shared content store (architecture §6). igs-content-writer reads the
-# content.* topics into it; igsctl clickhouse migrate creates its tables.
+# igs's earlier content store. The platform's ClickHouse now reads the
+# content.* topics (securebrand-contracts v1.2.0) and igs writes no rows;
+# igsctl clickhouse migrate still creates igs's old tables when asked.
 clickhouse:
   addr: []                  # host:9000, ... (native protocol); empty: off
   database: securebrand

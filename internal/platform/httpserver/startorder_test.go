@@ -50,7 +50,7 @@ func TestOpsStartsBeforeTheStores(t *testing.T) {
 		}
 		checked++
 	}
-	if checked < 8 {
-		t.Errorf("checked %d serving binaries, want the 8 (api, scheduler, crawler, persister, normalizer, media, registry-sync, content-writer)", checked)
+	if checked < 7 {
+		t.Errorf("checked %d serving binaries, want the 7 (api, scheduler, crawler, persister, normalizer, media, registry-sync)", checked)
 	}
 }

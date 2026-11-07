@@ -37,8 +37,9 @@ type Config struct {
 	RegistrySync RegistrySync `koanf:"registry_sync"`
 	// IG configures igs, the Instagram scraper.
 	IG IG `koanf:"ig"`
-	// ClickHouse is the shared content store (architecture §6) that
-	// igs-content-writer fills from the content.* topics.
+	// ClickHouse is igs's earlier content store (igsctl clickhouse
+	// migrate). The platform's ClickHouse now reads the content.* topics
+	// (securebrand-contracts v1.2.0); igs writes no rows to it.
 	ClickHouse ClickHouse `koanf:"clickhouse"`
 	// Platform is what the platform's credentials Secret says besides the
 	// stores (PlatformEnv).

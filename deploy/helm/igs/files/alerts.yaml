@@ -344,20 +344,12 @@ groups:
           description: Results reach Postgres late. Check igs_persist_batch_seconds and the database.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
       - alert: IgsIgNormalizerLag
-        expr: max by (topic) (igs:ig_leader:kafka_consumer_lag{group="igs-ig-normalizer"}) > 50000
+        expr: max by (topic) (igs:ig_leader:kafka_consumer_lag{group="igs-ig-normalizer-c1"}) > 50000
         for: 15m
         labels: {severity: warning}
         annotations:
           summary: "The igs normalizer is {{ $value }} records behind on {{ $labels.topic }}"
           description: content.* events reach storage, analysis and alerts late. Scale igs-normalizer, or check Kafka.
-          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
-      - alert: IgsContentWriterLag
-        expr: max by (topic) (igs:ig_leader:kafka_consumer_lag{group="igs-content-writer"}) > 100000
-        for: 15m
-        labels: {severity: warning}
-        annotations:
-          summary: "The content writer is {{ $value }} records behind on {{ $labels.topic }}"
-          description: The shared content store (ClickHouse) and the dashboards that read it are behind. Check igs_content_written_total and ClickHouse.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
       - alert: IgsIgPersisterQuarantine
         expr: sum by (topic, reason) (increase(igs_persist_quarantined_total{topic=~"ig\\..*"}[15m])) > 0

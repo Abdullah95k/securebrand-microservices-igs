@@ -28,7 +28,7 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 | # | Item | Notes |
 |---|---|---|
 | 1.1 | Depend on the contract module at v1.2.0. Delete igs's own `securebrand.content.v1` (proto and generated code) | Two packages of that name can't be linked into one program (README, "Adopting it") |
-| 1.2 | Retire igs's own ClickHouse writer (`igs-content-writer`, `internal/content/clickhouse`, `igsctl clickhouse migrate`) | It decodes igs's draft. It is off in production, and the platform's writer does its job. Removing it is an igs-internal change: nothing else uses it |
+| 1.2 | Retire igs's own ClickHouse writer (`igs-content-writer` and its code in `internal/content/clickhouse`). `igsctl clickhouse migrate` and `migrations/clickhouse` stay, behind `hooks.clickhouse: false`, until the master confirms nothing reads igs's old tables | It decodes igs's draft. It is off in production, and the platform's writer does its job. Removing it is an igs-internal change: nothing else uses it |
 | 1.3 | The envelope | `platform` `ig`; `kind`; `id` `ig:<kind>:<native id>`; `version` = `observed_at` µs; `content_hash` = SHA-256 of the content fields without counts; `event_id` = SHA-256 of `id\|observed_at µs\|content_hash`; `partial` for deletions |
 | 1.4 | Provenance | Collector `igs` and version; `parser_version` `<query>:<n>`; `source_operation` (the query's friendly name) and `source_variant` (the doc_id); job IDs; `SCRAPED_LOGGED_OUT`; the crawl mode; `raw_ref`; `exit_country` from the exit's tier |
 | 1.5 | Account and AccountSnapshot | Account: handle, name, bio as text with spans, links (bio links and the linked Facebook page: `LINK_SOURCE_LINKED_ACCOUNT`, `target_platform` `fb`, URL `https://www.facebook.com/<id>`), verified, private as status, scope. Counts go to AccountSnapshot. Type and `is_business` stay unset (REQ-019 item 3) |
@@ -76,3 +76,24 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 | Item | PR | Evidence |
 |---|---|---|
 | Plan and re-estimate | this file | v1.2.0 read on 7 Nov; the contract's Go module resolves at v1.2.0 |
+| 1.1 to 1.11 (slice 1) | the slice 1 PR | See below |
+
+**Slice 1, as built** (`internal/ig/normalize`, `internal/ig/app/normalizer.go`):
+- **1.1:** `go.mod` requires `securebrand-contracts v1.2.0`. igs's own `securebrand.content.v1` (proto, generated code, embed) is deleted.
+- **1.2:** `igs-content-writer`, its consumer and row code, its chart component and `IgsContentWriterLag` are gone, and so is CI's ClickHouse service. The ClickHouse hook is off unless `hooks.clickhouse: true`.
+- **1.3 and 1.4:** the envelope and provenance as planned. **Not yet set:** `exit_country` and the account's `scope`. igs's `ig.*` events carry neither the exit nor the registration. Both are additions to igs's own events, planned with slice 4 (the registry consumer). Conformance allows them unset.
+- **1.5:** Account and AccountSnapshot as planned, plus extras `ig.pronouns`, `ig.requested_ref` and `ig.highlight_count`, and the country signals as `relevance.matched_rules`. A missing account is a partial `UNAVAILABLE` event (reason `no_user`).
+- **1.6:** Post as planned. A walled post is a partial `RESTRICTED` event, reason `login_wall`; any other unavailable post is `UNAVAILABLE`. Hidden likes are `Count{hidden: true}`.
+- **1.7:** Comment as planned. Instagram serves each comment's `created_at`, so its time is `EXACT`, not derived from the pk. A redacted (erased) author's comment publishes nothing. An author pseudonymised for privacy is `hidden`.
+- **1.8:** Metrics for posts and comments, keyed by the post. The volume rule's memory is in Valkey (`igs:content:metrics:<id>`, `SET … GET`, 48 h). If Valkey fails, the counts are published: a repeat costs a row, a dropped change loses a count.
+- **1.9:** headers `sb-type` (`proto.MessageName`) and `sb-contract` (`contracts.Version`). Keys from `registry/topics.yaml`.
+- **1.10:** every message passes `conformance.<Kind>(m, Options{Production: true})`:
+  - in `normalize_test.go`: Account, AccountSnapshot, every post type, walled and unavailable posts, comments, deletions, metrics, event IDs, spans, the volume rule;
+  - end to end: `TestContentEventsMatchStore` crawls fakeig. Every record on the five topics carries both headers and passes conformance. Posts, comments and accounts match Postgres, and snapshots and metrics are there.
+- **1.11:** the normalizer's group is now `igs-ig-normalizer-c1`, which starts at the earliest offset. When it starts, it publishes the 7 days the `ig.*` topics hold, once.
+- **1.12:** the platform's step, below.
+
+**For the platform (1.12):**
+1. `content.account_snapshot.v1` must exist on the shared Kafka before the normalizer starts. igs creates no topics there.
+2. Pin the slice 1 commit and set the normalizer back to its chart size.
+3. Check `topic-peek` and `writer-stats`.

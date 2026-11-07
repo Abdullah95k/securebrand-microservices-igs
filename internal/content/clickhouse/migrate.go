@@ -1,8 +1,9 @@
-// Package clickhouse is the shared content store's writer (architecture
-// §6): its schema (migrations/clickhouse), applied for a single server or a
-// replicated cluster, and the batched, idempotent writer that fills it from
-// the content.* topics. It knows no platform: every collector's normalized
-// events land in the same tables.
+// Package clickhouse is igs's own ClickHouse schema (migrations/clickhouse,
+// architecture §6), applied for a single server or a replicated cluster by
+// `igsctl clickhouse migrate`. It dates from before the shared contract:
+// igs no longer writes to ClickHouse, and the platform's writer fills the
+// shared store from content.* (REQ-019). The schema stays until the
+// platform says it can go.
 package clickhouse
 
 import (

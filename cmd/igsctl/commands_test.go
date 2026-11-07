@@ -142,6 +142,13 @@ func TestPlatformTopicsLeftOut(t *testing.T) {
 			t.Errorf("%s kept without --include-content", s.Name)
 		}
 	}
+	// Every content.* topic is the platform's, including ones igs does not
+	// publish yet.
+	for _, n := range []string{"content.media.v1", "content.audio.v1"} {
+		if !platformOwned(n) {
+			t.Errorf("%s is not left out", n)
+		}
+	}
 	if len(own)+len(skipped) != len(doc.Topics) {
 		t.Errorf("%d kept + %d skipped of %d", len(own), len(skipped), len(doc.Topics))
 	}

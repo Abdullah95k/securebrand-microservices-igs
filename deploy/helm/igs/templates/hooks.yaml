@@ -10,7 +10,7 @@
 {{- $schemaArgs := list "schemas" "apply" -}}
 {{- if .Values.hooks.schemasIncludeContent }}{{ $schemaArgs = append $schemaArgs "--include-content" }}{{ end -}}
 {{- if .Values.hooks.schemas }}{{ $jobs = append $jobs (dict "name" "schemas" "args" $schemaArgs) }}{{ end -}}
-{{- if and .Values.hooks.clickhouse (index .Values.components "content-writer" "enabled") }}{{ $jobs = append $jobs (dict "name" "clickhouse" "args" (list "clickhouse" "migrate")) }}{{ end -}}
+{{- if .Values.hooks.clickhouse }}{{ $jobs = append $jobs (dict "name" "clickhouse" "args" (list "clickhouse" "migrate")) }}{{ end -}}
 {{- if .Values.paused }}{{ $jobs = list }}{{ end -}}
 {{- $hook := dict "root" $root "proxies" "" }}
 {{- range $jobs }}

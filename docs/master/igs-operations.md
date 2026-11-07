@@ -20,8 +20,7 @@ The same image holds every binary. Ops port `:9090` on each (`/metrics`, `/healt
 | `igs-crawler --stages post` (crawler-post) | Post pages and comments. | Long-running | 4, KEDA 4 to 24 | Yes | Same |
 | `igs-crawler --stages retry` (crawler-retry) | Moves tasks from the 30 s and 5 min retry topics back to work topics when due. | Long-running | 1 | Yes | None |
 | `igs-persister` (persister) | `ig.*` to Postgres schema `ig`. Writes history only when a value changes. Bad records go to `igs.persist.dlq`. | Long-running | 2, KEDA 2 to 8 | Yes | None |
-| `igs-normalizer` (normalizer) | `ig.*` to igs's draft `content.*` topics. | Long-running | 2, KEDA 2 to 8 | Yes | None |
-| `igs-content-writer` (content-writer) | `content.*` to ClickHouse. | Long-running | **Off** until ClickHouse exists | Yes | None |
+| `igs-normalizer` (normalizer) | `ig.*` to the shared `content.*` topics, in contract v1.2.0's form (`securebrand-contracts`, REQ-019), with headers `sb-type` and `sb-contract`. Consumer group `igs-ig-normalizer-c1`. Metrics only when a count changed or the day did (memory in Valkey). | Long-running | 2, KEDA 2 to 8 | Yes | Valkey keys `igs:content:metrics:*` (48 h) |
 | `igs-media --roles downloader` (media-downloader) | Downloads media files, but only for jobs that ask (`include_media`, **off**). Announces `ig.media.ready.v1`. | Long-running | 2, KEDA 2 to 12 | Yes | None (S3) |
 | `igs-media --roles janitor` (media-janitor) | Deletes files once analysis acknowledges them (`ig.media.processed.v1`), or after an optional TTL (`media.ttl: 0` means none). | Long-running | 1 | No need | None |
 | `igs-registry-sync` (registry-sync) | Keeps Instagram's GraphQL query IDs current. It reads canary profiles' pages and scripts, then tests and promotes new IDs. | Long-running | 1 (Valkey lock) | No | Registry rows in Postgres |
@@ -55,7 +54,7 @@ The same image holds every binary. Ops port `:9090` on each (`/metrics`, `/healt
    1. `igsctl migrate up` (goose, schema `ig`, migrations `00001` to `00008`, partitions created ahead);
    2. `igsctl kafka apply` (`configs/ig/topics.yaml`);
    3. `igsctl schemas apply` (`hooks.schemas`, off by default but **on in `examples/production.yaml`**; see section 4);
-   4. `igsctl clickhouse migrate`, when ClickHouse is enabled.
+   4. `igsctl clickhouse migrate`, only with `hooks.clickhouse: true` (off: the platform's ClickHouse reads `content.*` itself).
 
    `paused: true` stops every hook and scales the components down, which is used for restores.
 4. **Where it runs today.**
@@ -76,7 +75,7 @@ The same image holds every binary. Ops port `:9090` on each (`/metrics`, `/healt
 | Kafka or Redpanda, with Schema Registry | Redpanda in CI; any Kafka 3.x | Work topics `igs.*` (tasks, retries, dead letters), platform topics `ig.*`, draft `content.*` | Can share a cluster: topic names never collide with fbs's (a test checks this); `kafka.topic_prefix` is available. Plain protobuf on the wire; the registry is used for compatibility checks only | 0. **Note:** `configs/ig/topics.yaml` creates **27 topics, 915 partitions, replication 3** (2,745 partition replicas). That is sized for 300,000 accounts and too many for a small managed cluster. Set lower for the pilot and the first months |
 | Valkey or Redis | Valkey 8 in CI | Exit pacing and rests, kept identities, checkpoints, leases, done markers, rate limits, budget | Can share: every key starts with `igs:` | Small. Done markers at 300,000 accounts: about 58 million keys, about 5 GB (sized in `igs-operations.md`) |
 | Object storage (S3) | Any S3 API (minio client) | `igs-raw` (every raw response, kept forever); `igs-media` (media until analysed) | Separate buckets per service recommended | 0. **Estimate:** raw about 2 to 4 GB a day per 1,000 accounts, kept forever |
-| ClickHouse | 25.8 in CI | Shared content store (`migrations/clickhouse`), via `igs-content-writer` | Meant to be the platform's shared store | 0, off |
+| ClickHouse | 25.8 in CI | igs writes none. The platform's writer reads `content.*` into its own ClickHouse. igs's earlier tables (`migrations/clickhouse`) are created only by `igsctl clickhouse migrate` | The platform's | 0 |
 | Browser (Chromium) | In the `-browser` image | Fallback for page loads only | No | **Off** (`ig.browser.enabled: false`) |
 | GPU or AI APIs | None | - | - | - |
 | Other | None | KEDA and Prometheus Operator are optional | - | - |
@@ -106,11 +105,11 @@ Replication is 3 on every topic. Partitions are as in `configs/ig/topics.yaml`.
 | `ig.media.deleted.v1` | Janitor produces | media ID | `common.v1.MediaDeleted` | 12 | 168 h | (none today) |
 | `ig.job.v1` | Scheduler produces | job ID | `common.v1.JobEvent` | 12 | 168 h | (none today) |
 | `ig.erasure.v1` | Scheduler (eraser) produces, for the other services; no igs component consumes it (igs erases through the database) | Subject | `common.v1.Erasure` | 3 | 720 h | (none in igs) |
-| `content.post.v1`, `.comment.v1`, `.account.v1`, `.metrics.v1`, `.media.v1` | Normalizer produces; content-writer consumes | `instagram:<native id>` (a comment's key is its post) | igs's draft `securebrand.content.v1` messages | 48, 96, 24, 96, 24 | 168 h | `igs-content-writer` |
+| `content.account.v1`, `.account_snapshot.v1`, `.post.v1`, `.comment.v1`, `.metrics.v1` | Normalizer produces; the platform's writer consumes | As `registry/topics.yaml` says: the account ID (`ig:account:<pk>`) for accounts and snapshots; the post ID (`ig:post:<pk>`) for posts, comments and metrics | Contract v1.2.0: `securebrand.content.v1.Account`, `AccountSnapshot`, `Post`, `Comment`, `Metrics`; headers `sb-type`, `sb-contract` | The platform creates them | 168 h | (the platform's writer) |
 
 **Schema Registry.**
 - `igsctl schemas apply` registers one subject per public topic, `<topic>-value`, as `BACKWARD_TRANSITIVE`, then checks every later change against it.
-- **That list includes the five `content.*` topics.** So running it against a registry shared with another service would register `securebrand.content.*`. That's against the standing rule, and it would conflict with analysis's `content.item.v1` schema, which uses the same package name.
+- **That list no longer includes any `content.*` topic** (REQ-008 fix 1, and since REQ-019 igs has no content schema of its own). The platform registers the `content.*` subjects from the contract repository's CI.
 - **Nothing is registered anywhere today**, because igs isn't deployed.
 - `hooks.schemas` is off by default, **but `examples/production.yaml` turns it on.**
 - Proposed fix (not done): leave the `content.*` subjects out of `schemas apply` unless a flag asks for them, and set `hooks.schemas: false` in the production example until the master publishes v1. The fix is in `igs-gaps.md`, E3.
@@ -119,14 +118,14 @@ Replication is 3 on every topic. Partitions are as in `configs/ig/topics.yaml`.
 - tasks: about 20,000 a day;
 - `ig.post_metrics.v1`: **one event per reel per visit**, because the reels tab is re-read a year back each time. For accounts with about 100 to 1,000 reels a year, that's 0.8 to 8 million events a day (10 to 90 a second). The same number goes to `content.metrics.v1`;
 - every other `ig.*` topic together: about 15,000 to 250,000 events a day (posts, comments, profiles, media);
-- `content.*` otherwise mirrors `ig.*`.
+- `content.*` otherwise mirrors `ig.*`, except that `content.metrics.v1` follows the contract's volume rule: a post's or comment's counts are published when they changed, or once a day while the item is still read.
 
-Postgres stores a reel's metrics only when they change. **But `igs-content-writer` writes every observation to ClickHouse `post_metrics`**, so at 10,000 accounts that's 8 to 80 million rows a day, most of them unchanged. The reels fix in `igs-gaps.md` cuts both by about 20 times.
+Postgres stores a reel's metrics only when they change, and since REQ-019 so does `content.metrics.v1` (plus one a day). The reels fix in `igs-gaps.md` cut the reads by about 20 times.
 
 **Idempotency:**
 - Every event ID is a hash of the entity and its content, so a repeat gets the same ID.
 - The persister upserts, and only writes when something changed.
-- ClickHouse uses `ReplacingMergeTree(version)`, so a redelivered event has no extra effect.
+- On `content.*`, the same observation always gets the same `event_id` (SHA-256 of the ID, `observed_at` in microseconds and the content hash), so a redelivery or a re-emit adds nothing for the platform's writer.
 - Crawler tasks carry done markers, so a redelivered task isn't run twice within 96 h.
 
 ---
@@ -290,11 +289,10 @@ Important settings and their defaults (`ig:` section):
 | api | none | `igs.task.profile.*`, `igs.task.post.*` | |
 | scheduler | none | `igs.task.profile.*`, `igs.task.post.*`, `ig.job.v1`, `ig.erasure.v1`, `ig.comment.v1` (deletions its re-reads find) | Describe every `igs-*` group and the topics they read (the lag gauges), and the end offsets of the six entity topics against `igs-ig-persister` (the job finalizer) |
 | persister | The six entity topics: `ig.profile.v1`, `ig.post.v1`, `ig.post_metrics.v1`, `ig.comment.v1`, `ig.media.v1`, `ig.highlight.v1` (`igs-ig-persister`) | `igs.persist.dlq` | |
-| normalizer | The six entity topics (`igs-ig-normalizer`) | `content.post.v1`, `content.comment.v1`, `content.account.v1`, `content.metrics.v1`, `content.media.v1` | |
+| normalizer | The six entity topics (`igs-ig-normalizer-c1`; the earlier `igs-ig-normalizer` is no longer used) | `content.account.v1`, `content.account_snapshot.v1`, `content.post.v1`, `content.comment.v1`, `content.metrics.v1` | |
 | media-downloader | `igs.task.media` (`igs-ig-media-downloader`) | `ig.media.ready.v1` | |
 | media-janitor | `ig.media.processed.v1` (`igs-ig-media-janitor`) | `ig.media.ready.v1` (re-announced), `ig.media.deleted.v1` | |
 | registry-sync | none | none | No Kafka user needed |
-| content-writer (off in production) | `content.*` (`igs-content-writer`) | none | |
 
 These keep the shared user:
 - `igsctl`'s DLQ replay reads `igs.task.dlq` or `igs.persist.dlq` (`igs-ig-dlq-replay`, `igs-ig-persist-dlq-replay`) and writes the tasks or records back;
@@ -303,7 +301,7 @@ These keep the shared user:
 
 No igs component reads `ig.erasure.v1`: it is for the other services. igs applies erasures through the database and the suppression list.
 
-**PostgreSQL, per component.** Five components get a user of their own; the scheduler and the migrate hook keep the owner (`igs`), because the scheduler's maintenance creates and drops partitions, which only the tables' owner may do. The normalizer and content-writer use no PostgreSQL.
+**PostgreSQL, per component.** Five components get a user of their own; the scheduler and the migrate hook keep the owner (`igs`), because the scheduler's maintenance creates and drops partitions, which only the tables' owner may do. The normalizer uses no PostgreSQL.
 
 The persister also adds a partition when a row falls outside the scheduler's window (a post from 2012, say). It does that through `ig.create_partition` (migration 00014), a function that runs as the owner and creates only the partition its name describes. Only `igspersister` may call it.
 
@@ -385,7 +383,6 @@ Are any logged?
 | crawler-retry | - | 256Mi |
 | persister | - | 1Gi |
 | normalizer | - | 512Mi |
-| content-writer | - | 1Gi |
 | media-downloader | - | 1Gi |
 | registry-sync | - | 1Gi |
 
@@ -430,7 +427,7 @@ Are any logged?
   | Area | Alerts |
   |---|---|
   | Blocks and exits | block rate high and critical; exits mostly resting; identities retiring fast; proxy bucket open; query breaker open |
-  | Pipeline | DLQ growing; persister, normalizer and content-writer lag; persister quarantine; tasks parked; crawlers idle with backlog |
+  | Pipeline | DLQ growing; persister and normalizer lag; persister quarantine; tasks parked; crawlers idle with backlog |
   | Schedule and jobs | schedule lag; on-demand lag; scheduler without a leader; jobs failing; jobs partial |
   | Parsing and registry | schema drift; optional-field drift; registry stale; registry query failing; registry-sync not running |
   | Other | media downloads failing; media TTL expiries; budget holding backfill; browser fallback saturated and failing; API errors |

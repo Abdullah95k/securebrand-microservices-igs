@@ -196,9 +196,10 @@ hooks:
   # own).
   schemas: false
   schemasIncludeContent: false
-  # `igsctl clickhouse migrate`: creates the shared content store's tables
-  # (with components.content-writer enabled).
-  clickhouse: true
+  # `igsctl clickhouse migrate`: igs's own ClickHouse tables, from before
+  # the shared contract (REQ-019). The platform's writer fills the shared
+  # store now and igs-content-writer is gone; off unless asked for.
+  clickhouse: false
   # Every hook job's container (a namespace with a ResourceQuota refuses
   # pods without them).
   resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi}}
@@ -331,25 +332,9 @@ components:
       min: 2
       max: 12
       lag:
-        - {group: igs-ig-normalizer, topic: ig.comment.v1, threshold: 20000}
-        - {group: igs-ig-normalizer, topic: ig.post.v1, threshold: 5000}
-        - {group: igs-ig-normalizer, topic: ig.post_metrics.v1, threshold: 20000}
-  # Fills the shared content store (ClickHouse, architecture §6) from the
-  # content.* topics. Enable it once config.clickhouse.addr points at the
-  # store; the hook creates its tables.
-  content-writer:
-    enabled: false
-    command: ["/usr/local/bin/igs-content-writer"]
-    replicas: 2
-    resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {memory: 1Gi}}
-    pdb: {maxUnavailable: 1}
-    autoscale:
-      min: 2
-      max: 8
-      lag:
-        - {group: igs-content-writer, topic: content.comment.v1, threshold: 50000}
-        - {group: igs-content-writer, topic: content.metrics.v1, threshold: 50000}
-        - {group: igs-content-writer, topic: content.post.v1, threshold: 20000}
+        - {group: igs-ig-normalizer-c1, topic: ig.comment.v1, threshold: 20000}
+        - {group: igs-ig-normalizer-c1, topic: ig.post.v1, threshold: 5000}
+        - {group: igs-ig-normalizer-c1, topic: ig.post_metrics.v1, threshold: 20000}
   # Downloads media (ig.limits.include_media) and expires it once the
   # analysis service acknowledged it or its TTL passed.
   media-downloader:

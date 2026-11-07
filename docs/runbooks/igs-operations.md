@@ -537,45 +537,27 @@ To see who leads:
 SELECT * FROM ig.leases;
 ```
 
-The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka exporter is needed. The crawler groups are `igs-ig-crawler-<stage>-<lane>`, the persister's is `igs-ig-persister`, the normalizer's `igs-ig-normalizer` and the downloader's `igs-ig-media-downloader`. All of them carry `kafka.topic_prefix`.
+The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka exporter is needed. The crawler groups are `igs-ig-crawler-<stage>-<lane>`, the persister's is `igs-ig-persister`, the normalizer's `igs-ig-normalizer-c1` and the downloader's `igs-ig-media-downloader`. All of them carry `kafka.topic_prefix`.
 
 ## The shared content contract
 
-`igs-normalizer` maps igs's own topics to the shared `content.*` contract (architecture §5) that storage (ClickHouse), the analysis and the alerts read. Its schema is `api/proto/securebrand/content/v1/content.proto`, kept in igs until the shared schema repository exists.
+`igs-normalizer` maps igs's own topics to the shared contract, `github.com/abdullah95k/securebrand-contracts` **v1.2.0** (REQ-019; `docs/master/igs-contract-adoption.md`). The platform's writer reads these topics into its ClickHouse; igs writes no ClickHouse rows itself.
 
 | igs topic | content events |
 |---|---|
-| `ig.profile.v1` | `content.account.v1` (handle, name, bio, website, every profile link and the linked Facebook page, for the entity layer) and a `content.metrics.v1` account sample |
-| `ig.post.v1` | `content.post.v1` (kind post, video or reel) |
-| `ig.post_metrics.v1` | `content.metrics.v1` (target post) |
-| `ig.comment.v1` | `content.comment.v1` (keyed by its post) and a `content.metrics.v1` comment sample |
-| `ig.media.v1` | `content.media.v1` |
-| `ig.highlight.v1` | a `content.post.v1` of kind `highlight` per item |
+| `ig.profile.v1` | `content.account.v1` (handle, name, bio with hashtags and mentions, bio links, the website field and the linked Facebook page as links, verified, status) and `content.account_snapshot.v1` (followers, following, posts) |
+| `ig.post.v1` | `content.post.v1`: photo, carousel, video, igtv, or reel as `SHORT_VIDEO`. A walled post is a partial event, `RESTRICTED`; an unavailable one `UNAVAILABLE` |
+| `ig.post_metrics.v1` | `content.metrics.v1`, target the post |
+| `ig.comment.v1` | `content.comment.v1` and `content.metrics.v1` (target the comment). A deletion is a partial `DELETED` event. Redacted comments publish nothing |
+| `ig.media.v1`, `ig.highlight.v1` | nothing yet (REQ-019 slices 2 and 3) |
 
-Every event carries the envelope: `platform` (`instagram`), `native_id`, `observed_at`, `published_at`, `version` (newest wins), `collector`, `collector_version` and `raw_ref`. Records are keyed `instagram:<native_id>`. A redelivered record maps to the same event ids, so consumers stay idempotent.
-
-## The shared content store (ClickHouse)
-
-`igs-content-writer` fills ClickHouse (architecture §6) from the `content.*` topics. It knows no platform, so the other collectors' normalized events land in the same tables. Its schema is `migrations/clickhouse/`:
-
-| Table | One row per | Engine |
-|---|---|---|
-| `posts` (highlight items as `kind = 'highlight'`) | post | ReplacingMergeTree(version, is_deleted), by publication month, ordered by (platform, post_id) |
-| `comments` | comment or reply | the same, ordered by (platform, post_id, comment_id) |
-| `accounts` (bio, website, `link_urls` for the entity layer) | account | ReplacingMergeTree(version, is_deleted) |
-| `authors` | comment author (by id, or keyed hash) | ReplacingMergeTree(version) |
-| `media` | image or video | ReplacingMergeTree(version, is_deleted) |
-| `post_metrics`, `comment_metrics`, `account_snapshots` | observation | ReplacingMergeTree on (id, observed_at), by observation month: a redelivered row collapses |
-| `entities`, `entity_accounts` | entity, and each account linked to it (how, confidence, who confirmed) | ReplacingMergeTree(version, is_deleted); filled by entity linking and the client app |
-
-- Ids are text; `*_key` columns hold `cityHash64(platform, id)` for joins.
-- Read the newest version of an entity with `FINAL` (and `WHERE is_deleted = 0`), or `argMax(..., version)`.
-- **Turning it on:**
-  1. set `config.clickhouse` (addresses, database, user; the password in `IGS_CLICKHOUSE__PASSWORD`);
-  2. on a replicated cluster set `cluster`: every table is created `ON CLUSTER` with `Replicated*` engines (at least two replicas and three Keeper nodes);
-  3. with `storage_policy` and `cold_after`, partitions older than `cold_after` move to the policy's `cold` volume (object storage), still queryable;
-  4. enable `components.content-writer`; the install hook runs `igsctl clickhouse migrate`.
-- **Lag:** `IgsContentWriterLag`; `igs_content_written_total{table}` counts rows written. A failed insert is retried until it succeeds; nothing is committed past unwritten rows.
+- **On the wire:** plain Protobuf, one message type per topic, headers `sb-type` (the full message name) and `sb-contract` (`1.2.0`). Keys: the account ID (`ig:account:<pk>`) for accounts and snapshots; the post ID (`ig:post:<pk>`) for posts, comments and metrics.
+- **The envelope:** `platform` `ig`, `id` `ig:<kind>:<native id>`, `version` = `observed_at` in microseconds, `content_hash` (SHA-256 of the content without counts), `event_id` (SHA-256 of `id|observed_at µs|content_hash`), and provenance (collector, version, parser version `<query>:<n>`, the query and its doc_id, job IDs, logged-out scraping, the crawl mode, `raw_ref`).
+- **Metrics volume:** a post's or comment's counts are published when they changed, or once a day while it is still read. The memory is in Valkey (`igs:content:metrics:<id>`, 48 h). If Valkey doesn't answer, the counts are published anyway.
+- **Every message passes** the contract's `conformance` check as production runs it, in the unit tests and end to end.
+- **Not yet set:** `scope` and `exit_country`. igs's own events don't carry the account's registration or the exit; they come with slice 4.
+- **Lag:** `IgsIgNormalizerLag` on group `igs-ig-normalizer-c1`. The chart leaves the alert out while the normalizer is off.
+- **Publishing again:** move `igs-ig-normalizer-c1` back (`rpk group seek`) within the `ig.*` topics' 7 days. The same observation gets the same `event_id`.
 
 ## Persister quarantine
 

@@ -34,11 +34,12 @@ topics:
   - {name: ig.media.deleted.v1,   partitions: 3,  retention: 168h}
   - {name: ig.job.v1,             partitions: 3,  retention: 168h}
   - {name: ig.erasure.v1,         partitions: 3,  retention: 720h}
-  # The shared content contract (architecture §5), from igs-normalizer.
-  # Other collectors' normalizers publish to the same topics; whoever runs
-  # first creates them.
-  - {name: content.post.v1,       partitions: 48, retention: 168h}
-  - {name: content.comment.v1,    partitions: 96, retention: 168h}
-  - {name: content.account.v1,    partitions: 24, retention: 168h}
-  - {name: content.metrics.v1,    partitions: 96, retention: 168h}
-  - {name: content.media.v1,      partitions: 24, retention: 168h}
+  # The shared content contract (securebrand-contracts v1.2.0), from
+  # igs-normalizer. The platform owns these topics: igsctl kafka apply
+  # leaves every content.* topic out unless --include-content asks for it
+  # (a Kafka of igs's own). content.media.v1 joins with REQ-019 slice 2.
+  - {name: content.post.v1,             partitions: 48, retention: 168h}
+  - {name: content.comment.v1,          partitions: 96, retention: 168h}
+  - {name: content.account.v1,          partitions: 24, retention: 168h}
+  - {name: content.account_snapshot.v1, partitions: 24, retention: 168h}
+  - {name: content.metrics.v1,          partitions: 96, retention: 168h}

@@ -1,6 +1,6 @@
-// Command igs-normalizer maps igs's ig.* entity topics to the shared
-// content.* contract (architecture §5) that storage, analysis and alerts
-// read.
+// Command igs-normalizer maps igs's ig.* entity topics to the SecureBrand
+// contract's content.* topics (securebrand-contracts v1.2.0, REQ-019) that
+// storage, analysis and alerts read.
 package main
 
 import (
@@ -12,6 +12,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/clients"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/normalize"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
@@ -45,10 +46,16 @@ func runNormalizer(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer producer.Close()
-	c, err := igapp.NewNormalizer(cfg, producer)
+	rdb, err := clients.Redis(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rdb.Close() }()
+	c, err := igapp.NewNormalizer(cfg, producer, normalize.RedisVolume{C: rdb})
 	if err != nil {
 		return err
 	}
 	ops.AddCheck("kafka", producer.Ping)
+	ops.AddCheck("redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })
 	return run.Group(ctx, ops.Run, c.Run)
 }
