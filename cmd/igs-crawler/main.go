@@ -68,7 +68,7 @@ func runCrawler(ctx context.Context, cfg *config.Config, stages []string) error 
 	}
 	defer producer.Close()
 	var raw *minio.Client
-	if cfg.IG.CaptureRaw != "none" {
+	if cfg.IG.CaptureRaw != "none" && igapp.Fetches(stages) {
 		if raw, err = igapp.OpenS3(ctx, cfg, cfg.S3.RawBucket); err != nil {
 			return err
 		}

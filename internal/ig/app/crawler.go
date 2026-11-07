@@ -48,6 +48,19 @@ import (
 // DefaultStages are igs's crawler stages.
 var DefaultStages = []string{"profile", "post", "retry"}
 
+// Fetches reports whether a crawler running stages (none: DefaultStages)
+// reads Instagram, and so keeps raw responses: the retry relay alone only
+// moves tasks between topics and needs no object store (REQ-008 fix 22b).
+func Fetches(stages []string) bool {
+	if len(stages) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(stages, func(s string) bool {
+		s = strings.TrimSpace(s)
+		return s == "profile" || s == "post"
+	})
+}
+
 // Consumer groups. They differ from the copied Facebook crawler's, which
 // shares the cluster in tests.
 const (

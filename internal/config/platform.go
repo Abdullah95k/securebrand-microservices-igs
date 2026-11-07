@@ -146,7 +146,11 @@ func (c *Config) applyPlatform(getenv func(string) string) error {
 
 	// S3: the endpoint may come as a URL; its scheme says whether to use
 	// TLS.
-	need("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET_RAW", "S3_BUCKET_MEDIA")
+	// The key isn't needed here: only the components that open the object
+	// store need one (app.OpenS3 says so when it's missing), so the
+	// platform can give a key to those components alone (REQ-008 fix 22b,
+	// components.<name>.credentialsSecret).
+	need("S3_ENDPOINT", "S3_BUCKET_RAW", "S3_BUCKET_MEDIA")
 	if e := get("S3_ENDPOINT"); e != "" {
 		if u, err := url.Parse(e); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
 			c.S3.Endpoint, c.S3.UseSSL = u.Host, u.Scheme == "https"
@@ -154,15 +158,16 @@ func (c *Config) applyPlatform(getenv func(string) string) error {
 			c.S3.Endpoint = e
 		}
 	}
-	for k, dst := range map[string]*string{"S3_REGION": &c.S3.Region, "S3_ACCESS_KEY": &c.S3.AccessKey,
+	for k, dst := range map[string]*string{"S3_REGION": &c.S3.Region,
 		"S3_BUCKET_RAW": &c.S3.RawBucket, "S3_BUCKET_MEDIA": &c.S3.MediaBucket, "S3_BUCKET_BACKUPS": &c.S3.BackupsBucket} {
 		if v := get(k); v != "" {
 			*dst = v
 		}
 	}
-	if v := getenv("S3_SECRET_KEY"); v != "" {
-		c.S3.SecretKey = v
-	}
+	// The key comes from these two variables only, never from the config
+	// file's development key: a component given none can't reach the
+	// object store, and says so when it tries.
+	c.S3.AccessKey, c.S3.SecretKey = get("S3_ACCESS_KEY"), getenv("S3_SECRET_KEY")
 
 	if v := get("CONTRACT_VERSION"); v != "" {
 		c.Platform.ContractVersion = v

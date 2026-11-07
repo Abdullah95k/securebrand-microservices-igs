@@ -54,7 +54,7 @@ spec:
             - name: IGS_IG__BROWSER__REMOTE
               value: "http://127.0.0.1:{{ $root.Values.browserContainer.port }}"
             {{- end }}
-          {{- include "igs.envFrom" $root | nindent 10 }}
+          {{- include "igs.envFrom" (dict "root" $root "credentials" ($c.credentialsSecret | default "")) | nindent 10 }}
           ports:
             - {name: metrics, containerPort: 9090}
             {{- if $c.port }}
