@@ -146,7 +146,15 @@ type Server struct {
 	pageLoads int
 	exits     map[string]*ExitStat
 	gql       atomic.Int64
-	rng       *rand.Rand // world changes asked for through AdminPrefix
+	// mutateMu guards rng, the world changes asked for through
+	// AdminPrefix. It is not mu: a change waits for the world's write
+	// lock, and a request holding the world's read lock takes mu, so a
+	// change holding mu would deadlock with it.
+	mutateMu sync.Mutex
+	rng      *rand.Rand
+	// started tells this server apart from the one before a restart, which
+	// generated the world again from its seed (AdminPrefix "instance").
+	started string
 	// Requests counts GraphQL requests by friendly name.
 	Requests sync.Map
 }
@@ -230,7 +238,8 @@ type ident struct {
 
 // NewServer returns a server for w.
 func NewServer(w *World, o Options) *Server {
-	return &Server{World: w, opts: o, idents: map[string]*ident{}, byCSRF: map[string]*ident{}}
+	return &Server{World: w, opts: o, idents: map[string]*ident{}, byCSRF: map[string]*ident{},
+		started: time.Now().UTC().Format(time.RFC3339Nano)}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

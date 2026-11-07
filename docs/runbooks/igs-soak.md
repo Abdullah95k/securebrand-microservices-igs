@@ -43,7 +43,14 @@ Two Argo CD applications, at one igs commit (the platform builds igs's image at 
 - the jobs by status, and the longest any job ran;
 - the posts and comments stored;
 - the differences from fakeig's truth (the first 20);
-- any job that ended failed, partial or cancelled, and any chaos that failed.
+- any job that ended failed, partial or cancelled, and any chaos that failed;
+- whether the harness held: how many of the driver's world changes fakeig left unanswered, and whether fakeig restarted.
+
+**When the harness fails, the soak fails, and its report says so** ("the harness failed, not necessarily igs; run the soak again"):
+- **fakeig left more than 1% of the world changes unanswered.** Its world then mostly stood still, so the soak didn't test what it should.
+- **fakeig restarted.** fakeig keeps its world in memory and generates it again from the seed at each start, so its truth is no longer the world igs read. The driver compares when fakeig says it started (`/__fakeig/instance`) at the start and at the end.
+
+Either way, the comparison says nothing about igs. Fix the cause and run the soak again. igs's own pods can still be judged from Prometheus, below.
 
 **From Prometheus,** over the 24 hours, for igs's pods (`app.kubernetes.io/name="igs"`; the stores grow with their data, as they should):
 
