@@ -5,7 +5,7 @@ PG_DSN ?= postgres://fbs:fbs@localhost:5432/fbs?sslmode=disable
 TEST_ENV = IGS_TEST_PG_DSN="$(PG_DSN)" IGS_TEST_REDIS_ADDR=localhost:6379 IGS_TEST_KAFKA_BROKERS=localhost:19092 IGS_TEST_SCHEMA_REGISTRY=http://localhost:18081
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 
-.PHONY: all build test lint vet generate golden infra-up infra-down test-integration e2e loadtest soak igs-loadtest igs-soak docker docker-prebuilt compose-up compose-down igs-compose-up igs-compose-down igs-phase0 igs-phase0-dryrun igs-probe igs-probe-dryrun igs-tagged igs-tagged-dryrun igs-spike-bin chart-check igs-chart-check chart-smoke igs-chart-smoke clean
+.PHONY: all build test lint vet generate golden infra-up infra-down test-integration e2e loadtest soak igs-loadtest igs-soak docker docker-prebuilt compose-up compose-down igs-compose-up igs-compose-down igs-phase0 igs-phase0-dryrun igs-probe igs-probe-dryrun igs-tagged igs-tagged-dryrun igs-spike-bin chart-check igs-chart-check chart-smoke igs-chart-smoke security clean
 
 all: generate build test
 
@@ -75,6 +75,12 @@ KUBECONFORM_ARGS = -strict -summary -kubernetes-version 1.30.0 -schema-location 
 ## Lint the igs Helm chart and validate its renders (defaults, every
 ## optional object, the fakeig rehearsal values) against the Kubernetes and
 ## CRD schemas.
+## The security workflow's checks that need no Docker (.github/workflows/security.yml):
+## gitleaks over the history and govulncheck.
+security:
+	gitleaks git --no-banner --redact --exit-code 1 .
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
 chart-check: igs-chart-check
 
 igs-chart-check:

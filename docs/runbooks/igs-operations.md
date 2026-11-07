@@ -431,6 +431,21 @@ igsctl kafka apply
 
 `igsctl schemas apply` registers the `ig.*` subjects (`<topic>-value`, `BACKWARD_TRANSITIVE`); `schemas check` only checks them. Both leave out the `content.*` subjects unless `--include-content` (a registry of igs's own).
 
+## Security checks
+
+The `security` workflow (REQ-008 fix 22) runs on every change, on main and on Sundays at 05:17 Iraq time. `make security` runs the first two locally.
+
+- **secrets (gitleaks)** fails when a commit holds something that looks like a credential.
+  - If it is real: rotate it first, then remove it from the history. Never add a real credential to `.gitleaksignore`.
+  - If it isn't (a key name, a test fake, a fixture token): add the finding's fingerprint to `.gitleaksignore` with a comment saying why.
+- **go-vulns (govulncheck)** fails when igs's code calls a function with a known vulnerability. Update the module (`go get <module>@<fixed version>`, then `go mod tidy`) or Go itself (`go.mod`'s `go` line and the Dockerfile's `golang` tag).
+- **images (Trivy)** fails on a HIGH or CRITICAL vulnerability with a fix in either image.
+  - In the distroless image it is a Go module or the standard library: update as above.
+  - In the browser image it is a Debian package. A rebuild picks up the fix (the browser stage runs `apt-get upgrade`); if Debian's fix is newer than the base image's tag, wait for Dependabot's update to `debian:12-slim`.
+  - Only when it can't apply to igs: add its ID to `.trivyignore` with the reason and a date to look again.
+
+Dependabot opens weekly pull requests for the Go modules, the Actions and the base images (`.github/dependabot.yml`). Each runs CI and these checks; merge it when they pass.
+
 ## Network policy
 
 In production igs's pods reach only what `networkPolicy.egress` lists (REQ-008 fix 21; the list is in [igs-operations.md §6](../master/igs-operations.md#6-network)). Something missing from it looks like a store or exit that does not answer: connections time out, nothing is refused.

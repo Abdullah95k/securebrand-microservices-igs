@@ -1,0 +1,4 @@
+# Vulnerabilities Trivy reports in igs's images that are accepted for now
+# (REQ-008 fix 22). One ID per line, each with a comment saying why it
+# doesn't apply or what it waits for, and when to look again. Prefer
+# updating the module or the base image.

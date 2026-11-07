@@ -1,0 +1,21 @@
+# Dependency updates (REQ-008 fix 22, gap I3): weekly pull requests for the
+# Go modules, the GitHub Actions and the Dockerfile's base images. Each runs
+# CI and the security checks like any other change; merge it when green.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule: {interval: weekly, day: sunday, time: "06:00", timezone: Asia/Baghdad}
+    open-pull-requests-limit: 5
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly, day: sunday, time: "06:00", timezone: Asia/Baghdad}
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /deploy/docker
+    schedule: {interval: weekly, day: sunday, time: "06:00", timezone: Asia/Baghdad}

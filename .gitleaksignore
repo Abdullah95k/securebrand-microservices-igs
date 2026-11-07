@@ -1,0 +1,23 @@
+# gitleaks findings checked by hand and not secrets (REQ-008 fix 22).
+# Each line is commit:file:rule:line, so the same text anywhere else is
+# still reported. Add a line only after checking the finding; never for a
+# real credential (rotate it, then remove it from history).
+
+# the platform key names (S3_ACCESS_KEY, ...), not values
+84d60b303fbd75ecd474193993a8637c21e03b1b:internal/config/platform.go:generic-api-key:142
+
+# the test fakes AKIAFAKE and fake-secret
+84d60b303fbd75ecd474193993a8637c21e03b1b:internal/config/platform_test.go:generic-api-key:33
+
+# Instagram's organic_tracking_token in a scrubbed fixture: a page token, not a credential
+70ec68d5466307f268211a93fc97fcdeaed7bafa:testdata/ig/post_page/post_page_reel/response.html:generic-api-key:2
+
+# fakefb's made-up comment pagination tokens (expansion_token), in fixtures removed with the Facebook code
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/comments/fakefb_first_page/expected.json:generic-api-key:903
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/comments/fakefb_first_page/expected.json:generic-api-key:912
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/comments/fakefb_first_page/expected.json:generic-api-key:921
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/comments/fakefb_first_page/expected.json:generic-api-key:930
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/comments/fakefb_first_page/expected.json:generic-api-key:939
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/comments/fakefb_first_page/response.ndjson:generic-api-key:1
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/replies/fakefb_first_page/expected.json:generic-api-key:350
+ae614c0cad15ad0140e93e62d20ebf2a6195956c:testdata/fb/replies/fakefb_first_page/response.ndjson:generic-api-key:1

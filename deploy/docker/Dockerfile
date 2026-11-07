@@ -13,7 +13,10 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # `--target browser`: the same binaries with Chromium, for crawlers and
 # igs-registry-sync with ig.browser.enabled (headless-Chromium fallback).
 FROM debian:12-slim AS browser
+# upgrade: the base image's packages with Debian's security fixes since the
+# tag was built (the image scan fails on a fixed HIGH or CRITICAL).
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation tini \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 65532 --create-home --home-dir /home/nonroot nonroot

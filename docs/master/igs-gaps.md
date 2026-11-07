@@ -99,7 +99,7 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 | G1 | **Met** | `ci.yml`: build, vet, buf lint, generate and breaking, `go test -race`, integration with Postgres 18, Valkey, ClickHouse 25.8 and Redpanda, the Phase 0 dry run, chart check and chart smoke | - | - |
 | G2 | **Met** | `internal/fakeig`: profiles, grid, reels, highlights, post pages, comments, walls, rate limits, hidden counts, mutations and ground truth; e2e tests compare the store to it | - | - |
 | G3 | **Partly** | `make igs-loadtest` (2 Nov, 4 CPUs: 150 profiles in 21 s; persister 15,200 rows a second); `make igs-soak` (4 minutes locally); the `soak` workflow (90 min default) | **No 24-hour soak**, and the workflow **has never been run**; GitHub-hosted runners stop at 6 hours. Memory and disk weren't recorded. Fix: Plans, memory and soak | 0.5 day, plus 24 h |
-| G4 | **Partly** | The fixture scrubber and its tests; a CI grep for CDN signatures in fixtures | **No gitleaks** or other secret scanner. Fix: a gitleaks job on every change | 0.25 day |
+| G4 | **Met** | The fixture scrubber and its tests; a CI grep for CDN signatures in fixtures; gitleaks over the whole history on every change and weekly (REQ-008 fix 22, `security` workflow) | - | - |
 | G5 | **Missing** | igs's own content tests (`TestContentEventsMatchStore`, `TestContentStoreMatchesPostgres`) | There's no shared conformance kit yet. Fix: run the master's kit in CI once it exists | 0.5 day after the kit |
 
 ## H. Operations
@@ -117,7 +117,7 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 |---|---|---|---|---|
 | I1 | **Partly** | One database user for igs. The API can use a read-only DSN (`IGS_POSTGRES__READ_DSN`). The chart exposes no database | Every igs binary shares one Postgres credential, and one Valkey, Kafka and S3 credential. Fix: a role per component (the persister writes content; the scheduler writes schedule and jobs; the API reads), and S3 keys per bucket | 1 day |
 | I2 | **Met** | Egress policies (REQ-008 fix 21, `networkPolicy.egress`, fbs's key names): every pod to DNS, the stores, listed namespaces and HTTPS; the crawlers, crawler-retry and registry-sync to the proxy gateway too. On in `values-production.yaml` with the platform's addresses (`igs-operations.md` §6) | - | - |
-| I3 | **Missing** | Go modules pinned; CI runs `go vet` and builds | No dependency updates (Dependabot), no `govulncheck`, no image scan. Fix: Dependabot for Go modules and Actions; `govulncheck` and an image scanner (for example Trivy) in CI | 0.5 day |
+| I3 | **Met** | Go modules pinned; Dependabot for the Go modules, the Actions and the base images; `govulncheck` and Trivy over both images on every change and weekly, failing on a fixable HIGH or CRITICAL (REQ-008 fix 22) | - | - |
 | I4 | **Met** | API keys per client, hashed, with scopes and rate limits (`api_clients`); author identity only with `pii:read`; admin scopes for registry, discovery and erasure | - | - |
 
 ---
