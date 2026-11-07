@@ -7,9 +7,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,6 +22,48 @@ type Option func(*options) error
 type options struct {
 	cfg    *pgxpool.Config
 	pooled bool
+	// retryFor bounds how long opening keeps trying while the server is
+	// busy (Retryable); 0 tries once.
+	retryFor time.Duration
+}
+
+// RetryFor is how long Open and OpenSchema keep trying, by default, while
+// the server is out of connections or starting (Retryable): about three
+// minutes, backing off from 1 s to 15 s.
+const RetryFor = 3 * time.Minute
+
+// Backoff bounds between tries.
+const (
+	retryMin = time.Second
+	retryMax = 15 * time.Second
+)
+
+// Retry sets how long opening keeps trying while the server is busy; 0
+// tries once.
+func Retry(d time.Duration) Option {
+	return func(o *options) error {
+		o.retryFor = d
+		return nil
+	}
+}
+
+// Retryable reports whether err says the server is busy or starting rather
+// than that the request is wrong: out of connection slots (SQLSTATE 53300,
+// also a role's connection limit), starting up (57P03), out of resources
+// (53000), or PgBouncer's "no more connections allowed" and "server login
+// has been failing". A wrong password, a missing database or a refused TLS
+// handshake are not.
+func Retryable(err error) bool {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		switch pe.Code {
+		case "53300", "57P03", "53000":
+			return true
+		}
+		m := strings.ToLower(pe.Message)
+		return strings.Contains(m, "no more connections allowed") || strings.Contains(m, "server login has been failing")
+	}
+	return false
 }
 
 // Pooled says the server sits behind a transaction-mode connection pool
@@ -108,7 +153,7 @@ func parse(dsn string, maxConns int32, opts []Option) (*options, error) {
 	if cfg.ConnConfig.DefaultQueryExecMode == pgx.QueryExecModeCacheStatement {
 		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
 	}
-	o := &options{cfg: cfg}
+	o := &options{cfg: cfg, retryFor: RetryFor}
 	for _, opt := range opts {
 		if err := opt(o); err != nil {
 			return nil, err
@@ -117,21 +162,42 @@ func parse(dsn string, maxConns int32, opts []Option) (*options, error) {
 	return o, nil
 }
 
-// Open creates a pool and verifies connectivity.
+// Open creates a pool and verifies connectivity. While the server is busy
+// (Retryable) it tries again for RetryFor (Retry), backing off.
 func Open(ctx context.Context, dsn string, maxConns int32, opts ...Option) (*pgxpool.Pool, error) {
 	o, err := parse(dsn, maxConns, opts)
 	if err != nil {
 		return nil, err
 	}
-	pool, err := pgxpool.NewWithConfig(ctx, o.cfg)
-	if err != nil {
-		return nil, fmt.Errorf("pg: connect: %w", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
+	return connect(ctx, o, func(pool *pgxpool.Pool) error { return pool.Ping(ctx) })
+}
+
+// connect creates a pool and runs check on it, again while check fails
+// with a Retryable error and o.retryFor lasts.
+func connect(ctx context.Context, o *options, check func(*pgxpool.Pool) error) (*pgxpool.Pool, error) {
+	deadline := time.Now().Add(o.retryFor)
+	wait := retryMin
+	for {
+		pool, err := pgxpool.NewWithConfig(ctx, o.cfg)
+		if err != nil {
+			return nil, fmt.Errorf("pg: connect: %w", err)
+		}
+		err = check(pool)
+		if err == nil {
+			return pool, nil
+		}
 		pool.Close()
-		return nil, fmt.Errorf("pg: ping: %w", err)
+		if !Retryable(err) || time.Now().Add(wait).After(deadline) {
+			return nil, fmt.Errorf("pg: ping: %w", err)
+		}
+		slog.Warn("pg: the database is busy; trying again", "in", wait, "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("pg: ping: %w (then %w)", err, ctx.Err())
+		case <-time.After(wait):
+		}
+		wait = min(2*wait, retryMax)
 	}
-	return pool, nil
 }
 
 // OpenSchema creates a pool whose connections all use schema as their
@@ -155,14 +221,12 @@ func OpenSchema(ctx context.Context, dsn string, maxConns int32, schema string, 
 			return err
 		}
 	}
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("pg: connect: %w", err)
-	}
 	var current *string
-	if err := pool.QueryRow(ctx, "SELECT current_schema()").Scan(&current); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("pg: ping: %w", err)
+	pool, err := connect(ctx, o, func(pool *pgxpool.Pool) error {
+		return pool.QueryRow(ctx, "SELECT current_schema()").Scan(&current)
+	})
+	if err != nil {
+		return nil, err
 	}
 	if current == nil || *current != schema {
 		pool.Close()
