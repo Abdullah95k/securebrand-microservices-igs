@@ -1,0 +1,37 @@
+# fakeig: a synthetic logged-out Instagram (cmd/fakeig) with 500 generated
+# profiles. -admin serves /__fakeig/ for the soak driver: the profiles,
+# world changes and the ground truth. Every 37th GraphQL request answers
+# 429, so igs's rate limiting is exercised too.
+apiVersion: v1
+kind: Service
+metadata:
+  name: fakeig
+spec:
+  selector: {app: fakeig}
+  ports: [{name: http, port: 8091}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakeig
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fakeig}
+  template:
+    metadata:
+      labels: {app: fakeig}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 65532}
+      containers:
+        - name: fakeig
+          image: igs
+          command: ["/usr/local/bin/fakeig"]
+          args: ["-addr", ":8091", "-admin", "-seed", "12", "-profiles", "500", "-posts", "40", "-max-comments", "25",
+            "-rate-limit-every", "37"]
+          ports: [{name: http, containerPort: 8091}]
+          readinessProbe:
+            tcpSocket: {port: 8091}
+            periodSeconds: 5
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: 500m, memory: 1Gi}}

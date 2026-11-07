@@ -192,7 +192,7 @@ Estimated growth: 2 to 4 GB a day per 1,000 accounts.
 
 ### 4. Memory and soak
 
-**Today:** not measured. The load test (21 s) and the 4-minute soak didn't record memory. The 90-minute soak workflow has never run.
+**Today:** not measured. The load test (21 s) and the 4-minute soak didn't record memory. The 90-minute soak workflow has never run. **REQ-008 fix 12:** the 24-hour soak runs on the production cluster in the namespace `igs-soak` (`deploy/soak`, runbook `igs-soak.md`) rather than on a droplet; its plan is below.
 
 **Plan:**
 1. **A 24-hour soak on a machine of our own.** Use the pilot droplet before the pilot, not GitHub's runners, which stop at 6 hours.

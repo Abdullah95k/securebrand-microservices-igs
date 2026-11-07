@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"strconv"
@@ -125,6 +126,8 @@ type Options struct {
 	// CDNBase prefixes media URLs; empty is an unresolvable stand-in host.
 	// Tests that download media point it at the server's /fake-cdn.
 	CDNBase string
+	// Admin serves AdminPrefix, for igs's soak driver.
+	Admin bool
 }
 
 // DefaultCDN is the stand-in CDN of media URLs.
@@ -143,6 +146,7 @@ type Server struct {
 	pageLoads int
 	exits     map[string]*ExitStat
 	gql       atomic.Int64
+	rng       *rand.Rand // world changes asked for through AdminPrefix
 	// Requests counts GraphQL requests by friendly name.
 	Requests sync.Map
 }
@@ -231,6 +235,8 @@ func NewServer(w *World, o Options) *Server {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case s.opts.Admin && strings.HasPrefix(r.URL.Path, AdminPrefix):
+		s.admin(w, r)
 	case strings.HasPrefix(r.URL.Path, "/accounts/login"):
 		page(w, http.StatusOK, `<html><form action="/accounts/login/ajax/" method="post"></form></html>`)
 	case strings.HasPrefix(r.URL.Path, "/challenge"):

@@ -1,0 +1,69 @@
+# The soak driver (cmd/igs-soak): registers fakeig's 500 profiles through
+# igs's API, keeps them on a 30-minute schedule for 23 hours while fakeig's
+# world changes, kills a crawler pod every 2 hours and restarts Valkey once
+# at 12 hours; then stops the schedules, reads every profile in full and
+# compares igs's store with fakeig's truth. Its last log lines are the
+# report ("igs soak: PASS" or "igs soak: FAIL"). It runs once: a failed soak
+# is not retried.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: igs-soak-driver
+---
+# The chaos, in this namespace only: delete pods (a crawler's), and restart
+# Valkey's StatefulSet.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: igs-soak-driver
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, delete]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [statefulsets]
+    resourceNames: [valkey]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: igs-soak-driver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: igs-soak-driver
+subjects:
+  - kind: ServiceAccount
+    name: igs-soak-driver
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: igs-soak
+spec:
+  backoffLimit: 0
+  # 23 h of driving, up to 30 min to settle and 2 h of final reads.
+  activeDeadlineSeconds: 97200
+  template:
+    metadata:
+      labels: {app: igs-soak}
+    spec:
+      serviceAccountName: igs-soak-driver
+      restartPolicy: Never
+      securityContext: {runAsNonRoot: true, runAsUser: 65532}
+      containers:
+        - name: igs-soak
+          image: igs
+          command: ["/usr/local/bin/igs-soak"]
+          args: ["--api", "http://igs-api", "--fakeig", "http://fakeig:8091", "--duration", "23h", "--interval", "30m",
+            "--mutate-every", "2s", "--chaos", "--kill-every", "2h", "--valkey-at", "12h", "--settle", "30m",
+            "--final-wait", "2h", "--wait", "30m"]
+          env:
+            - {name: IGS_SERVICE__ENV, value: soak}
+            - {name: IGS_POSTGRES__DSN, value: "postgres://igs@postgres:5432/igs?sslmode=disable"}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 250m, memory: 256Mi}}

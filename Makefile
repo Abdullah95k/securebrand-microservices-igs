@@ -88,6 +88,10 @@ igs-chart-check:
 	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/production.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 	$(HELM) lint deploy/helm/igs -f deploy/helm/igs/values-production.yaml
 	set -o pipefail; $(HELM) template igs deploy/helm/igs -n igs -f deploy/helm/igs/values-production.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	$(HELM) lint deploy/helm/igs -f deploy/soak/values-soak.yaml
+	set -o pipefail; $(HELM) template igs deploy/helm/igs -n igs-soak -f deploy/soak/values-soak.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	$(KUBECONFORM) $(KUBECONFORM_ARGS) deploy/soak/stores.yaml deploy/soak/fakeig.yaml deploy/soak/driver.yaml
+	python3 scripts/soak-resources.py --helm $(HELM)
 
 ## Run the chart's hooks and Deployments in Docker exactly as rendered
 ## (igsctl hooks, every Deployment), then three registered profiles'

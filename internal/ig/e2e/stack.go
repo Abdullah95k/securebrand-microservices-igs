@@ -173,7 +173,7 @@ func Start(t *testing.T, o Options) *Stack {
 		docs[q.FriendlyName] = append(docs[q.FriendlyName], q.DocID)
 	}
 	world := fakeig.NewWorld(spec)
-	fake := fakeig.NewServer(world, fakeig.Options{Docs: docs, Faults: o.Faults})
+	fake := fakeig.NewServer(world, fakeig.Options{Docs: docs, Faults: o.Faults, Admin: true})
 	fhs := httptest.NewServer(fake)
 	t.Cleanup(fhs.Close)
 	cfg.IG.BaseURL = fhs.URL
