@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Checks which Secrets igs's chart makes its pods wait for.
 
-- Production (deploy/helm/igs/values-production.yaml): only the
-  components that reach Instagram through the proxy tiers (crawler-profile,
-  crawler-post, registry-sync) mount the proxies Secret; the scheduler
+- Production (deploy/helm/igs/values-production.yaml): only the crawlers
+  and registry-sync mount the proxies Secret (crawler-retry too: the crawler
+  binary builds the proxy pool, whose routing names the tiers); the scheduler
   mounts it as optional; the hook Jobs and every other component never
   name it, so igs migrates and starts before the platform adds the proxies.
 - The soak (deploy/soak/values-soak.yaml): every Secret a rendered pod or
@@ -21,7 +21,7 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHART = os.path.join(ROOT, "deploy/helm/igs")
-PROXIES_REQUIRED = {"crawler-profile", "crawler-post", "registry-sync"}
+PROXIES_REQUIRED = {"crawler-profile", "crawler-post", "crawler-retry", "registry-sync"}
 PROXIES_OPTIONAL = {"scheduler"}
 
 

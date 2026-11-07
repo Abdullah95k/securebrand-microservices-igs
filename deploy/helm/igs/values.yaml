@@ -274,6 +274,10 @@ components:
   crawler-retry:
     enabled: true
     command: ["/usr/local/bin/igs-crawler", "--stages", "retry"]
+    # It reaches nothing on the web, but the crawler binary builds the proxy
+    # pool at start, whose routing names the tiers in the proxies file: it
+    # waits for them like the other crawlers.
+    proxies: required
     replicas: 1
     resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
   persister:
