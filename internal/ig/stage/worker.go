@@ -217,8 +217,8 @@ func (w *Worker) exhausted(next *igstaskv1.Task) string {
 
 // DoneTTL is how long a finished task's id is remembered, so a redelivered
 // record of it is skipped: longer than igs's task topics keep a record
-// (72h, configs/ig/topics.yaml), and well short of fbs's 7 days. At 300k
-// profiles every 3 hours, the done markers are most of igs's Valkey keys.
+// (24h for crawl tasks, 72h for media, configs/ig/topics.yaml), and well
+// short of fbs's 7 days. The done markers are most of igs's Valkey keys.
 const DoneTTL = 96 * time.Hour
 
 // finish marks a task that ran to its end (done or yielded) done, drops

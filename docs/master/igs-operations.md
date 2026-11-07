@@ -496,7 +496,7 @@ The pilot must measure all of this (D5).
    - Discovery has no daily cap by default.
    - The reels tab is re-read a year back on every visit.
    - The shared rate limiter fails open when Valkey is down.
-   - The topics file has 915 partitions.
+   - The topics file had 915 partitions (*fixed by REQ-008 fix 20: 99, the production sizes for 10,000 profiles*).
    - Raw lines carry no parser version.
    - There's no gitleaks or image scanning in CI.
 3. **Top three risks in production:**
