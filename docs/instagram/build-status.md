@@ -289,3 +289,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **The fix:** world changes take a lock of their own. A test reproduces the deadlock, and fails without the fix.
   - **The soak now fails loudly when its harness fails:** when fakeig leaves more than 1% of the world changes unanswered, or restarts. The report says the harness failed, not necessarily igs.
   - **Then the owner decided (D-045): "dont test on fake instagram or fake tiktok or fake facebook or fake youtube, test on the real thing".** The soak gates nothing and won't run again in production. The pilot on Instagram is the test, and starts the same evening. The fix stays, because CI's soak tests run fakeig the same way.
+
+- **2026-11-07 (the pilot's first watch):** the first 50 accounts went in at 20:07 Iraq time. Half an hour later, 194 jobs had completed, rows were being stored (29,013 comments in the hour), schedule lag was 0, there were no restarts and no parser drift. The watch raised four points, none of which holds the other 298:
+  - **The block rate showed no data, because nothing had been blocked.** The rule now gives 0 in that case (`or vector(0)`).
+  - **igs held 26 PostgreSQL server connections**, above the runbook's estimate of 8 to 12. Ten pods with pools of at most 4 cap it at 40; the runbook now says so.
+  - **Registry-sync recorded no successful run**, probably because no canary profile has highlights, so the highlights query is never checked. The other queries are healthy, and the crawlers store highlights. The owner can add a canary that has highlights. The runbooks now require one.
+  - **The post backlog of about 11,000 on the backfill lane** is the 50 accounts' history, drained at the exits' pace while scheduled visits go first.

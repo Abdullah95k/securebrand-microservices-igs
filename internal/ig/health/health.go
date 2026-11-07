@@ -223,7 +223,8 @@ func exits(ctx context.Context, s Sources) Check {
 		for _, n := range resting {
 			total += n
 		}
-		parts = append(parts, fmt.Sprintf("%d resting (no static tier in this config)", total))
+		parts = append(parts, fmt.Sprintf("%d resting (this pod has no proxies config: run igsctl health in a crawler pod "+
+			"for each tier)", total))
 	}
 	c.Value = strings.Join(parts, ", ")
 	return c
