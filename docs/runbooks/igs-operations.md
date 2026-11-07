@@ -633,8 +633,12 @@ The persister is the first stage to back up: its backlog peaked at 136,716 recor
 - 300k profiles every 3 hours (about 28 runs a second, 150 to 300 requests a second) needs 600 to 1,200 exits at 0.25 a second each.
 - Size the exit pool from `igs_exits`, `igs_exits_resting` and the schedule lag: when `igs:ig_leader:schedule_lag_seconds` grows while few exits rest, add exits.
 
+**Kafka.** `configs/ig/topics.yaml` holds the topics as the platform creates them in production, sized for 10,000 profiles: 99 partitions, replication 3 (REQ-008 fix 20). Crawl tasks keep 24 h, media tasks 72 h, retries 48 h, dead letters 14 days, `ig.*` 7 days and erasure 30 days.
+- Each topic's partitions bound the pods that consume it, and the chart's KEDA maxima follow: crawler-profile 6 (`igs.task.profile.p1`), crawler-post 12 (`igs.task.post.p1`), persister and normalizer 12 (`ig.comment.v1`), media-downloader 3. `TestKEDAMaximaFitTopics` checks every values file against the topics.
+- At 10,000 profiles the exits, not the pods, set the pace (above). To grow past that, raise the partitions first: the platform changes them in `kafka.tf` (they can only grow), then raise the KEDA maxima to match.
+
 **Valkey.** Most keys are per task:
-- **Done marker:** 88 B, kept `stage.DoneTTL` (96 h, longer than the task topics' 72 h retention).
+- **Done marker:** 88 B, kept `stage.DoneTTL` (96 h, longer than the task topics keep a record: 24 h for crawl tasks, 72 h for media).
 - **Checkpoint:** 344 B, deleted when its task finishes, so only in-flight segments hold one.
 - **Job keys:** kept 24 h after the job finishes.
 

@@ -216,7 +216,10 @@ podAnnotations: {}
 
 # One Deployment per component. "lag" lists consumer groups/topics KEDA
 # watches (group and topic names get config.kafka.topic_prefix prepended).
-# Crawler groups are igs-ig-crawler-<stage>-<lane>.
+# Crawler groups are igs-ig-crawler-<stage>-<lane>. A component's
+# autoscale.max is at most the partitions of the largest topic it consumes
+# (configs/ig/topics.yaml, sized for 10,000 profiles): more pods would only
+# wait (TestKEDAMaximaFitTopics).
 components:
   api:
     enabled: true
@@ -248,7 +251,7 @@ components:
     pdb: {maxUnavailable: 1}
     autoscale:
       min: 2
-      max: 12
+      max: 6
       lag:
         - {group: igs-ig-crawler-profile-p0, topic: igs.task.profile.p0, threshold: 20}
         - {group: igs-ig-crawler-profile-p1, topic: igs.task.profile.p1, threshold: 500}
@@ -265,7 +268,7 @@ components:
     pdb: {maxUnavailable: 1}
     autoscale:
       min: 4
-      max: 24
+      max: 12
       lag:
         - {group: igs-ig-crawler-post-p0, topic: igs.task.post.p0, threshold: 50}
         - {group: igs-ig-crawler-post-p1, topic: igs.task.post.p1, threshold: 1000}
@@ -288,7 +291,7 @@ components:
     pdb: {maxUnavailable: 1}
     autoscale:
       min: 2
-      max: 8
+      max: 12
       lag:
         - {group: igs-ig-persister, topic: ig.comment.v1, threshold: 20000}
         - {group: igs-ig-persister, topic: ig.post.v1, threshold: 5000}
@@ -303,7 +306,7 @@ components:
     pdb: {maxUnavailable: 1}
     autoscale:
       min: 2
-      max: 8
+      max: 12
       lag:
         - {group: igs-ig-normalizer, topic: ig.comment.v1, threshold: 20000}
         - {group: igs-ig-normalizer, topic: ig.post.v1, threshold: 5000}
@@ -333,8 +336,8 @@ components:
     resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {memory: 1Gi}}
     pdb: {maxUnavailable: 1}
     autoscale:
-      min: 2
-      max: 12
+      min: 1
+      max: 3
       lag:
         - {group: igs-ig-media-downloader, topic: igs.task.media, threshold: 1000}
   media-janitor:

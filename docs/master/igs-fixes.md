@@ -52,7 +52,7 @@ The owner's approved fixes for igs (REQ-008, 6 November 2026), in the order to b
 
 | # | Fix | PR | Status | Evidence |
 |---|---|---|---|---|
-| 20 | Topic sizes for 10,000 accounts (proposed to the master on 6 November: 186 partitions instead of 915) | - | planned | |
+| 20 | Topic sizes for 10,000 accounts. `configs/ig/topics.yaml` holds the topics as the platform creates them in production (its `kafka.tf`, 7 Nov): 99 partitions instead of 915, replication 3, crawl tasks kept 24 h (media 72 h). The chart's default KEDA maxima follow the partitions: crawler-profile 6, crawler-post 12, persister and normalizer 12, media-downloader 3 | - | in review | `TestKEDAMaximaFitTopics` (`internal/ig/topics`): in `values.yaml`, `values-production.yaml` and `examples/production.yaml`, no component scales past the partitions of the largest topic it consumes; it fails on the previous defaults (crawler-profile 12, crawler-post 24, media-downloader 12) |
 | 21 | Chart defaults: NetworkPolicy with egress, alerts on, hook Job resources, the browser in its own container (B3) | - | planned | |
 | 22 | Security: a credential per component, gitleaks, Dependabot, `govulncheck`, an image scan (I1, I3, G4) | - | planned | |
 | 23 | Smaller items: a migration check (A6), Iraq time in owner-facing output (B7), a 3-day canary in the runbook (H3) | - | planned | |
