@@ -92,6 +92,7 @@ var (
 	PersistRows        = counterVec("persist_rows_total", "Rows written by the persister.", "entity", "op")
 	PersistQuarantined = counterVec("persist_quarantined_total", "Records the persister could not write and moved to its DLQ.", "topic", "reason")
 	PersistSuppressed  = counterVec("persist_suppressed_total", "Records the persister dropped or redacted for an erased subject.", "entity", "action")
+	DeletionChecks     = counterVec("deletion_checks_total", "Posts read in full that the finalizer checked for deleted comments, by outcome (checked, skipped_partial: the read's count did not match the post's).", "outcome")
 	CommentChanges     = counterVec("comment_changes_total", "Stored comments edited, marked deleted or seen again after a deletion, by kind (edited, deleted, restored).", "kind")
 	PersistBatch       = histVec("persist_batch_seconds", "Persister batch flush duration.", prometheus.ExponentialBuckets(0.005, 2, 12), "entity")
 	Jobs               = counterVec("jobs_total", "Jobs reaching a terminal state.", "status", "lane")

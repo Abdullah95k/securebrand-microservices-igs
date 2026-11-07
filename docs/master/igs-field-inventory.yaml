@@ -850,7 +850,7 @@ entities:
     published_at: Post.status; content.post.v1 Post.is_deleted
     history: latest
     personal_data: false
-    notes: 'Unavailable means deleted, archived or made private: Instagram doesn''t say which. Only noticed by re-reads, so only within the 7-day refresh window.'
+    notes: 'Unavailable means deleted, archived or made private: Instagram doesn''t say which. Noticed by re-reads: within the 7-day refresh window, and at each post''s one full re-read at 30 days (REQ-008 fix 14).'
   - name: walled post pages
     meaning: Post page served only a login wall
     type: '-'
@@ -1148,7 +1148,7 @@ entities:
     published_at: Comment.status; Comment.is_deleted
     history: latest
     personal_data: false
-    notes: 'No stage detects a deleted comment today: the persister would record one, but nothing publishes it. Plan in igs-gaps.md (E7).'
+    notes: 'Detected after a complete read of the post''s comments (REQ-008 fix 14): the stored comments it no longer returned become deleted, with their text kept, and are published with status deleted and no text. A comment seen again becomes visible.'
   - name: redacted
     meaning: Personal fields removed (erasure)
     type: bool
@@ -1947,7 +1947,7 @@ planned:
 - field: comment deletions
   entity: comment
   why: E7.
-  change: On a complete re-read within the refresh window, publish comments that are gone as deleted.
+  change: 'Done (REQ-008 fix 14): after a complete re-read (refresh window, or the one at 30 days), comments that are gone are published as deleted.'
 - field: walled posts
   entity: post
   why: 2.6% of posts publish nothing.

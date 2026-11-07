@@ -18,6 +18,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
@@ -162,6 +163,17 @@ func (p *Planner) batch(ctx context.Context, n int, stretch float64) (int, error
 				posts, refreshed = nil, nil
 			}
 		}
+		var rechecked []recheck
+		if d.userPK != nil && g.PostRecheckAfter > 0 && g.PostRecheckPerRun > 0 {
+			rcs, err := p.dueRechecks(ctx, *d.userPK)
+			if err != nil {
+				slog.Warn("planner: post re-reads", d.account(), "err", err)
+			}
+			for _, r := range rcs {
+				posts = append(posts, r.root)
+				rechecked = append(rechecked, r)
+			}
+		}
 		j, _, err := p.Dispatch.Create(ctx, dispatch.Request{Kind: dispatch.KindScheduled, Lane: igstaskv1.Lane_LANE_P1,
 			Mode: "auto", ProfileRef: d.ref, Limits: lim, RefreshProfile: d.refresh, Posts: posts})
 		if err != nil {
@@ -182,8 +194,66 @@ func (p *Planner) batch(ctx context.Context, n int, stretch float64) (int, error
 				return 0, err
 			}
 		}
+		if len(rechecked) > 0 {
+			taken := make([]time.Time, len(rechecked))
+			pks := make([]int64, len(rechecked))
+			for i, r := range rechecked {
+				taken[i], pks[i] = r.taken, r.root.Scope.MediaPk
+			}
+			if _, err := p.DB.Exec(ctx, `UPDATE posts p SET rechecked_at = now()
+				FROM unnest($1::timestamptz[], $2::bigint[]) AS d(taken, media)
+				WHERE p.taken_at = d.taken AND p.media_pk = d.media`, taken, pks); err != nil {
+				return 0, err
+			}
+		}
 	}
 	return len(list), nil
+}
+
+// recheck is a post due its 30-day re-read.
+type recheck struct {
+	root  dispatch.PostRoot
+	taken time.Time
+}
+
+// dueRechecks returns the profile's posts due their one full re-read
+// (ig.schedule.post_recheck_after old, for a week after that), newest
+// first, at most post_recheck_per_run, as full post tasks: the page shows
+// whether the post still exists, and every comment is read, so the job's
+// end can tell which were deleted.
+func (p *Planner) dueRechecks(ctx context.Context, userPK int64) ([]recheck, error) {
+	g := p.Cfg.IG.Schedule
+	after := int(g.PostRecheckAfter.Seconds())
+	rows, err := p.DB.Query(ctx, `SELECT p.media_pk, i.shortcode, p.taken_at, p.permalink, p.comment_count
+		FROM posts p JOIN post_index i ON i.media_pk = p.media_pk AND i.taken_at = p.taken_at
+		WHERE p.owner_pk = $1 AND p.status = 'visible' AND p.kind <> 'highlight' AND p.rechecked_at IS NULL
+		  AND p.taken_at <= now() - $2::int * interval '1 second'
+		  AND p.taken_at > now() - ($2::int + 604800) * interval '1 second'
+		ORDER BY p.taken_at DESC LIMIT $3`, userPK, after, g.PostRecheckPerRun)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []recheck
+	for rows.Next() {
+		var pk int64
+		var code string
+		var taken time.Time
+		var link *string
+		var count *int64
+		if err := rows.Scan(&pk, &code, &taken, &link, &count); err != nil {
+			return nil, err
+		}
+		sc := &igstaskv1.PostScope{MediaPk: pk, Shortcode: code, OwnerPk: userPK, TakenAt: timestamppb.New(taken)}
+		if link != nil {
+			sc.Permalink = *link
+		}
+		if count != nil {
+			sc.ReportedCommentCount = *count
+		}
+		out = append(out, recheck{root: dispatch.PostRoot{Scope: sc, Mode: commonv1.CrawlMode_CRAWL_MODE_FULL}, taken: taken})
+	}
+	return out, rows.Err()
 }
 
 // dueRefreshes returns the profile's posts due a comment refresh (newest

@@ -76,6 +76,9 @@ type Request struct {
 // PostRoot is a post task started with a job.
 type PostRoot struct {
 	Scope *igstaskv1.PostScope
+	// Mode is the post task's; unset, incremental (a comment refresh). A
+	// full one reads the page and every comment (the 30-day re-read).
+	Mode commonv1.CrawlMode
 }
 
 // Job is a job as the API shows it.
@@ -245,7 +248,11 @@ func (d *Dispatcher) Create(ctx context.Context, r Request) (*Job, bool, error) 
 	root := task.NewProfile(id.String(), r.Lane, cm, r.ProfileRef, k.userPK, r.Limits, sc)
 	roots := []*igstaskv1.Task{root}
 	for _, p := range r.Posts {
-		pt := task.NewPost(root, commonv1.CrawlMode_CRAWL_MODE_INCREMENTAL, p.Scope)
+		pm := p.Mode
+		if pm == commonv1.CrawlMode_CRAWL_MODE_UNSPECIFIED {
+			pm = commonv1.CrawlMode_CRAWL_MODE_INCREMENTAL
+		}
+		pt := task.NewPost(root, pm, p.Scope)
 		roots = append(roots, pt)
 		// The refreshed posts' coverage is reported with the job's.
 		if _, err := d.Jobs.SetPost(ctx, id.String(), p.Scope.MediaPk, p.Scope.GetTakenAt().GetSeconds(),

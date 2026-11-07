@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
@@ -398,6 +399,23 @@ func (w *Writer) Metrics(ctx context.Context, ms []*igv1.PostMetrics) error {
 // edit; a redacted comment stays redacted.
 func (w *Writer) Comments(ctx context.Context, cs []*igv1.Comment) error {
 	cs = latest(cs, func(c *igv1.Comment) string { return strconv.FormatInt(c.CommentPk, 10) })
+	// A deletion only marks the stored comment: its event carries no text,
+	// which an upsert would wipe.
+	var dels []*igv1.Comment
+	kept := cs[:0]
+	for _, c := range cs {
+		if c.Status == igv1.CommentStatus_COMMENT_STATUS_DELETED {
+			dels = append(dels, c)
+			continue
+		}
+		kept = append(kept, c)
+	}
+	cs = kept
+	if len(dels) > 0 {
+		if _, err := MarkDeleted(ctx, w.DB, dels); err != nil {
+			return fmt.Errorf("persist: comments deleted: %w", err)
+		}
+	}
 	if len(cs) == 0 {
 		return nil
 	}
@@ -503,6 +521,37 @@ func (w *Writer) Comments(ctx context.Context, cs []*igv1.Comment) error {
 	observe("comment", start, int(written), len(rows))
 	metrics.CommentChanges.WithLabelValues("edited").Add(float64(edited))
 	return nil
+}
+
+// MarkDeleted sets visible comments to deleted as of their observation. A
+// comment seen after that (a later read returns it) becomes visible again
+// (Comments). The text and history stay: nothing is removed.
+func MarkDeleted(ctx context.Context, db *pgxpool.Pool, cs []*igv1.Comment) (int64, error) {
+	taken := make([]time.Time, 0, len(cs))
+	media := make([]int64, 0, len(cs))
+	ids := make([]int64, 0, len(cs))
+	at := make([]time.Time, 0, len(cs))
+	for _, c := range cs {
+		if c.PostTakenAt == nil || c.CommentPk == 0 {
+			continue
+		}
+		taken = append(taken, c.PostTakenAt.AsTime())
+		media = append(media, c.MediaPk)
+		ids = append(ids, c.CommentPk)
+		at = append(at, observed(c.Obs))
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := db.Exec(ctx, `UPDATE comments c SET status = 'deleted', deleted_at = d.at
+		FROM unnest($1::timestamptz[], $2::bigint[], $3::bigint[], $4::timestamptz[]) AS d(taken, media, id, at)
+		WHERE c.taken_at = d.taken AND c.media_pk = d.media AND c.comment_pk = d.id
+		  AND c.status = 'visible' AND NOT c.redacted AND c.last_seen_at < d.at`, taken, media, ids, at)
+	if err != nil {
+		return 0, err
+	}
+	metrics.CommentChanges.WithLabelValues("deleted").Add(float64(tag.RowsAffected()))
+	return tag.RowsAffected(), nil
 }
 
 // Media upserts media metadata. A newer sighting refreshes the signed

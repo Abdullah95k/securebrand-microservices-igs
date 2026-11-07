@@ -116,7 +116,7 @@ Post = feed post, video, carousel or reel (reel = product type `clips`). The pos
 | `has_audio` | Video has sound | bool (optional) | true | always | post page (HTML with embedded JSON) | `posts.has_audio` | `Post.has_audio` | latest | no | Videos only. |
 | `permalink` | The post's URL | text | https://www.instagram.com/p/FAKEcode01/ | always | derived by igs (from shortcode) | `posts.permalink` | `Post.permalink`; `content.post.v1 Post.url` | latest | no |  |
 | `discovered_via` | grid, tagged or reels | enum | grid | always | derived by igs | `posts.discovered_via` | `Post.discovered_via`; `extras.discovered_via` | latest | no | `tagged` is never used: the tagged tab needs a login (tested 5 Nov). |
-| `status` | visible or unavailable | enum | visible | always | derived by igs (a re-read finds the post gone) | `posts.status` | `Post.status`; `content.post.v1 Post.is_deleted` | latest | no | Unavailable means deleted, archived or made private: Instagram doesn't say which. Only noticed by re-reads, so only within the 7-day refresh window. |
+| `status` | visible or unavailable | enum | visible | always | derived by igs (a re-read finds the post gone) | `posts.status` | `Post.status`; `content.post.v1 Post.is_deleted` | latest | no | Unavailable means deleted, archived or made private: Instagram doesn't say which. Noticed by re-reads: within the 7-day refresh window, and at each post's one full re-read at 30 days (REQ-008 fix 14). |
 | `walled post pages` | Post page served only a login wall | - | - | rare (2.6%) | post page (HTML with embedded JSON) | job counter `posts_gated` | **nothing published** for the post | - | no | 2.6% of post pages. After three fresh identities see the wall, igs skips the post and publishes no event, though the grid gave its ID, time, type and thumbnail. Fix planned. |
 | `dropped post-page keys` | `seo_canonical_url`, `organic_tracking_token`, `is_dash_eligible`, `number_of_qualities`, `if_is_crawler`, `video_dash_manifest` (used for duration only), `is_trending_in_clips`, `topic_id`, player settings | mixed | - | always | post page (HTML with embedded JSON) | not stored (raw response only) | not published | - | no | Dropped: delivery and player data. |
 | `paid partnership, sponsor` | Branded-content flag | bool | - | unknown | post page (HTML with embedded JSON) | not stored | not published | - | no | Not seen in any captured logged-out answer. |
@@ -158,7 +158,7 @@ Comment = top-level comment. Replies: none logged out. A comments page is about 
 | `parent_comment_pk` | Parent comment (replies) | int64 (optional) | - | logged_in_only | comments query, and the first comments embedded in the post page (`parent_comment_id`) | `comments.parent_comment_pk` | `Comment.parent_comment_pk`; `Comment.parent_comment_id` | key | no | Always empty logged out. |
 | `depth` | 0 = comment | int32 | 0 | always | derived by igs | `comments.depth` | `Comment.depth` | latest | no | Always 0 logged out. |
 | `is_op` | Written by the post's account | bool | false | always | derived by igs (author pk = post owner) | `comments.is_op` | `Comment.is_op`; `extras.is_op` | latest | no |  |
-| `status` | visible or deleted | enum | visible | always | derived by igs | `comments.status`, `comments.deleted_at` | `Comment.status`; `Comment.is_deleted` | latest | no | **No stage detects a deleted comment today**: the persister would record one, but nothing publishes it. Plan in `igs-gaps.md` (E7). |
+| `status` | visible or deleted | enum | visible | always | derived by igs | `comments.status`, `comments.deleted_at` | `Comment.status`; `Comment.is_deleted` | latest | no | Detected after a complete read of the post's comments (REQ-008 fix 14): the stored comments it no longer returned become `deleted`, with their text kept, and are published with status deleted and no text. A comment seen again becomes visible. |
 | `redacted` | Personal fields removed (erasure) | bool | false | always | derived by igs | `comments.redacted` | `Comment.redacted`; `extras.redacted` | latest | no |  |
 | `edit tracking` | Edit count and time of the latest edit seen | int, timestamp | 1 | rare | derived by igs (text changed between reads) | `comments.edit_count`, `comments.edited_at` | a new `ig.comment.v1` version | versions | no | Instagram serves no edited flag on comments. |
 | `giphy_media_info` | A GIF attached to the comment | object | - | unknown | comments query, and the first comments embedded in the post page | not stored | not published | - | no | Dropped. The `comment_gif` media kind exists but nothing fills it. |
@@ -339,8 +339,8 @@ Nothing about discovery is published to Kafka today. `discovery.candidate.v1` do
 - Caption edits: detected when a re-read (within 7 days) returns a new caption. The old one goes to `post_edits`, and a new version is published.
 - Comment edits: detected the same way (`comment_edits`, `edit_count`, `edited_at`).
 - Bio and link changes: a new version is published; Postgres keeps the latest only.
-- Post deletion: a re-read that finds the post gone marks it `unavailable` (deleted, archived or private; Instagram doesn't say which). Only within the 7-day refresh window, or when the post is re-read later for another reason.
-- Comment deletion: **not detected today** (planned).
+- Post deletion: a re-read that finds the post gone marks it `unavailable` (deleted, archived or private; Instagram doesn't say which). Within the 7-day refresh window, and at the post's one full re-read at 30 days (REQ-008 fix 14).
+- Comment deletion (REQ-008 fix 14): after a read of a post's comments from the first page to the last, whose comments and reply counts add up to the post's count, the stored comments it no longer returned are marked `deleted` (text kept) and published. Such reads: a refresh that finds fewer comments than before, full runs, and the 30-day re-read.
 - Speed: as fast as the re-read schedule: about 3 h, 9 h, 21 h, 45 h and 93 h after posting on the 3-hour tier.
 
 ### 6. Relationships
@@ -414,7 +414,7 @@ Proposals only; each needs the owner's approval. All are additions: nothing is r
 | linked Facebook page ID | account | Cross-platform linking. **Done (REQ-008 fix 9).** | `Profile.linked_facebook_page_id` and a link with `platform` `fb` on `content.account.v1`; the name no longer in `Link.url`. |
 | is_business / category as optional | account | `false` and empty mean unknown today. | Added optional fields; old ones kept. |
 | post metrics from post pages | post_metrics | Photos and carousels have no metrics series. | Publish `ig.post_metrics.v1` (likes, comments) from each post-page read. |
-| comment deletions | comment | E7. | On a complete re-read within the refresh window, publish comments that are gone as deleted. |
+| comment deletions | comment | E7. **Done (REQ-008 fix 14).** | After a complete re-read (refresh window, or the one at 30 days), comments that are gone are published as deleted. |
 | walled posts | post | 2.6% of posts publish nothing. | Publish the grid's fields with a `gated` reason. |
 | parser version on raw lines | raw | E8 asks for it. | Add `parser` to each raw line. |
 | bio and link history | account | Only the latest is in Postgres. | A `profile_edits` table, like `post_edits` (optional: the event stream and ClickHouse may cover it). |

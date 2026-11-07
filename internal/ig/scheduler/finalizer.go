@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -17,9 +18,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
+	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
@@ -153,6 +156,13 @@ func (f *Finalizer) Finalize(ctx context.Context, id string) error {
 	comp, err := f.completeness(ctx, posts, st.Counters)
 	if err != nil {
 		return err
+	}
+	deleted, err := f.deletions(ctx, id, status == "cancelling")
+	if err != nil {
+		return fmt.Errorf("deletions: %w", err)
+	}
+	if deleted > 0 {
+		st.Counters["comments_deleted"] += deleted
 	}
 	c := st.Counters
 	final := "completed"
@@ -295,4 +305,106 @@ func jobStatus(s string) commonv1.JobStatus {
 		return commonv1.JobStatus_JOB_STATUS_CANCELLED
 	}
 	return commonv1.JobStatus_JOB_STATUS_UNSPECIFIED
+}
+
+// deletions compares the stored comments of each post read in full during
+// the job with what that read returned (REQ-008 fix 14). A comment stored
+// before the read began and not returned by it is published as deleted on
+// ig.comment.v1 and marked deleted in the store; its text and history stay.
+// It returns how many were marked; a cancelled job only drops its pass
+// records.
+func (f *Finalizer) deletions(ctx context.Context, job string, cancelled bool) (int64, error) {
+	passes, posts, err := f.Jobs.Passes(ctx, job)
+	if err != nil || len(posts) == 0 {
+		return 0, err
+	}
+	var marked int64
+	if f.Cfg.Scheduler.PostRefresh.DetectDeletions && !cancelled {
+		var dels []*igv1.Comment
+		for _, p := range passes {
+			ds, err := f.missing(ctx, job, p)
+			if err != nil {
+				return 0, err
+			}
+			dels = append(dels, ds...)
+		}
+		if len(dels) > 0 {
+			// One time for the whole check, so the store and the events agree.
+			at := time.Now().UTC()
+			em := emit.Emitter{Now: func() time.Time { return at }}
+			src := emit.Source{JobID: job, Query: "comments", Mode: commonv1.CrawlMode_CRAWL_MODE_FULL}
+			b := f.Producer.NewBatch()
+			for _, d := range dels {
+				if err := em.CommentDeleted(ctx, b, src, d); err != nil {
+					return 0, err
+				}
+			}
+			if err := b.Wait(ctx); err != nil {
+				return 0, err
+			}
+			// The persister may apply the events first; either way each comment
+			// is marked once, at the same time.
+			for _, d := range dels {
+				d.Obs = &commonv1.Observation{ObservedAt: timestamppb.New(at)}
+			}
+			if _, err := persist.MarkDeleted(ctx, f.DB, dels); err != nil {
+				return 0, err
+			}
+			marked = int64(len(dels))
+			// Before the pass records go: a retried finalize finds these
+			// already marked and does not count them again.
+			if err := f.Jobs.AddCounters(ctx, job, map[string]int64{"comments_deleted": marked}); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return marked, f.Jobs.ClearPasses(ctx, job, posts)
+}
+
+// missing returns the stored comments of p's post stored before the read
+// began and not returned by it. Only a complete read counts: the comments
+// it returned, each with its reply count, must add up to the post's comment
+// count from the same read (within scheduler.post_refresh.
+// deletion_count_slack), or Instagram may have answered partially and the
+// post is skipped.
+func (f *Finalizer) missing(ctx context.Context, job string, p jobs.Pass) ([]*igv1.Comment, error) {
+	seen, err := f.Jobs.Seen(ctx, job, p.PostID)
+	if err != nil {
+		return nil, err
+	}
+	var covered int64
+	for _, replies := range seen {
+		covered += 1 + replies
+	}
+	slack := int64(math.Round(f.Cfg.Scheduler.PostRefresh.DeletionCountSlack * float64(p.Reported)))
+	if p.Reported <= 0 || covered < p.Reported-slack || covered > p.Reported+slack {
+		metrics.DeletionChecks.WithLabelValues("skipped_partial").Inc()
+		slog.Debug("igs finalizer: partial comment read; not checked for deletions", "job", job, "post", p.PostID,
+			"returned", covered, "reported", p.Reported)
+		return nil, nil
+	}
+	metrics.DeletionChecks.WithLabelValues("checked").Inc()
+	rows, err := f.DB.Query(ctx, `SELECT comment_pk, owner_pk, created_at FROM comments
+		WHERE taken_at = $1 AND media_pk = $2 AND depth = 0 AND status = 'visible' AND NOT redacted
+		  AND first_seen_at < $3`, p.PostCreated, p.PostID, p.Start)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*igv1.Comment
+	for rows.Next() {
+		var id, owner int64
+		var created *time.Time
+		if err := rows.Scan(&id, &owner, &created); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[id]; !ok {
+			c := &igv1.Comment{CommentPk: id, MediaPk: p.PostID, OwnerPk: owner, PostTakenAt: timestamppb.New(p.PostCreated)}
+			if created != nil {
+				c.CreatedAt = timestamppb.New(*created)
+			}
+			out = append(out, c)
+		}
+	}
+	return out, rows.Err()
 }

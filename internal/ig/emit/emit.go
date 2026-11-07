@@ -127,6 +127,17 @@ func (e *Emitter) Comment(ctx context.Context, b *kafka.Batch, src Source, c *ig
 	return keep, b.AddProto(ctx, topics.Comment, key(c.MediaPk), c)
 }
 
+// CommentDeleted publishes that a stored comment is gone (a complete read
+// of its post no longer returned it): the comment's keys, its creation
+// time (stores that partition by it place the deletion beside the
+// comment) and its status.
+func (e *Emitter) CommentDeleted(ctx context.Context, b *kafka.Batch, src Source, c *igv1.Comment) error {
+	d := &igv1.Comment{CommentPk: c.CommentPk, MediaPk: c.MediaPk, OwnerPk: c.OwnerPk, PostTakenAt: c.PostTakenAt,
+		CreatedAt: c.CreatedAt, Status: igv1.CommentStatus_COMMENT_STATUS_DELETED}
+	e.stamp(src, "comment:"+key(c.CommentPk), d, func(o *commonv1.Observation) { d.Obs = o })
+	return b.AddProto(ctx, topics.Comment, key(c.MediaPk), d)
+}
+
 // Privatize sets the author key, applies the pseudonymized mode and
 // redacts a suppressed author's comment. It returns false if redacted.
 func (e *Emitter) Privatize(c *igv1.Comment) bool {
