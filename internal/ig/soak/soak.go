@@ -135,7 +135,7 @@ type driver struct {
 
 func (d *driver) logf(format string, args ...any) {
 	if d.o.Log != nil {
-		fmt.Fprintf(d.o.Log, "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
+		_, _ = fmt.Fprintf(d.o.Log, "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
 	}
 }
 
@@ -162,7 +162,7 @@ func (d *driver) call(ctx context.Context, method, url, key string, body, out an
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if out != nil && resp.StatusCode/100 == 2 {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 			return resp.StatusCode, err
@@ -195,14 +195,20 @@ func run(ctx context.Context, o Options) (Report, error) {
 	}
 	d.key = key
 	var names []string
-	if _, err := d.call(ctx, http.MethodGet, o.FakeIG+fakeig.AdminPrefix+"profiles", "", nil, &names); err != nil || len(names) == 0 {
-		return d.r, fmt.Errorf("soak: fakeig's profiles (is it run with -admin?): %v", err)
+	if _, err := d.call(ctx, http.MethodGet, o.FakeIG+fakeig.AdminPrefix+"profiles", "", nil, &names); err != nil {
+		return d.r, fmt.Errorf("soak: fakeig's profiles (is it run with -admin?): %w", err)
+	}
+	if len(names) == 0 {
+		return d.r, errors.New("soak: fakeig has no profiles (is it run with -admin?)")
 	}
 	d.r.Profiles = len(names)
 	for _, n := range names {
 		code, err := d.call(ctx, http.MethodPost, o.API+"/v1/profiles", key, map[string]any{"profile": n}, nil)
-		if err != nil || (code != http.StatusCreated && code != http.StatusOK) {
-			return d.r, fmt.Errorf("soak: register %s: %d %v", n, code, err)
+		if err != nil {
+			return d.r, fmt.Errorf("soak: register %s: %w", n, err)
+		}
+		if code != http.StatusCreated && code != http.StatusOK {
+			return d.r, fmt.Errorf("soak: register %s: HTTP %d", n, code)
 		}
 	}
 	d.logf("registered %d profiles; driving for %s at a %s interval", len(names), o.Duration, o.Interval)
@@ -358,8 +364,11 @@ func (d *driver) finalReads(ctx context.Context, names []string) error {
 			ID string `json:"job_id"`
 		}
 		code, err := d.call(ctx, http.MethodPost, d.o.API+"/v1/jobs", d.key, map[string]any{"profile": n, "mode": "full"}, &j)
-		if err != nil || code/100 != 2 || j.ID == "" {
-			return fmt.Errorf("soak: full read of %s: %d %v", n, code, err)
+		if err != nil {
+			return fmt.Errorf("soak: full read of %s: %w", n, err)
+		}
+		if code/100 != 2 || j.ID == "" {
+			return fmt.Errorf("soak: full read of %s: HTTP %d", n, code)
 		}
 		ids = append(ids, j.ID)
 	}
@@ -392,7 +401,7 @@ func (d *driver) check(ctx context.Context) error {
 	var truth []fakeig.ProfileTruth
 	if _, err := d.call(ctx, http.MethodGet, d.o.FakeIG+fakeig.AdminPrefix+"truth?since="+url.QueryEscape(since), "", nil,
 		&truth); err != nil || len(truth) == 0 {
-		return fmt.Errorf("soak: fakeig's truth: %v", errors.Join(err, errEmpty(len(truth))))
+		return fmt.Errorf("soak: fakeig's truth: %w", errors.Join(err, errEmpty(len(truth))))
 	}
 	for _, t := range truth {
 		diffs, err := Compare(ctx, d.o.DB, t)
@@ -418,7 +427,7 @@ func Ready(ctx context.Context, apiURL, fakeURL string) error {
 		if err != nil {
 			return err
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		// The API answers 401 without a key: it is up.
 		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("%s: %d", u, resp.StatusCode)

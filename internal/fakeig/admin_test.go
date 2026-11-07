@@ -21,7 +21,7 @@ func TestAdmin(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if out != nil && resp.StatusCode == http.StatusOK {
 			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 				t.Fatal(err)
@@ -70,7 +70,7 @@ func TestAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		t.Error("a server without Admin answered the admin path")
 	}

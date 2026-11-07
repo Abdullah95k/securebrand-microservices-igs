@@ -83,7 +83,7 @@ func (k *Kube) do(ctx context.Context, method, path, contentType string, body io
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("soak: %s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
