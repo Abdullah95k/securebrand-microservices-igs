@@ -27,6 +27,12 @@ type Layout struct {
 	FillFactor map[string]bool
 	// LZ4 columns are large text/jsonb columns that compress well.
 	LZ4 map[string][]string
+	// Create names the function that creates a partition (schema ig's
+	// create_partition, migration 00014). It runs as the tables' owner, so
+	// a component with a role of its own (the persister) can add the
+	// partition an old post needs; only the owner may create one. Empty
+	// runs the DDL directly, as the pool's user.
+	Create string
 }
 
 // PartitionWindow describes which partitions must exist.
@@ -99,15 +105,28 @@ func (l Layout) ensureRange(ctx context.Context, pool *pgxpool.Pool, table, name
 	if exists {
 		return false, nil
 	}
+	created := true
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", partitionLockKey); err != nil {
 			return err
+		}
+		if l.Create != "" {
+			var fill any
+			if l.FillFactor[table] {
+				fill = 85
+			}
+			err := tx.QueryRow(ctx, "SELECT "+l.Create+"($1, $2, $3, $4)", table, name, fill, l.LZ4[table]).Scan(&created)
+			if err != nil {
+				return fmt.Errorf("store: create partition %s: %w", name, err)
+			}
+			return nil
 		}
 		var exists bool
 		if err := tx.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", name).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {
+			created = false
 			return nil
 		}
 		ff := ""
@@ -124,6 +143,9 @@ func (l Layout) ensureRange(ctx context.Context, pool *pgxpool.Pool, table, name
 	})
 	if err != nil {
 		return false, err
+	}
+	if !created || l.Create != "" {
+		return created, nil // the function sets lz4 itself
 	}
 	for _, col := range l.LZ4[table] {
 		// lz4 needs a server built with lz4 (official images are); ignore otherwise.

@@ -25,7 +25,7 @@ func i64(n int64) *int64 { return &n }
 func TestWriter(t *testing.T) {
 	db := testenv.PostgresIG(t)
 	ctx := context.Background()
-	w := &Writer{DB: db}
+	w := &Writer{DB: testenv.AsComponent(t, db, "persister")}
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -284,7 +284,7 @@ func TestWriter(t *testing.T) {
 func TestWalledPosts(t *testing.T) {
 	db := testenv.PostgresIG(t)
 	ctx := context.Background()
-	w := &Writer{DB: db}
+	w := &Writer{DB: testenv.AsComponent(t, db, "persister")}
 	must := func(err error) {
 		t.Helper()
 		if err != nil {

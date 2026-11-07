@@ -102,6 +102,17 @@ func migrate(ctx context.Context, cfg *config.Config, sub string) error {
 		return err
 	}
 	fmt.Printf("schema %s migrated; registry seeded (%d queries); %d new place keywords; %d partitions created\n", store.IGSchema, len(seed.Queries), added, n)
+	// Each component's own role, where the platform created it, gets its
+	// grants on schema ig (REQ-008 fix 22b); the others keep the owner.
+	granted, err := store.ApplyRoleGrants(ctx, db)
+	if err != nil {
+		return err
+	}
+	if len(granted) == 0 {
+		fmt.Println("roles: none of igs's per-component roles exists; every component uses the owner")
+	} else {
+		fmt.Printf("roles: granted %s\n", strings.Join(granted, ", "))
+	}
 	return nil
 }
 

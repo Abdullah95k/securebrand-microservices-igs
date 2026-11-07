@@ -84,6 +84,11 @@ type Stack struct {
 	API      *httptest.Server
 	S3       *minio.Client
 
+	// Each component's own pool (testenv.AsComponent), as in production: the
+	// api, the scheduler, the crawler, the persister and media. DB stays
+	// the owner's, for the tests' own reads and setup.
+	dbs map[string]*pgxpool.Pool
+
 	mu     sync.Mutex
 	groups map[string]*group
 	copts  igapp.CrawlerOptions
@@ -232,7 +237,7 @@ func Start(t *testing.T, o Options) *Stack {
 	})
 
 	s := &Stack{Cfg: cfg, DB: db, Redis: rdb, Producer: producer, World: world, Fake: fake, Jobs: jobs.New(rdb), S3: s3,
-		groups: map[string]*group{},
+		groups: map[string]*group{}, dbs: map[string]*pgxpool.Pool{},
 		copts: igapp.CrawlerOptions{DrainTimeout: o.CrawlerDrain, RetryScale: 0.02,
 			DoerFactory: func(to transport.Options) (transport.Doer, error) {
 				d := transport.NewStd(10 * time.Second)
@@ -249,14 +254,17 @@ func Start(t *testing.T, o Options) *Stack {
 		s.topics = append(s.topics, prefix+tp)
 	}
 	t.Cleanup(s.Stop)
-	s.Crawler, err = igapp.NewCrawler(ctx, cfg, db, rdb, producer, s.copts)
+	for _, c := range []string{"api", "scheduler", "crawler", "persister", "media"} {
+		s.dbs[c] = testenv.AsComponent(t, db, c)
+	}
+	s.Crawler, err = igapp.NewCrawler(ctx, cfg, s.dbs["crawler"], rdb, producer, s.copts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.start("crawler", s.Crawler.Components...)
 	s.RestartPersister(t)
-	s.Dispatch = &dispatch.Dispatcher{DB: db, Jobs: s.Jobs, Producer: producer}
-	srv := &igapi.Server{Cfg: cfg, DB: db, Redis: rdb, Dispatch: s.Dispatch}
+	s.Dispatch = &dispatch.Dispatcher{DB: s.dbs["api"], Jobs: s.Jobs, Producer: producer}
+	srv := &igapi.Server{Cfg: cfg, DB: s.dbs["api"], Redis: rdb, Dispatch: s.Dispatch}
 	s.API = httptest.NewServer(srv.Handler())
 	t.Cleanup(s.API.Close)
 	return s
@@ -265,8 +273,10 @@ func Start(t *testing.T, o Options) *Stack {
 // StartScheduler runs the planner and the finalizer, as igs-scheduler's
 // leader does, with short intervals.
 func (s *Stack) StartScheduler() {
-	planner := &scheduler.Planner{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg, Redis: s.Redis}
-	fin := &scheduler.Finalizer{DB: s.DB, Jobs: s.Jobs, Producer: s.Producer, Cfg: s.Cfg, Timeout: 30 * time.Second}
+	db := s.dbs["scheduler"]
+	disp := &dispatch.Dispatcher{DB: db, Jobs: s.Jobs, Producer: s.Producer}
+	planner := &scheduler.Planner{DB: db, Dispatch: disp, Cfg: s.Cfg, Redis: s.Redis}
+	fin := &scheduler.Finalizer{DB: db, Jobs: s.Jobs, Producer: s.Producer, Cfg: s.Cfg, Timeout: 30 * time.Second}
 	loops := []run.Func{
 		func(ctx context.Context) error {
 			return scheduler.Every(ctx, "planner", 200*time.Millisecond, planner.Tick)
@@ -275,11 +285,11 @@ func (s *Stack) StartScheduler() {
 			return scheduler.Every(ctx, "finalizer", 200*time.Millisecond, fin.Tick)
 		},
 		func(ctx context.Context) error {
-			return scheduler.Every(ctx, "tiers", 200*time.Millisecond, (&scheduler.Tierer{DB: s.DB, Cfg: s.Cfg}).Tick)
+			return scheduler.Every(ctx, "tiers", 200*time.Millisecond, (&scheduler.Tierer{DB: db, Cfg: s.Cfg}).Tick)
 		},
 	}
 	if s.Cfg.IG.Discovery.Enabled {
-		vetter := &discovery.Vetter{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
+		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: s.Cfg}
 		if s.Cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(s.Redis, s.Cfg.Kafka.TopicPrefix)
 		}
@@ -348,7 +358,7 @@ func (s *Stack) ReadTopic(t *testing.T, topic string, idle time.Duration) []*kgo
 // StartMedia runs igs-media's downloader and janitor.
 func (s *Stack) StartMedia(t *testing.T) {
 	t.Helper()
-	comps, err := igapp.NewMedia(s.Cfg, s.DB, s.S3, s.Producer, nil)
+	comps, err := igapp.NewMedia(s.Cfg, s.dbs["media"], s.S3, s.Producer, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +367,7 @@ func (s *Stack) StartMedia(t *testing.T) {
 
 // StartEraser runs the erasure loop, as igs-scheduler's leader does.
 func (s *Stack) StartEraser() {
-	e := &iggdpr.Eraser{DB: s.DB, S3: s.S3, Producer: s.Producer, Suppression: s.Crawler.Suppression}
+	e := &iggdpr.Eraser{DB: s.dbs["scheduler"], S3: s.S3, Producer: s.Producer, Suppression: s.Crawler.Suppression}
 	s.start("eraser", func(ctx context.Context) error { return scheduler.Every(ctx, "erasure", 100*time.Millisecond, e.Tick) })
 }
 
@@ -455,7 +465,7 @@ func (s *Stack) RestartCrawler(t *testing.T) {
 	s.stop("crawler")
 	// As igs-crawler does once its consumers drained.
 	s.Crawler.Park(context.Background())
-	c, err := igapp.NewCrawler(context.Background(), s.Cfg, s.DB, s.Redis, s.Producer, s.copts)
+	c, err := igapp.NewCrawler(context.Background(), s.Cfg, s.dbs["crawler"], s.Redis, s.Producer, s.copts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +477,7 @@ func (s *Stack) RestartCrawler(t *testing.T) {
 func (s *Stack) RestartPersister(t *testing.T) {
 	t.Helper()
 	s.stop("persister")
-	pc, err := igapp.NewPersister(s.Cfg, s.DB, s.Producer, 2000, 100*time.Millisecond)
+	pc, err := igapp.NewPersister(s.Cfg, s.dbs["persister"], s.Producer, 2000, 100*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

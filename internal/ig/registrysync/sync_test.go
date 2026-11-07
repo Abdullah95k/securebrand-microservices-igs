@@ -34,7 +34,7 @@ func setup(t *testing.T, promote bool, faults ...fakeig.Faults) (*Sync, *igtest.
 	if err := igQueries.ApplySeed(context.Background(), db, env.Seed); err != nil {
 		t.Fatal(err)
 	}
-	s := &Sync{DB: db, Pool: env.Pool, Loader: env.Loader, Rules: igdetect.Rules(), AcceptLanguage: "en-US",
+	s := &Sync{DB: testenv.AsComponent(t, db, "registry-sync"), Pool: env.Pool, Loader: env.Loader, Rules: igdetect.Rules(), AcceptLanguage: "en-US",
 		Fetch: docids.HTTPFetcher(http.DefaultClient),
 		Cfg: config.RegistrySync{CanaryPages: []string{"profile_01", "@profile_02"}, Tier: "direct", MaxBundles: 10, Promote: promote,
 			KeepFallbacks: 2, RetireAfter: 3, RecheckRetired: time.Hour, Timeout: time.Minute}}
