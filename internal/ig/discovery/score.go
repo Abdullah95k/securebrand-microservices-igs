@@ -11,6 +11,7 @@ package discovery
 import (
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -217,6 +218,32 @@ func Score(v Vet, s Sightings) Signals {
 		sig["network_capped"] = limit - network
 	}
 	return sig
+}
+
+// CountrySignalPrefix starts each country signal: the country they point
+// to (ISO 3166-1 alpha-2).
+const CountrySignalPrefix = "IQ:"
+
+// CountrySignals are the signs of Iraq in a profile's own words (its name,
+// bio, category, website and bio links), as discovery's Score finds them,
+// for content.account's country_signals (REQ-008 fix 18): IQ:iraq_named,
+// IQ:iraq_phone (+964, 00964 or the Iraqi 07xx xxx xxxx grouping),
+// IQ:iq_link, IQ:iraq_city, IQ:kurdistan, IQ:sorani_kurdish and
+// IQ:iraqi_dialect, sorted. Signals too weak to name a country on their own
+// are left out: Arabic script, and a bare 07 number. Nothing from the
+// network (who links to it) or its captions: only what the profile says.
+func CountrySignals(fullName, bio, category, website string, links []string) []string {
+	sig := Score(Vet{FullName: fullName, Biography: bio, Category: category, Links: append([]string{website}, links...)}, Sightings{})
+	var out []string
+	for k, v := range sig {
+		switch {
+		case v <= 0, k == "arabic_script", k == "iraq_phone" && v < 3:
+			continue
+		}
+		out = append(out, CountrySignalPrefix+k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 func arabicShare(letters, arabic int) float64 {

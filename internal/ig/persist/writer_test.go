@@ -40,15 +40,17 @@ func TestWriter(t *testing.T) {
 	must(w.Write(ctx, Batch{
 		Profiles: []*igv1.Profile{{Obs: obs(t0, "p1"), UserPk: owner, Username: "Brand", FullName: "Brand", FollowerCount: i64(100),
 			AuthorKey: []byte("k"), Status: igv1.ProfileStatus_PROFILE_STATUS_ACTIVE, HighlightsHash: []byte("h1"),
-			LinkedFacebookPage: "Brand Page", LinkedFacebookPageId: "540790833730240"}},
+			LinkedFacebookPage: "Brand Page", LinkedFacebookPageId: "540790833730240", ExternalUrl: "https://brand.example/"}},
 		Metrics: []*igv1.PostMetrics{{Obs: obs(t0, "m"), MediaPk: reel, OwnerPk: owner, TakenAt: timestamppb.New(taken),
 			CapturedAt: timestamppb.New(t0), PlayCount: i64(900), LikeCount: i64(10), CommentCount: i64(2)}},
 	}))
-	// The linked Facebook page: its name and its ID (REQ-008 fix 9).
-	var fbName, fbID string
-	must(db.QueryRow(ctx, `SELECT linked_facebook_page, linked_facebook_page_id FROM profiles WHERE user_pk = $1`, owner).Scan(&fbName, &fbID))
-	if fbName != "Brand Page" || fbID != "540790833730240" {
-		t.Errorf("linked Facebook page %q, id %q", fbName, fbID)
+	// The linked Facebook page: its name and its ID (REQ-008 fix 9); the
+	// website when served as external_url (fix 18).
+	var fbName, fbID, website string
+	must(db.QueryRow(ctx, `SELECT linked_facebook_page, linked_facebook_page_id, external_url FROM profiles WHERE user_pk = $1`,
+		owner).Scan(&fbName, &fbID, &website))
+	if fbName != "Brand Page" || fbID != "540790833730240" || website != "https://brand.example/" {
+		t.Errorf("linked Facebook page %q, id %q, external_url %q", fbName, fbID, website)
 	}
 	post := func(pk int64, at time.Time, hash string, likes *int64, hidden bool) *igv1.Post {
 		return &igv1.Post{Obs: obs(at, hash), MediaPk: pk, Shortcode: "C" + hash, OwnerPk: owner, TakenAt: timestamppb.New(taken),

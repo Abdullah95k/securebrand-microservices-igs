@@ -568,6 +568,7 @@ components:
         full_name: {type: string}
         biography: {type: string}
         bio_links: {type: array, items: {type: object}}
+        external_url: {type: string, description: "The website, when Instagram serves it as such; otherwise the first bio link"}
         verified: {type: boolean}
         private: {type: boolean}
         follower_count: {type: integer, format: int64}

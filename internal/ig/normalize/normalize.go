@@ -24,6 +24,7 @@ import (
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	contentv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/content/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 )
@@ -133,6 +134,15 @@ func extras(m map[string]any) string {
 	return string(b)
 }
 
+// links are the bio links' URLs.
+func links(ls []*igv1.BioLink) []string {
+	out := make([]string, 0, len(ls))
+	for _, l := range ls {
+		out = append(out, l.Url)
+	}
+	return out
+}
+
 func profile(p *igv1.Profile) []Out {
 	native := id(p.UserPk)
 	a := &contentv1.Account{
@@ -149,9 +159,15 @@ func profile(p *igv1.Profile) []Out {
 	for _, l := range p.BioLinks {
 		a.Links = append(a.Links, &contentv1.Link{Url: l.Url, Title: l.Title})
 	}
-	if len(a.Links) > 0 {
+	// The website: external_url when served, else the first bio link, as
+	// the logged-out answer has carried it (REQ-008 fix 18).
+	switch {
+	case p.ExternalUrl != "":
+		a.Website = p.ExternalUrl
+	case len(a.Links) > 0:
 		a.Website = a.Links[0].Url
 	}
+	a.CountrySignals = discovery.CountrySignals(p.FullName, p.Biography, p.Category, a.Website, links(p.BioLinks))
 	// The linked Facebook page: its name as the title and, with its ID, the
 	// page as platform "fb" (REQ-008 fix 9). The name is not a URL.
 	if p.LinkedFacebookPage != "" || p.LinkedFacebookPageId != "" {

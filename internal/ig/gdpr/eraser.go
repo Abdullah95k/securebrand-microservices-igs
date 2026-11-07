@@ -199,7 +199,7 @@ func (e *Eraser) eraseProfile(ctx context.Context, pk int64, stats map[string]in
 			{"discovery_candidates", `DELETE FROM discovery_candidates WHERE user_pk = $1`},
 			{"profiles", `UPDATE profiles SET status = 'suppressed', username = NULL, full_name = NULL, biography = NULL,
 				bio_links = NULL, follower_count = NULL, following_count = NULL, media_count = NULL, profile_pic_url = NULL,
-				linked_facebook_page = NULL, linked_facebook_page_id = NULL, category = NULL, highlights_hash = NULL, extra = NULL WHERE user_pk = $1`},
+				linked_facebook_page = NULL, linked_facebook_page_id = NULL, external_url = NULL, category = NULL, highlights_hash = NULL, extra = NULL WHERE user_pk = $1`},
 		} {
 			tag, err := tx.Exec(ctx, q.sql, pk)
 			if err != nil {

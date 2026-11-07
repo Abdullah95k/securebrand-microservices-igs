@@ -108,7 +108,10 @@ message Account {
   string kind = 4;
   bool verified = 5;
   string category = 6;
-  // Signals of the account's country (Iraq, for igs's discovery).
+  // Signals of the account's country, sorted, each "<country>:<signal>"
+  // with the country as ISO 3166-1 alpha-2. igs publishes the signs of Iraq
+  // in the profile's own words: IQ:iraq_named, IQ:iraq_phone, IQ:iq_link,
+  // IQ:iraq_city, IQ:kurdistan, IQ:sorani_kurdish, IQ:iraqi_dialect.
   repeated string country_signals = 7;
   string bio = 8;
   string website = 9;
