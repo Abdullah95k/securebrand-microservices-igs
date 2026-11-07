@@ -187,6 +187,9 @@ func (f *Finalizer) Finalize(ctx context.Context, id string) error {
 			WHERE last_job_id = $1`, jid, userPK, final); err != nil {
 			return err
 		}
+		if err := coverage(ctx, tx, posts); err != nil {
+			return fmt.Errorf("coverage: %w", err)
+		}
 		if userPK == nil || final == "cancelled" || final == "failed" {
 			return nil
 		}
@@ -234,10 +237,12 @@ func (f *Finalizer) Finalize(ctx context.Context, id string) error {
 // includes replies, which logged-out readers do not get, so the ratios are
 // information, never a failure (ADR 0005 §5).
 type Completeness struct {
-	Posts             int64   `json:"posts"`
-	PostsComplete     int64   `json:"posts_complete"`
-	PostsTruncated    int64   `json:"posts_truncated"`
-	PostsSkipped      int64   `json:"posts_skipped"`
+	Posts          int64 `json:"posts"`
+	PostsComplete  int64 `json:"posts_complete"`
+	PostsTruncated int64 `json:"posts_truncated"`
+	PostsSkipped   int64 `json:"posts_skipped"`
+	// Read up to the job's comment cap (max_comments_per_post).
+	PostsCapped       int64   `json:"posts_capped"`
 	PostsGated        int64   `json:"posts_gated"`
 	MedianRatio       float64 `json:"median_ratio"`
 	MinRatio          float64 `json:"min_ratio"`
@@ -251,12 +256,14 @@ func (f *Finalizer) completeness(ctx context.Context, posts []jobs.PostState, c 
 	for _, p := range posts {
 		comp.Posts++
 		switch p.State {
-		case jobs.PostComplete:
+		case jobs.PostComplete, jobs.PostUpdated:
 			comp.PostsComplete++
 		case jobs.PostTruncated:
 			comp.PostsTruncated++
-		case jobs.PostSkipped:
+		case jobs.PostSkipped, jobs.PostGated:
 			comp.PostsSkipped++
+		case jobs.PostCapped:
+			comp.PostsCapped++
 		}
 		pks = append(pks, p.PostID)
 	}
@@ -291,6 +298,49 @@ func (f *Finalizer) completeness(ctx context.Context, posts []jobs.PostState, c 
 		comp.MinRatio, comp.MedianRatio = ratios[0], ratios[len(ratios)/2]
 	}
 	return comp, nil
+}
+
+// coverage writes each visible post's comment coverage (REQ-008 fix 15):
+// posts.comments_state from how the job's read of its comments ended, and
+// posts.comments_collected, its visible top-level comments stored now.
+//   - complete: the read went from the first page to the last;
+//   - truncated: a login wall stopped it;
+//   - partial: a cap stopped it, or it did not finish (a failed task, a
+//     cancelled job);
+//   - a scheduled read of the comments since the last one keeps the state
+//     that read left ("none", from before coverage was written, becomes
+//     partial);
+//   - a post with no comments is complete; a post skipped for another
+//     reason (unchanged, or comments not asked for) keeps its state.
+//
+// Logged out, Instagram serves no replies, so collected is compared with
+// the post's comment count only as information. Comments still on their
+// way to the store are counted at the post's next read. Posts that are
+// unavailable (walled or gone) are left as they are.
+func coverage(ctx context.Context, tx pgx.Tx, posts []jobs.PostState) error {
+	if len(posts) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(posts))
+	states := make([]string, len(posts))
+	reported := make([]int64, len(posts))
+	for i, p := range posts {
+		ids[i], states[i], reported[i] = p.PostID, p.State, p.Reported
+	}
+	_, err := tx.Exec(ctx, `UPDATE posts p SET
+			comments_state = CASE
+				WHEN s.state = 'complete' THEN 'complete'
+				WHEN s.state = 'truncated' THEN 'truncated'
+				WHEN s.state IN ('capped', 'pending', 'failed') THEN 'partial'
+				WHEN s.state = 'updated' THEN CASE WHEN p.comments_state = 'none' THEN 'partial' ELSE p.comments_state END
+				WHEN s.state = 'skipped' AND s.reported = 0 AND coalesce(p.comment_count, 0) = 0 THEN 'complete'
+				ELSE p.comments_state END,
+			comments_collected = (SELECT count(*) FROM comments c
+				WHERE c.taken_at = p.taken_at AND c.media_pk = p.media_pk AND c.depth = 0 AND c.status = 'visible')
+		FROM post_index i, unnest($1::bigint[], $2::text[], $3::bigint[]) AS s(media_pk, state, reported)
+		WHERE i.media_pk = s.media_pk AND p.taken_at = i.taken_at AND p.media_pk = i.media_pk
+			AND p.status = 'visible' AND s.state <> 'gated'`, ids, states, reported)
+	return err
 }
 
 func jobStatus(s string) commonv1.JobStatus {

@@ -2,6 +2,7 @@ package persist
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -187,6 +188,16 @@ func TestWriter(t *testing.T) {
 	if cst != "deleted" || ctext != "hello!" {
 		t.Fatalf("deleted comment: %s %q, want deleted with its text", cst, ctext)
 	}
+	// The post's visible top-level comments are counted (REQ-008 fix 15).
+	collected := func(want int64) {
+		t.Helper()
+		var n *int64
+		must(db.QueryRow(ctx, `SELECT comments_collected FROM posts WHERE media_pk = $1`, reel).Scan(&n))
+		if n == nil || *n != want {
+			t.Fatalf("comments collected %v, want %d", n, want)
+		}
+	}
+	collected(0)
 	t4e := t4d.Add(time.Second)
 	must(w.Write(ctx, Batch{Comments: []*igv1.Comment{{Obs: obs(t4e, "back"), CommentPk: 1, MediaPk: reel, OwnerPk: owner,
 		PostTakenAt: timestamppb.New(taken), Text: "hello!", CreatedAt: timestamppb.New(t1), LikeCount: i64(5), ChildCommentCount: i64(2),
@@ -195,6 +206,7 @@ func TestWriter(t *testing.T) {
 	if cst != "visible" {
 		t.Fatalf("comment seen after its deletion: %s, want visible", cst)
 	}
+	collected(1)
 
 	// Kinds, and the caption a post's edit replaced.
 	var kind string
@@ -240,6 +252,15 @@ func TestWriter(t *testing.T) {
 	if status != "unavailable" || caption != "c p1" {
 		t.Fatalf("gone post: %s %q", status, caption)
 	}
+	// A walled read of a stored post changes its status and reason only.
+	must(w.Write(ctx, Batch{Posts: []*igv1.Post{{Obs: obs(t4.Add(2*time.Minute), "walled"), MediaPk: reel, Shortcode: "Cr2", OwnerPk: owner,
+		TakenAt: timestamppb.New(taken), MediaType: igv1.MediaType_MEDIA_TYPE_VIDEO, Status: igv1.PostStatus_POST_STATUS_UNAVAILABLE,
+		StatusReason: "login_wall"}}}))
+	var reason string
+	must(db.QueryRow(ctx, `SELECT status, status_reason, caption, like_count FROM posts WHERE media_pk = $1`, reel).Scan(&status, &reason, &caption, &likes))
+	if status != "unavailable" || reason != "login_wall" || caption != "c r2" || likes == nil {
+		t.Fatalf("walled stored post: %s %s %q likes %v, want its caption and counts kept", status, reason, caption, likes)
+	}
 
 	// Nothing of a suppressed profile is written.
 	_, err := db.Exec(ctx, `INSERT INTO suppression (subject_type, subject_key) VALUES ('profile', '5001')`)
@@ -252,5 +273,84 @@ func TestWriter(t *testing.T) {
 	must(db.QueryRow(ctx, `SELECT caption FROM posts WHERE media_pk = $1`, reel).Scan(&caption))
 	if caption != "c r2" {
 		t.Fatalf("suppressed profile's post written: %q", caption)
+	}
+}
+
+// A post whose page is walled is stored from the grid's fields, unavailable
+// with reason login_wall, its counts NULL unless the reels tab gave them, in
+// either order; a later read of its page makes it visible (REQ-008 fix 15).
+func TestWalledPosts(t *testing.T) {
+	db := testenv.PostgresIG(t)
+	ctx := context.Background()
+	w := &Writer{DB: db}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	t0 := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	taken := time.Date(2026, 10, 25, 8, 0, 0, 0, time.UTC)
+	const owner, photo, reelBefore, reelAfter = int64(5101), int64(3_100_000_000_000_000_001), int64(3_100_000_000_000_000_002),
+		int64(3_100_000_000_000_000_003)
+	walled := func(pk int64, at time.Time, mt igv1.MediaType) *igv1.Post {
+		pinned := false
+		return &igv1.Post{Obs: obs(at, "w"), MediaPk: pk, Shortcode: "W" + strconv.FormatInt(pk%1000, 10), OwnerPk: owner,
+			TakenAt: timestamppb.New(taken), MediaType: mt, ProductType: map[bool]string{true: "clips", false: "feed"}[mt == 2],
+			IsPinned: &pinned, DiscoveredVia: igv1.DiscoveredVia_DISCOVERED_VIA_GRID,
+			Status: igv1.PostStatus_POST_STATUS_UNAVAILABLE, StatusReason: "login_wall"}
+	}
+	sample := func(pk int64, at time.Time) *igv1.PostMetrics {
+		return &igv1.PostMetrics{Obs: obs(at, "m"), MediaPk: pk, OwnerPk: owner, TakenAt: timestamppb.New(taken),
+			CapturedAt: timestamppb.New(at), PlayCount: i64(700), LikeCount: i64(30), CommentCount: i64(4)}
+	}
+	// The reels tab before the post's walled page, and after it (an older
+	// sample persisted later).
+	must(w.Write(ctx, Batch{Metrics: []*igv1.PostMetrics{sample(reelBefore, t0)}}))
+	must(w.Write(ctx, Batch{Posts: []*igv1.Post{walled(photo, t0.Add(time.Minute), igv1.MediaType_MEDIA_TYPE_PHOTO),
+		walled(reelBefore, t0.Add(time.Minute), igv1.MediaType_MEDIA_TYPE_VIDEO),
+		walled(reelAfter, t0.Add(time.Minute), igv1.MediaType_MEDIA_TYPE_VIDEO)}}))
+	must(w.Write(ctx, Batch{Metrics: []*igv1.PostMetrics{sample(reelAfter, t0)}}))
+
+	type row struct {
+		status, reason, shortcode, state string
+		mediaType                        int16
+		likes, comments, plays           *int64
+	}
+	get := func(pk int64) row {
+		t.Helper()
+		var r row
+		var reason *string
+		must(db.QueryRow(ctx, `SELECT p.status, p.status_reason, p.shortcode, p.comments_state, p.media_type, p.like_count,
+			p.comment_count, p.play_count FROM posts p JOIN post_index i USING (media_pk) JOIN post_owners o USING (media_pk)
+			WHERE p.media_pk = $1 AND o.user_pk = $2`, pk, owner).Scan(&r.status, &reason, &r.shortcode, &r.state, &r.mediaType,
+			&r.likes, &r.comments, &r.plays))
+		if reason != nil {
+			r.reason = *reason
+		}
+		return r
+	}
+	if r := get(photo); r.status != "unavailable" || r.reason != "login_wall" || r.mediaType != 1 || r.state != "none" ||
+		r.likes != nil || r.comments != nil || r.plays != nil {
+		t.Fatalf("walled photo: %+v, want unavailable, login_wall, no counts", r)
+	}
+	for _, pk := range []int64{reelBefore, reelAfter} {
+		if r := get(pk); r.status != "unavailable" || r.mediaType != 2 || r.likes == nil || *r.likes != 30 || r.plays == nil ||
+			*r.plays != 700 || r.comments == nil || *r.comments != 4 {
+			t.Fatalf("walled reel %d: %+v, want the reels tab's counts", pk, r)
+		}
+	}
+	// The page is read later: the post is visible, with no reason.
+	must(w.Write(ctx, Batch{Posts: []*igv1.Post{{Obs: obs(t0.Add(time.Hour), "open"), MediaPk: photo, Shortcode: "W1", OwnerPk: owner,
+		TakenAt: timestamppb.New(taken), MediaType: igv1.MediaType_MEDIA_TYPE_PHOTO, Caption: "now open", LikeCount: i64(3),
+		CommentCount: i64(0), Status: igv1.PostStatus_POST_STATUS_VISIBLE}}}))
+	if r := get(photo); r.status != "visible" || r.reason != "" || r.likes == nil || *r.likes != 3 {
+		t.Fatalf("photo read later: %+v, want visible", r)
+	}
+	// A gone post is marked not_found.
+	must(w.Write(ctx, Batch{Posts: []*igv1.Post{{Obs: obs(t0.Add(2*time.Hour), "gone"), MediaPk: photo, OwnerPk: owner,
+		TakenAt: timestamppb.New(taken), Status: igv1.PostStatus_POST_STATUS_UNAVAILABLE, StatusReason: "not_found"}}}))
+	if r := get(photo); r.status != "unavailable" || r.reason != "not_found" || r.likes == nil {
+		t.Fatalf("gone photo: %+v, want unavailable, not_found, its counts kept", r)
 	}
 }

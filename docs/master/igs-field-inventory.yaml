@@ -845,24 +845,24 @@ entities:
     example: visible
     present: always
     present_pct: null
-    source: derived by igs (a re-read finds the post gone)
-    stored_at: posts.status
-    published_at: Post.status; content.post.v1 Post.is_deleted
+    source: derived by igs (a re-read finds the post gone, or its page walled)
+    stored_at: posts.status, posts.status_reason
+    published_at: Post.status, Post.status_reason; content.post.v1 Post.is_deleted (gone only), extras.status, extras.status_reason
     history: latest
     personal_data: false
-    notes: 'Unavailable means deleted, archived or made private: Instagram doesn''t say which. Noticed by re-reads: within the 7-day refresh window, and at each post''s one full re-read at 30 days (REQ-008 fix 14).'
+    notes: 'status_reason says why (REQ-008 fix 15): not_found (deleted, archived or made private: Instagram doesn''t say which) or login_wall (the page is walled for logged-out readers). Gone posts are noticed by re-reads: within the 7-day refresh window, and at each post''s one full re-read at 30 days (REQ-008 fix 14).'
   - name: walled post pages
     meaning: Post page served only a login wall
     type: '-'
     example: '-'
     present: rare
     present_pct: 2.6
-    source: post page (HTML with embedded JSON)
-    stored_at: job counter posts_gated
-    published_at: nothing published for the post
-    history: '-'
+    source: post page (HTML with embedded JSON); the grid
+    stored_at: posts (status unavailable, status_reason login_wall); job counters posts_gated, posts_walled_published
+    published_at: Post from the grid's fields (ID, shortcode, time, type, pinned), counts unset; content.post.v1 not deleted
+    history: latest
     personal_data: false
-    notes: 2.6% of post pages. After three fresh identities see the wall, igs skips the post and publishes no event, though the grid gave its ID, time, type and thumbnail. Fix planned.
+    notes: 2.6% of post pages. After three fresh identities see the wall, the post is stored and published from the grid's fields with its counts empty, never 0 (REQ-008 fix 15). A walled reel keeps the reels tab's views, likes and comment count. No comments or media are read.
   - name: dropped post-page keys
     meaning: seo_canonical_url, organic_tracking_token, is_dash_eligible, number_of_qualities, if_is_crawler, video_dash_manifest (used for duration only), is_trending_in_clips, topic_id, player settings
     type: mixed
@@ -888,17 +888,29 @@ entities:
     personal_data: false
     notes: Not seen in any captured logged-out answer.
   - name: bookkeeping
-    meaning: content_hash, first_seen_at, last_seen_at; comments_state, comments_collected, extra
+    meaning: content_hash, first_seen_at, last_seen_at; extra
     type: mixed
     example: '-'
     present: always
     present_pct: null
     source: derived by igs
-    stored_at: posts.* (comments_state, comments_collected and extra are never written)
+    stored_at: posts.* (extra is never written)
     published_at: Observation
     history: latest
     personal_data: false
-    notes: Per-post coverage lives in the job's completeness, not on the post row.
+    notes: ''
+  - name: comment coverage
+    meaning: How the last read of the post's comments ended; its visible top-level comments stored
+    type: enum; int64
+    example: complete; 41
+    present: always
+    present_pct: null
+    source: derived by igs
+    stored_at: posts.comments_state (complete, partial, truncated, none), posts.comments_collected
+    published_at: API only (comments_state, comments_collected); ItemCoverage with contract v1.0.0
+    history: latest
+    personal_data: false
+    notes: REQ-008 fix 15. The state is written when a job ends; the persister keeps the count current. Logged out, replies are not served, so collected is below Instagram's comment count.
 - name: post_metrics
   unified: post_metrics
   fetched: The reels tab on every visit, back to max_age_days (365); the post page on each read and re-read (latest values only).
@@ -1951,7 +1963,7 @@ planned:
 - field: walled posts
   entity: post
   why: 2.6% of posts publish nothing.
-  change: Publish the grid's fields with a gated reason.
+  change: 'Done (REQ-008 fix 15): the grid''s fields are published with status unavailable, reason login_wall.'
 - field: parser version on raw lines
   entity: raw
   why: E8 asks for it.

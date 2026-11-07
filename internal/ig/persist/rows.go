@@ -115,7 +115,7 @@ var postCols = []string{"taken_at", "media_pk", "owner_pk", "shortcode", "media_
 	"hashtags", "mentions", "accessibility_caption", "location", "usertags", "coauthors", "music", "topics", "ai_label",
 	"like_count", "counts_hidden", "comment_count", "commenting_disabled", "play_count", "is_pinned", "child_count",
 	"video_duration_ms", "width", "height", "has_audio", "media_ids", "discovered_via", "permalink", "content_hash",
-	"status", "first_seen_at", "last_seen_at", "kind"}
+	"status", "first_seen_at", "last_seen_at", "kind", "status_reason"}
 
 // Post kinds (posts.kind): a highlight's items are posts too (M12d).
 const (
@@ -147,7 +147,14 @@ func postRow(p *igv1.Post) []any {
 		protoJSON(p.Location), protoJSONList(p.Usertags), protoJSONList(p.Coauthors), protoJSON(p.Music), p.Topics,
 		nilIfEmpty(p.AiLabel), p.LikeCount, p.CountsHidden, p.CommentCount, p.CommentingDisabled, p.PlayCount, p.IsPinned,
 		children, dur, w, h, p.HasAudio, p.MediaIds, discoveredVia(p.DiscoveredVia), nilIfEmpty(p.Permalink), hashOf(p.Obs),
-		"visible", seen, seen, parse.PostKind(p)}
+		postStatus(p.Status), seen, seen, parse.PostKind(p), nilIfEmpty(p.StatusReason)}
+}
+
+func postStatus(s igv1.PostStatus) string {
+	if s == igv1.PostStatus_POST_STATUS_UNAVAILABLE {
+		return "unavailable"
+	}
+	return "visible"
 }
 
 var commentCols = []string{"taken_at", "media_pk", "comment_pk", "owner_pk", "parent_comment_pk", "depth", "author_key",

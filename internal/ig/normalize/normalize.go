@@ -194,7 +194,9 @@ func post(p *igv1.Post) Out {
 		Envelope:  envelope(p.Obs, "post", native, p.TakenAt),
 		AccountId: id(p.OwnerPk), Kind: parse.PostKind(p), Text: p.Caption, Url: url,
 		Views: p.PlayCount, Comments: p.CommentCount, MediaCount: int32(max(1, len(p.Children))),
-		IsDeleted: p.Status == igv1.PostStatus_POST_STATUS_UNAVAILABLE,
+		// A walled post may still exist: it is published as unavailable,
+		// not deleted, with what the grid gave and no counts (REQ-008 fix 15).
+		IsDeleted: p.Status == igv1.PostStatus_POST_STATUS_UNAVAILABLE && p.StatusReason != "login_wall",
 	}
 	if !p.CountsHidden {
 		c.Likes = p.LikeCount
@@ -225,6 +227,12 @@ func post(p *igv1.Post) Out {
 	}
 	if p.VideoDurationMs > 0 {
 		x["video_duration_ms"] = p.VideoDurationMs
+	}
+	if p.Status == igv1.PostStatus_POST_STATUS_UNAVAILABLE {
+		x["status"] = "unavailable"
+		if p.StatusReason != "" {
+			x["status_reason"] = p.StatusReason
+		}
 	}
 	c.ExtrasJson = extras(x)
 	return Out{Topic: topics.ContentPost, Key: Key(native), Msg: c}

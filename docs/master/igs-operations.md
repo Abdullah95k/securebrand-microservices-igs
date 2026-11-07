@@ -377,7 +377,7 @@ Are any logged?
 - **When Instagram blocks:**
   - A rate limit rests the exit 10 min; a checkpoint or challenge 30 min; a login wall on a page load 30 min.
   - The task moves to another exit, at most `block_hops` (2) times. Then it waits or retries later.
-  - A post page walled for three fresh identities is skipped and counted (`posts_gated`).
+  - A post page walled for three fresh identities is counted (`posts_gated`). The post is stored and published from the grid's fields, as unavailable (`login_wall`), with no counts (REQ-008 fix 15).
   - Every block is counted by type. Nothing tries to solve a challenge.
 - **When Kafka, the database or Valkey is down:**
   - `/readyz` fails.
@@ -488,8 +488,8 @@ The pilot must measure all of this (D5).
      - how many requests an IP sustains per day.
 2. **Open issues and known bugs.** Each is in `igs-gaps.md` with a fix:
    - The linked Facebook page ID is dropped, and its name is put in `Link.url`.
-   - Comment deletions are never published.
-   - Walled posts (2.6%) publish nothing.
+   - Comment deletions are never published. *(Fixed: REQ-008 fix 14.)*
+   - Walled posts (2.6%) publish nothing. *(Fixed: REQ-008 fix 15.)*
    - Photos and carousels have no metrics series.
    - Exits are named by address.
    - `schemas apply` would register `content.*` subjects.

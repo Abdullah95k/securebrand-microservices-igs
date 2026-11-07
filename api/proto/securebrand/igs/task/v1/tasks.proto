@@ -11,6 +11,7 @@ package securebrand.igs.task.v1;
 import "google/protobuf/timestamp.proto";
 import "securebrand/common/v1/common.proto";
 import "securebrand/ig/v1/media.proto";
+import "securebrand/ig/v1/post.proto";
 
 option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1;igstaskv1";
 
@@ -100,6 +101,9 @@ message PostScope {
   bool detail_known = 9;
   // Pinned to the grid (shown first though older).
   bool pinned = 10;
+  // The grid's type, published for a post whose page is walled.
+  securebrand.ig.v1.MediaType media_type = 11;
+  string product_type = 12;
 }
 
 message MediaScope {

@@ -615,6 +615,15 @@ components:
         video_duration_ms: {type: integer, format: int64}
         media_ids: {type: array, items: {type: string}}
         status: {type: string, enum: [visible, unavailable]}
+        status_reason:
+          type: string
+          enum: [login_wall, not_found]
+          description: Why the post is unavailable. login_wall means its page is walled for logged-out readers; only the grid's fields (id, shortcode, time, type) are known and its counts are absent.
+        comments_state:
+          type: string
+          enum: [complete, partial, truncated, none]
+          description: How the last read of the post's comments ended. complete means from the first page to the last; logged out, replies are not served.
+        comments_collected: {type: integer, format: int64, description: Visible top-level comments stored, as of the post's last read}
         first_seen_at: {type: string, format: date-time}
         last_seen_at: {type: string, format: date-time}
     Comment:

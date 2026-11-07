@@ -102,8 +102,8 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 					// Three fresh identities saw the same wall: the post is
 					// age-gated or otherwise closed to logged-out readers.
 					c["posts_gated"]++
-					_, _ = d.Jobs.SetPost(ctx, t.JobId, sc.MediaPk, createdUnix, sc.ReportedCommentCount, jobs.PostSkipped)
-					return done(c)
+					_, _ = d.Jobs.SetPost(ctx, t.JobId, sc.MediaPk, createdUnix, sc.ReportedCommentCount, jobs.PostGated)
+					return s.walled(ctx, t, sc, c)
 				}
 				_ = d.saveCkpt(ctx, t, st, c)
 				o := classOutcome(t, detect.LoginWall, "post page gated", st.Cursor, c)
@@ -216,7 +216,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	olderRun := 0
 	// complete: the read reached the last page (not a cap or the
 	// incremental stop).
-	finished, truncated, complete := false, false, false
+	finished, truncated, complete, capped := false, false, false, false
 	next := func(res parse.CommentsResult, n, older int) {
 		if !watermark.IsZero() {
 			if n > 0 && older == n {
@@ -229,7 +229,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		case !res.PageInfo.HasNext || res.PageInfo.EndCursor == "":
 			finished, complete = true, true
 		case maxC > 0 && t.ItemsSeen+st.ItemsSeen >= maxC:
-			finished = true
+			finished, capped = true, true
 			c["posts_capped"]++
 		case !watermark.IsZero() && olderRun >= incrementalOlderStop:
 			finished = true
@@ -342,10 +342,17 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		}
 	}
 	if finished || truncated {
+		// The post's comment coverage, written when the job ends.
 		state := jobs.PostComplete
-		if truncated {
+		switch {
+		case truncated:
 			state = jobs.PostTruncated
 			c["posts_truncated"]++
+		case capped:
+			state = jobs.PostCapped
+		case !watermark.IsZero():
+			// Only the comments since the last read: as complete as that was.
+			state = jobs.PostUpdated
 		}
 		_ = d.Jobs.UpdatePostState(ctx, t.JobId, sc.MediaPk, state)
 		return done(c)
@@ -409,7 +416,8 @@ func (s *PostStage) unavailable(ctx context.Context, t *igstaskv1.Task, sc *igst
 		sc.TakenAt = timestampFromPK(sc.MediaPk)
 	}
 	b := d.Producer.NewBatch()
-	p := &igv1.Post{MediaPk: sc.MediaPk, Shortcode: sc.Shortcode, OwnerPk: sc.OwnerPk, TakenAt: sc.TakenAt, Status: igv1.PostStatus_POST_STATUS_UNAVAILABLE}
+	p := &igv1.Post{MediaPk: sc.MediaPk, Shortcode: sc.Shortcode, OwnerPk: sc.OwnerPk, TakenAt: sc.TakenAt,
+		Status: igv1.PostStatus_POST_STATUS_UNAVAILABLE, StatusReason: ReasonNotFound}
 	if err := d.Emit.Post(ctx, b, emit.Source{JobID: t.JobId, Query: "post_page", Mode: t.Mode}, p); err != nil {
 		return retry(t, "", "30s", err.Error(), c)
 	}
@@ -454,4 +462,44 @@ func (s *PostStage) emitComments(ctx context.Context, b *kafka.Batch, t *igstask
 		}
 	}
 	return len(res.Comments), older, nil
+}
+
+// Why a post is unavailable (igv1.Post.status_reason, posts.status_reason).
+const (
+	// ReasonLoginWall: the post page is walled for logged-out readers.
+	ReasonLoginWall = "login_wall"
+	// ReasonNotFound: the post is gone (deleted, archived or made private).
+	ReasonNotFound = "not_found"
+)
+
+// walled publishes a post whose page three fresh identities found walled,
+// from what the grid gave: its id, shortcode, time and type, with status
+// unavailable (login_wall) and its counts unset, never 0 (REQ-008 fix 15).
+// A post already stored keeps what was read before; a scheduled refresh's
+// task has no grid fields and publishes nothing.
+func (s *PostStage) walled(ctx context.Context, t *igstaskv1.Task, sc *igstaskv1.PostScope, c map[string]int64) Outcome {
+	d := s.D
+	if sc.DetailKnown || sc.TakenAt == nil {
+		return done(c)
+	}
+	if _, _, known := d.storedPost(ctx, sc.MediaPk); known {
+		return done(c)
+	}
+	p := &igv1.Post{MediaPk: sc.MediaPk, Shortcode: sc.Shortcode, OwnerPk: sc.OwnerPk, TakenAt: sc.TakenAt,
+		MediaType: sc.MediaType, ProductType: sc.ProductType, Permalink: sc.Permalink,
+		DiscoveredVia: igv1.DiscoveredVia_DISCOVERED_VIA_GRID,
+		Status:        igv1.PostStatus_POST_STATUS_UNAVAILABLE, StatusReason: ReasonLoginWall}
+	if t.Mode == commonv1.CrawlMode_CRAWL_MODE_FULL {
+		pinned := sc.Pinned
+		p.IsPinned = &pinned
+	}
+	b := d.Producer.NewBatch()
+	if err := d.Emit.Post(ctx, b, emit.Source{JobID: t.JobId, Query: "grid", Mode: t.Mode}, p); err != nil {
+		return retry(t, "", "30s", err.Error(), c)
+	}
+	if err := b.Wait(ctx); err != nil {
+		return retry(t, "", "30s", err.Error(), c)
+	}
+	c["posts_walled_published"]++
+	return done(c)
 }
