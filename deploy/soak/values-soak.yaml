@@ -38,6 +38,11 @@ config:
     registry_sync:
       canary_pages: [profile_01, profile_02, profile_03]
 
+# No Secrets in igs-soak but the stores' own: the chart's defaults
+# (igs-env, igs-proxies) are not there, and a pod or hook naming one would
+# never start. scripts/chart-secrets.py checks it.
+secretEnv:
+  existingSecret: ""
 secretFiles:
   existingSecret: ""
 

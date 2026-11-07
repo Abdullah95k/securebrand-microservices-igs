@@ -91,7 +91,10 @@ platformCredentials:
 secretEnv:
   existingSecret: igs-env
 # Existing Secret with a "proxies.yaml" key holding ig.proxy.tiers (proxy
-# endpoints and credentials). Mounted and layered over config.yaml.
+# endpoints and credentials). Mounted and layered over config.yaml only in
+# the components whose proxies: is required (they wait for the Secret) or
+# optional (they start without it); the rest and the hook Jobs never mount
+# it, so igs migrates and starts before the proxies exist.
 secretFiles:
   existingSecret: igs-proxies
   key: proxies.yaml
@@ -219,6 +222,10 @@ components:
   scheduler:
     enabled: true
     command: ["/usr/local/bin/igs-scheduler"]
+    # Discovery's hold counts each static tier's exits from the proxies
+    # file; without it the scheduler starts and that check is off until
+    # it restarts with the file.
+    proxies: optional
     replicas: 2 # leader-elected; one active
     resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
     pdb: {minAvailable: 1}
@@ -228,6 +235,7 @@ components:
     enabled: true
     browser: true
     command: ["/usr/local/bin/igs-crawler", "--stages", "profile"]
+    proxies: required
     replicas: 2
     terminationGracePeriodSeconds: 90
     resources: {requests: {cpu: 500m, memory: 512Mi}, limits: {memory: 2Gi}}
@@ -244,6 +252,7 @@ components:
     enabled: true
     browser: true
     command: ["/usr/local/bin/igs-crawler", "--stages", "post"]
+    proxies: required
     replicas: 4
     terminationGracePeriodSeconds: 90
     resources: {requests: {cpu: 500m, memory: 512Mi}, limits: {memory: 2Gi}}
@@ -330,6 +339,7 @@ components:
     enabled: true
     browser: true
     command: ["/usr/local/bin/igs-registry-sync"]
+    proxies: required
     replicas: 1
     # Room for a headless Chromium when ig.browser is enabled.
     resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}}
