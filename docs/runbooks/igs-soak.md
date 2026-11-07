@@ -1,5 +1,7 @@
 # igs soak (24 hours against fakeig)
 
+**Not a gate since D-045** (7 Nov 2026): the owner decided to test on the real site, not on fake ones, so the pilot on Instagram is the test and this soak runs no more in production. The files stay, for running it locally or in CI against the code. The one production run (pinned to `60efca8`) ended void: fakeig deadlocked a few hours in (fixed in #107).
+
 REQ-008 fix 12. igs runs for 24 hours on the production cluster, in its own namespace `igs-soak`, against **fakeig** (a synthetic logged-out Instagram) and **throwaway stores**. Nothing reaches Instagram, the platform's stores or the internet. It shows whether igs holds up for a day: no memory creep, no out-of-memory kills, flat goroutines, jobs that end well, and a store that ends equal to the truth.
 
 ## What runs
