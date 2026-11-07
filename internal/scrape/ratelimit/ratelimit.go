@@ -5,11 +5,14 @@ package ratelimit
 import (
 	"context"
 	"log/slog"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-redis/redis_rate/v10"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
 
@@ -18,12 +21,21 @@ type Limiter interface {
 	Wait(ctx context.Context, key string, perSecond int) error
 }
 
-// Redis is a distributed GCRA limiter. If Redis is unreachable it fails
-// open after logging, relying on per-identity pacing, so a Redis blip does
-// not stop crawling.
+// Redis is a distributed GCRA limiter. It fails closed: while Valkey does
+// not answer, a request waits and the check is tried again (backing off up
+// to StoreRetryMax), so no request goes out without the fleet-wide limit.
+// Each identity's own pace alone would let several pods use one exit faster
+// than its limit.
 type Redis struct {
 	l *redis_rate.Limiter
 }
+
+// StoreRetryMin and StoreRetryMax bound the wait between tries while Valkey
+// does not answer.
+var (
+	StoreRetryMin = 250 * time.Millisecond
+	StoreRetryMax = 5 * time.Second
+)
 
 func NewRedis(c *redis.Client) *Redis { return &Redis{l: redis_rate.NewLimiter(c)} }
 
@@ -45,14 +57,36 @@ func (r *Redis) WaitRate(ctx context.Context, key string, perSecond float64) err
 }
 
 func (r *Redis) wait(ctx context.Context, key string, limit redis_rate.Limit) error {
+	backoff := StoreRetryMin
+	waiting := false
+	defer func() {
+		if waiting {
+			metrics.RateLimitWaiting.Dec()
+		}
+	}()
 	for {
 		res, err := r.l.Allow(ctx, redisx.KeyPrefix+"rl:"+key, limit)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			slog.Warn("ratelimit: redis unavailable, failing open", "key", key, "err", err)
-			return nil
+			// Fail closed: wait for Valkey, never send unchecked.
+			metrics.RateLimitStoreErrors.WithLabelValues(keyKind(key)).Inc()
+			if !waiting {
+				waiting = true
+				metrics.RateLimitWaiting.Inc()
+			}
+			storeDownLog(key, err)
+			if err := sleep(ctx, backoff); err != nil {
+				return err
+			}
+			backoff = min(2*backoff, StoreRetryMax)
+			continue
+		}
+		if waiting {
+			waiting = false
+			metrics.RateLimitWaiting.Dec()
+			backoff = StoreRetryMin
 		}
 		if res.Allowed > 0 {
 			return nil
@@ -61,14 +95,43 @@ func (r *Redis) wait(ctx context.Context, key string, limit redis_rate.Limit) er
 		if wait <= 0 {
 			wait = 10 * time.Millisecond
 		}
-		t := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			t.Stop()
-			return ctx.Err()
-		case <-t.C:
+		if err := sleep(ctx, wait); err != nil {
+			return err
 		}
 	}
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// keyKind is a limiter key's kind for the metric label: the part before
+// its first colon (exit, page, global).
+func keyKind(key string) string {
+	k, _, _ := strings.Cut(key, ":")
+	return k
+}
+
+// lastStoreLog throttles the "Valkey unavailable" warning to one every
+// storeLogEvery per process: every waiting request would otherwise log.
+var lastStoreLog atomic.Int64
+
+const storeLogEvery = 30 * time.Second
+
+func storeDownLog(key string, err error) {
+	now := time.Now().UnixNano()
+	last := lastStoreLog.Load()
+	if now-last < int64(storeLogEvery) || !lastStoreLog.CompareAndSwap(last, now) {
+		return
+	}
+	slog.Warn("ratelimit: Valkey unavailable; requests wait for the fleet-wide limit", "kind", keyKind(key), "err", err)
 }
 
 // Noop never waits.

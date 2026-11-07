@@ -92,6 +92,10 @@ message Comment {
 message Link {
   string url = 1;
   string title = 2;
+  // When the link is an account on another platform: its code ("fb") and
+  // its ID there (a linked Facebook page's ID).
+  string platform = 3;
+  string platform_id = 4;
 }
 
 // Account: a page, profile or channel (content.account), with what links

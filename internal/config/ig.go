@@ -51,6 +51,12 @@ type IG struct {
 	RateLimitRest  time.Duration `koanf:"rate_limit_rest"`
 	CheckpointRest time.Duration `koanf:"checkpoint_rest"`
 	PageWallRest   time.Duration `koanf:"page_wall_rest"`
+	// ExitPageLoadsPerDay caps the page loads (HTML pages: profiles, posts)
+	// each static exit makes in a UTC day, fleet-wide: an exit that reaches
+	// it rests until the day ends (03:00 Iraq time). How many a day an IP
+	// tolerates is unmeasured (3 of 10 ISP exits were flagged in Phase 0),
+	// so it is off (0) until the pilot measures it (owner, 6 Nov 2026).
+	ExitPageLoadsPerDay int `koanf:"exit_page_loads_per_day"`
 	// BlockHops is how many times a task run replaces a blocked identity
 	// (rate limit, checkpoint, login wall) with a fresh one on another exit
 	// and carries on, before it waits for a retry.
@@ -121,6 +127,14 @@ type IGSchedule struct {
 	PostRefreshWindow time.Duration `koanf:"post_refresh_window"`
 	// PostRefreshPerRun caps the refreshes riding on one scheduled run.
 	PostRefreshPerRun int `koanf:"post_refresh_per_run"`
+	// ReelsWindow is how far back a scheduled run reads the reels tab for
+	// the views of recent reels (owner, 6 Nov 2026: 7 days). Once every
+	// ReelsFullEvery per profile, a run reads it back to limits.max_age_days
+	// instead, so older reels' views are refreshed weekly. Backfills and
+	// on-demand full runs always read it to max_age_days. 0 reads it back to
+	// max_age_days on every run.
+	ReelsWindow    time.Duration `koanf:"reels_window"`
+	ReelsFullEvery time.Duration `koanf:"reels_full_every"`
 	// MinInterval floors any profile's interval (the hot tier, a custom
 	// interval).
 	MinInterval time.Duration `koanf:"min_interval"`
@@ -189,6 +203,14 @@ type IGDiscovery struct {
 	// Iraq time); 0 = no cap. Candidates over the cap wait as "capped" and
 	// are registered on the next days, highest score first.
 	MaxNewPerDay int `koanf:"max_new_per_day"`
+	// Discovery ranks below regular collection (owner, 6 Nov 2026). With
+	// HoldWhenBehind, no vet starts while a scheduled profile is a full
+	// interval overdue or its run is still going a full interval after it
+	// started. With HoldRestingShare > 0, none starts while more than that
+	// share of a static proxy tier's exits rest (the shared rests,
+	// ig.share_exit_rests). Vets already running carry on.
+	HoldWhenBehind   bool    `koanf:"hold_when_behind"`
+	HoldRestingShare float64 `koanf:"hold_resting_share"`
 }
 
 // IGPrivacy keeps igs's person keys apart from fbs's (ADR 0005 §1).
@@ -225,6 +247,12 @@ func (c *Config) validateIG() []error {
 		if d.Threshold <= 0 || d.VetInFlight <= 0 || d.Interval <= 0 || d.FlushEvery <= 0 || d.MinPriority < 0 || d.RevetAfter < 0 {
 			errs = append(errs, errors.New("ig.discovery: threshold, vet_in_flight, interval and flush_every must be > 0; min_priority and revet_after not negative"))
 		}
+		if d.HoldRestingShare < 0 || d.HoldRestingShare > 1 {
+			errs = append(errs, errors.New("ig.discovery.hold_resting_share must be in [0, 1]"))
+		}
+	}
+	if g.ExitPageLoadsPerDay < 0 {
+		errs = append(errs, errors.New("ig.exit_page_loads_per_day must not be negative"))
 	}
 	if g.ExitRPS < 0 || g.RateLimitRest < 0 || g.CheckpointRest < 0 || g.PageWallRest < 0 || g.BlockHops < 0 || g.ExitRestSync < 0 ||
 		g.KeepIdentities < 0 {
@@ -254,6 +282,9 @@ func (c *Config) validateIG() []error {
 	}
 	if g.Schedule.PostRefreshWindow < 0 || g.Schedule.PostRefreshPerRun < 0 {
 		errs = append(errs, errors.New("ig.schedule.post_refresh_window and post_refresh_per_run must not be negative"))
+	}
+	if g.Schedule.ReelsWindow < 0 || (g.Schedule.ReelsWindow > 0 && g.Schedule.ReelsFullEvery <= 0) {
+		errs = append(errs, errors.New("ig.schedule.reels_window must not be negative, and with a window reels_full_every must be > 0"))
 	}
 	if g.Schedule.Jitter < 0 || g.Schedule.Jitter >= 0.5 {
 		errs = append(errs, errors.New("ig.schedule.jitter must be in [0, 0.5)"))

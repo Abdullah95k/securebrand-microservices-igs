@@ -57,14 +57,24 @@ var (
 	// Identities.
 	IdentityActive  = gaugeVec("identity_active", "Live identities in this pod.", "tier")
 	IdentityRetired = counterVec("identity_retired_total", "Retired identities by reason.", "tier", "reason")
+	// Identities and IdentityShortfall show the identity pool: what a pod
+	// holds, and the tasks that got no identity.
+	Identities        = gaugeVec("identities", "Identities in this pod by state: idle, leased (in use by a task), waiting (tasks waiting at the pod's cap).", "tier", "state")
+	IdentityShortfall = counterVec("identity_shortfall_total", "Identity requests a pod could not meet, by reason (exits_cooling, no_other_exit, at_cap).", "tier", "reason")
+	// ExitPageLoads counts page loads per exit: a static exit by name
+	// (isp#3), a gateway's sessions by bucket.
+	ExitPageLoads = counterVec("exit_page_loads_total", "Page loads by exit (static exits by name, gateway sessions by bucket).", "tier", "exit")
 	// IdentityUnparked counts identities a pod resumed from another
 	// process's park (session.Pool.Park) instead of bootstrapping anew.
 	IdentityUnparked = counterVec("identity_unparked_total", "Identities resumed from the store after a restart.", "tier")
-	IdentityHops     = counterVec("identity_hops_total", "Blocked identities a task replaced with one on another exit and carried on, by stage and block class.", "stage", "class")
-	Exits            = gaugeVec("exits", "Proxy exits configured, by static tier.", "tier")
-	ExitsResting     = gaugeVec("exits_resting", "Proxy exits resting after a rate limit, checkpoint or login page, by tier.", "tier")
-	ExitRests        = counterVec("exit_rests_total", "Times an exit was rested, by tier and reason (rate_limited, checkpoint, page_wall).", "tier", "reason")
-	Bootstraps       = counterVec("bootstrap_total", "Identity bootstraps.", "method", "outcome")
+	// IdentityAdopted counts identities taken from the checkpoint of a
+	// crawler that died without parking, and parked for the others.
+	IdentityAdopted = counterVec("identity_adopted_total", "Identities taken from a dead crawler's checkpoint and parked for reuse.")
+	IdentityHops    = counterVec("identity_hops_total", "Blocked identities a task replaced with one on another exit and carried on, by stage and block class.", "stage", "class")
+	Exits           = gaugeVec("exits", "Proxy exits configured, by static tier.", "tier")
+	ExitsResting    = gaugeVec("exits_resting", "Proxy exits resting after a rate limit, checkpoint or login page, by tier.", "tier")
+	ExitRests       = counterVec("exit_rests_total", "Times an exit was rested, by tier and reason (rate_limited, checkpoint, page_wall).", "tier", "reason")
+	Bootstraps      = counterVec("bootstrap_total", "Identity bootstraps.", "method", "outcome")
 
 	// Tasks.
 	Tasks       = counterVec("tasks_total", "Crawl tasks by stage, lane and outcome.", "stage", "lane", "outcome")
@@ -95,8 +105,12 @@ var (
 	// ContentWritten counts rows igs-content-writer inserted into the
 	// shared store per table (outcome ok), and records it skipped
 	// (undecodable, by topic).
-	ContentWritten       = counterVec("content_written_total", "Rows written to the shared content store, by table and outcome.", "table", "outcome")
-	BreakerState         = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
+	ContentWritten = counterVec("content_written_total", "Rows written to the shared content store, by table and outcome.", "table", "outcome")
+	BreakerState   = gaugeVec("breaker_state", "Circuit breaker state (0 closed, 1 half-open, 2 open).", "name")
+	// RateLimitStoreErrors and RateLimitWaiting: the fleet-wide rate limit
+	// fails closed, so a request waits while Valkey does not answer.
+	RateLimitStoreErrors = counterVec("ratelimit_store_errors_total", "Fleet-wide rate limit checks Valkey did not answer (the request waited and tried again), by key kind.", "kind")
+	RateLimitWaiting     = gauge("ratelimit_waiting_for_store", "Requests in this pod waiting for Valkey before the fleet-wide rate limit lets them go.")
 	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")
 	AIMDCeiling          = gauge("aimd_ceiling_rps", "Fleet-wide platform request ceiling set by AIMD.")
@@ -112,12 +126,14 @@ var (
 	APIRequests          = counterVec("api_requests_total", "API requests.", "route", "code")
 	KafkaProduce         = counterVec("kafka_produce_total", "Produced records.", "topic", "outcome")
 	KafkaCommitted       = counterVec("kafka_commits_total", "Offset commits.", "group", "outcome")
+	KafkaHandlerPanics   = counterVec("kafka_handler_panics_total", "Record handlers that panicked (the record is retried; its partition waits).", "group")
 	ConsumerLag          = gaugeVec("kafka_consumer_lag", "Records behind the end of each topic, per consumer group (leader scheduler).", "group", "topic")
 
 	// Profile discovery (M11).
 	DiscoverySightings = counterVec("discovery_sightings_total", "Accounts met in the posts read, by source (tags, coauthors, mentions, commenters).", "source")
 	DiscoveryVets      = counterVec("discovery_vets_total", "Discovery candidates vetted, by outcome (registered, below, private, gone, failed, already_registered).", "outcome")
 	DiscoveryQueue     = gaugeVec("discovery_candidates", "Discovery candidates by status (new counts those at ig.discovery.min_priority or above).", "status")
+	DiscoveryHeld      = gaugeVec("discovery_held", "1 while discovery starts no vets, by reason (schedule_behind, exits_resting, rests_unknown).", "reason")
 
 	// Registry sync (igs-registry-sync).
 	RegistrySyncRuns        = counterVec("registry_sync_runs_total", "Registry sync runs by status (ok, degraded, error).", "status")

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/configs"
@@ -39,6 +40,9 @@ type Config struct {
 	// ClickHouse is the shared content store (architecture §6) that
 	// igs-content-writer fills from the content.* topics.
 	ClickHouse ClickHouse `koanf:"clickhouse"`
+	// Platform is what the platform's credentials Secret says besides the
+	// stores (PlatformEnv).
+	Platform Platform `koanf:"platform"`
 }
 
 // ClickHouse locates the shared content store and shapes its schema.
@@ -157,6 +161,19 @@ type S3 struct {
 	Region      string `koanf:"region"`
 	MediaBucket string `koanf:"media_bucket"`
 	RawBucket   string `koanf:"raw_bucket"`
+	// BackupsBucket receives the Postgres backups (the chart's backup job).
+	BackupsBucket string `koanf:"backups_bucket"`
+	// Key prefixes inside the buckets. Raw responses: RawKeepPrefix for
+	// failures, kept forever; RawPrefix for the rest, which a bucket rule
+	// may expire. Media files: MediaPrefix. With the platform's shared
+	// buckets: igs/keep/, igs/30d/ and igs/ (REQ-008 fix 11a).
+	RawPrefix     string `koanf:"raw_prefix"`
+	RawKeepPrefix string `koanf:"raw_keep_prefix"`
+	MediaPrefix   string `koanf:"media_prefix"`
+	// ManageBuckets lets igs create its buckets when missing and set the
+	// media bucket's expiry rule. Off for buckets the platform owns: igs
+	// then only checks they exist, and never touches their lifecycle.
+	ManageBuckets bool `koanf:"manage_buckets"`
 }
 
 type FB struct {
@@ -402,6 +419,11 @@ func Load(path string) (*Config, error) {
 	if _, err := pconfig.Load(configs.Default(), path, EnvPrefix, &c); err != nil {
 		return nil, err
 	}
+	if platformOn() {
+		if err := c.applyPlatform(os.Getenv); err != nil {
+			return nil, err
+		}
+	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -440,6 +462,16 @@ func (c *Config) Validate() error {
 	// privacy.author_hmac_key was fbs's; igs keys authors with
 	// ig.privacy.author_hmac_key alone (validateIG), so a production
 	// install must not have to set the other.
+	// Prefixes in shared buckets: the orphan sweep deletes under the media
+	// prefix, and a rule expiring the raw prefix must not reach the kept
+	// failures.
+	if s := c.S3; s.MediaPrefix == "" || !strings.HasSuffix(s.MediaPrefix, "/") {
+		errs = append(errs, errors.New("s3.media_prefix must be set and end with /: igs deletes orphaned media under it"))
+	}
+	if s := c.S3; s.RawPrefix == "" || s.RawKeepPrefix == "" ||
+		strings.HasPrefix(s.RawPrefix, s.RawKeepPrefix) || strings.HasPrefix(s.RawKeepPrefix, s.RawPrefix) {
+		errs = append(errs, errors.New("s3.raw_prefix and s3.raw_keep_prefix must be set and neither may start the other: an expiry rule on raw_prefix must not reach the kept failures"))
+	}
 	if c.Media.TTL < 0 {
 		errs = append(errs, errors.New("media.ttl must not be negative (0: keep until analysed)"))
 	}

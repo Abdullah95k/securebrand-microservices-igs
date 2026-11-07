@@ -120,6 +120,35 @@ groups:
             too high for the exits; checkpoints and page walls mean flagged
             IPs to replace.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#rotation-retries-and-failover
+      - alert: IgsIgIdentityPoolLow
+        # Tasks get no identity: every exit of the tier cools down, or a
+        # pod is at its identity cap (REQ-008 fix 7).
+        expr: |
+          sum by (tier) (rate(igs_identity_shortfall_total{reason=~"exits_cooling|at_cap"}[10m])) > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Crawl tasks on {{ $labels.tier }} keep finding no identity"
+          description: >-
+            For 15 minutes, tasks on the tier got no identity: every exit
+            cools down (they park), or a crawler pod is at its identity cap
+            (they wait). Check igs_identities by state and
+            igs_identity_shortfall_total by reason.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#identity-pool
+      - alert: IgsIgValkeyUnavailable
+        # The fleet-wide rate limit fails closed (REQ-008 fix 4): while
+        # Valkey does not answer, crawlers hold every request.
+        expr: max(igs_ratelimit_waiting_for_store) > 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Crawlers are waiting for Valkey: no request goes out"
+          description: >-
+            The fleet-wide rate limit cannot reach Valkey, so crawlers hold
+            every request rather than run without the per-exit limit.
+            Crawling resumes by itself once Valkey answers. Check Valkey and
+            the crawlers' connection to it (igs_ratelimit_store_errors_total).
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#valkey-unavailable
       - alert: IgsIgTasksParked
         expr: sum(rate(igs_tasks_total{outcome="parked"}[10m])) > 0
         for: 15m
@@ -270,6 +299,21 @@ groups:
           description: >-
             On-demand work waits. KEDA should be scaling the stage; check its
             max replicas, the lane slots and the AIMD ceiling.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
+      - alert: IgsIgHandlerPanics
+        # A record handler panicked: the consumer turns it into an error, so
+        # the record is retried with backoff and its partition waits behind
+        # it (ported from fbs 907e08a).
+        expr: sum by (group) (increase(igs_kafka_handler_panics_total[10m])) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.group }}: a record handler keeps panicking"
+          description: >-
+            The record is retried with backoff and its partition waits behind
+            it (its lag grows). The handler's log line "kafka: handler
+            panicked" names the topic, partition and offset and has the stack.
+            Fix the bug; the record goes through once it no longer panics.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#kafka-lag
       - alert: IgsIgPersisterLag
         expr: max by (topic) (igs:ig_leader:kafka_consumer_lag{group="igs-ig-persister"}) > 50000

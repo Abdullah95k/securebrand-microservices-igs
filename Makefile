@@ -41,7 +41,7 @@ infra-down:
 
 ## Integration tests against real Postgres/Redpanda/Valkey (make infra-up first).
 test-integration:
-	$(TEST_ENV) $(GO) test -count=1 ./internal/platform/kafka/... ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./cmd/igsctl/...
+	$(TEST_ENV) $(GO) test -count=1 ./internal/platform/kafka/... ./internal/platform/leader/... ./internal/platform/schemareg/... ./internal/store/... ./internal/testenv/... ./internal/ig/... ./cmd/igsctl/...
 
 ## igs's load tests against fakeig (opt-in; prints a report). Size with
 ## IGS_LOADTEST_PROFILES, _POSTS, _COMMENTS, _ROWS; IGS_LOADTEST_OUT appends
@@ -86,6 +86,8 @@ igs-chart-check:
 	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/fakeig.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 	$(HELM) lint deploy/helm/igs -f deploy/helm/igs/examples/production.yaml
 	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/production.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	$(HELM) lint deploy/helm/igs -f deploy/helm/igs/values-production.yaml
+	set -o pipefail; $(HELM) template igs deploy/helm/igs -n igs -f deploy/helm/igs/values-production.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 
 ## Run the chart's hooks and Deployments in Docker exactly as rendered
 ## (igsctl hooks, every Deployment), then three registered profiles'

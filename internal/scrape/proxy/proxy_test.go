@@ -34,32 +34,42 @@ func block(p *Pool, ep Endpoint, n int) {
 	}
 }
 
+// Buckets group endpoints by /24 (IPv4), /48 (IPv6) or, for a host that
+// names its exits by port, host and port; they are numbered in list order
+// and named by tier and number, never by address.
 func TestBuckets(t *testing.T) {
 	for raw, want := range map[string]string{
-		"http://u:p@203.0.113.10:8000":  "isp|203.0.113.0/24",
-		"http://proxy.example:8000":     "isp|proxy.example:8000",
-		"http://u:p@proxy.example:8001": "isp|proxy.example:8001",
-		"http://proxy.example":          "isp|proxy.example",
-		"socks5://[2001:db8::1]:1080":   "isp|2001:db8::/48",
+		"http://u:p@203.0.113.10:8000":  "203.0.113.0/24",
+		"http://proxy.example:8000":     "proxy.example:8000",
+		"http://u:p@proxy.example:8001": "proxy.example:8001",
+		"http://proxy.example":          "proxy.example",
+		"socks5://[2001:db8::1]:1080":   "2001:db8::/48",
 	} {
-		if got := staticBucket("isp", raw); got != want {
-			t.Errorf("staticBucket(%q) = %q, want %q", raw, got, want)
+		if got := staticGroup(raw); got != want {
+			t.Errorf("staticGroup(%q) = %q, want %q", raw, got, want)
 		}
+	}
+	got := staticBuckets("isp", []string{"http://u:p@203.0.113.10:8000", "http://u:p@198.51.100.7:8000",
+		"http://u:p@203.0.113.11:8000", "http://u:p@proxy.example:8001", "http://u:p@proxy.example:8002"})
+	if want := []string{"isp/b1", "isp/b2", "isp/b1", "isp/b3", "isp/b4"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("staticBuckets = %v, want %v", got, want)
 	}
 	p := testPool(t)
 	ep, err := p.Next("res")
-	if err != nil || ep.Bucket != "res|gw.example:7777|us" {
+	if err != nil || ep.Bucket != "res/gw-us" {
 		t.Fatalf("%+v %v", ep, err)
 	}
-	if strings.Contains(ep.Bucket, "u:p") {
-		t.Fatal("buckets must not carry credentials")
+	for _, b := range append(got, ep.Bucket, ep.Exit()) {
+		if strings.ContainsAny(b, ":.") || strings.Contains(b, "example") {
+			t.Errorf("%q names an address", b)
+		}
 	}
 }
 
 func TestStaticListSkipsOpenBuckets(t *testing.T) {
 	p := testPool(t)
 	ep, _ := p.Next("isp")
-	if ep.Bucket != "isp|203.0.113.0/24" {
+	if ep.Bucket != "isp/b1" {
 		t.Fatalf("first endpoint: %+v", ep)
 	}
 	block(p, ep, 4)
@@ -68,7 +78,7 @@ func TestStaticListSkipsOpenBuckets(t *testing.T) {
 	}
 	for i := 0; i < 5; i++ {
 		next, err := p.Next("isp")
-		if err != nil || next.Bucket != "isp|198.51.100.0/24" {
+		if err != nil || next.Bucket != "isp/b2" {
 			t.Fatalf("Next must skip the open /24: %+v %v", next, err)
 		}
 	}
@@ -146,22 +156,32 @@ func TestRestSkipsAnExit(t *testing.T) {
 	}
 }
 
-// An exit is one IP: a static endpoint's host and port (two in one /24
-// share a bucket, not an exit), a gateway session; direct egress has none.
+// An exit is one IP, named by tier and number: a static endpoint is its
+// tier's nth (two in one /24 share a bucket, not an exit), a gateway
+// session is its own exit; direct egress has none. No name holds an
+// address or a credential.
 func TestExits(t *testing.T) {
 	p := testPool(t)
 	a, _ := p.Next("isp")
 	b, _ := p.Next("isp")
-	if a.Bucket != b.Bucket || a.Exit() == b.Exit() || a.Exit() != "isp|203.0.113.10:8000" {
+	if a.Bucket != b.Bucket || a.Exit() == b.Exit() || a.Exit() != "isp#1" || b.Exit() != "isp#2" {
 		t.Fatalf("%q %q", a.Exit(), b.Exit())
 	}
 	g1, _ := p.Next("res")
 	g2, _ := p.Next("res")
-	if g1.Exit() == g2.Exit() || !strings.HasPrefix(g1.Exit(), "res|") || strings.Contains(g1.Exit(), "u:p") {
+	if g1.Exit() == g2.Exit() || !strings.HasPrefix(g1.Exit(), "res#s") || strings.Contains(g1.Exit(), "u:p") {
 		t.Fatalf("gateway sessions are their own exits: %q %q", g1.Exit(), g2.Exit())
 	}
 	if d, _ := p.Next("direct"); d.Exit() != "" {
 		t.Fatalf("direct: %q", d.Exit())
+	}
+	if ExitTier(a.Exit()) != "isp" || ExitTier(g1.Exit()) != "res" {
+		t.Fatalf("tiers of %q, %q", a.Exit(), g1.Exit())
+	}
+	// An endpoint made outside a tier is named by a hash, not its host.
+	odd := Endpoint{Tier: "isp", URL: "http://u:p@203.0.113.99:8000"}
+	if x := odd.Exit(); !strings.HasPrefix(x, "isp#h") || strings.Contains(x, "203.0.113") {
+		t.Fatalf("%q", x)
 	}
 }
 
@@ -169,15 +189,15 @@ func TestExits(t *testing.T) {
 // "all cooling", and never spends a half-open probe on a skipped exit.
 func TestNextWhereSkips(t *testing.T) {
 	p := testPool(t)
-	busy := map[string]bool{"isp|203.0.113.10:8000": true, "isp|203.0.113.11:8000": true}
+	busy := map[string]bool{"isp#1": true, "isp#2": true}
 	skip := func(ep Endpoint) bool { return busy[ep.Exit()] }
 	for range 4 {
 		ep, err := p.NextWhere("isp", skip)
-		if err != nil || ep.Exit() != "isp|198.51.100.7:8000" {
+		if err != nil || ep.Exit() != "isp#3" {
 			t.Fatalf("%+v %v", ep, err)
 		}
 	}
-	busy["isp|198.51.100.7:8000"] = true
+	busy["isp#3"] = true
 	if _, err := p.NextWhere("isp", skip); !errors.Is(err, ErrNoFreeExit) {
 		t.Fatalf("every exit skipped: %v", err)
 	}

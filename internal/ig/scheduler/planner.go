@@ -21,6 +21,7 @@ import (
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 )
@@ -60,6 +61,15 @@ type due struct {
 	lastJob  *uuid.UUID
 	refresh  bool
 	interval int
+}
+
+// account names the profile in logs by its pk, never its username.
+func (d due) account() slog.Attr {
+	var pk int64
+	if d.userPK != nil {
+		pk = *d.userPK
+	}
+	return plog.Account(pk, d.ref)
 }
 
 // Tick takes every due profile, scheduler.planner_batch at a time, and
@@ -141,21 +151,21 @@ func (p *Planner) batch(ctx context.Context, n int, stretch float64) (int, error
 		}
 		lim, err := dispatch.Limits(p.Cfg, o)
 		if err != nil {
-			slog.Warn("planner: stored options rejected; using the defaults", "profile", d.ref, "err", err)
+			slog.Warn("planner: stored options rejected; using the defaults", d.account(), "err", err)
 			lim, _ = dispatch.Limits(p.Cfg, dispatch.CrawlOptions{})
 		}
 		var posts []dispatch.PostRoot
 		var refreshed []int64
 		if d.userPK != nil && lim.IncludeComments && g.PostRefreshPerRun > 0 {
 			if posts, refreshed, err = p.dueRefreshes(ctx, *d.userPK); err != nil {
-				slog.Warn("planner: post refreshes", "profile", d.ref, "err", err)
+				slog.Warn("planner: post refreshes", d.account(), "err", err)
 				posts, refreshed = nil, nil
 			}
 		}
 		j, _, err := p.Dispatch.Create(ctx, dispatch.Request{Kind: dispatch.KindScheduled, Lane: igstaskv1.Lane_LANE_P1,
 			Mode: "auto", ProfileRef: d.ref, Limits: lim, RefreshProfile: d.refresh, Posts: posts})
 		if err != nil {
-			slog.Warn("planner: dispatch failed", "profile", d.ref, "err", err)
+			slog.Warn("planner: dispatch failed", d.account(), "err", err)
 			continue // the refreshes stay due
 		}
 		if _, err := p.DB.Exec(ctx, `UPDATE profile_schedule SET last_job_id = $2,

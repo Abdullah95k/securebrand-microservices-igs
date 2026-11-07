@@ -11,6 +11,16 @@ import (
 
 // Open returns a client and ensures the buckets exist.
 func Open(ctx context.Context, endpoint, access, secret, region string, useSSL bool, buckets ...string) (*minio.Client, error) {
+	return open(ctx, endpoint, access, secret, region, useSSL, true, buckets...)
+}
+
+// OpenExisting is Open for buckets someone else owns (the platform's): it
+// checks they exist and never creates one.
+func OpenExisting(ctx context.Context, endpoint, access, secret, region string, useSSL bool, buckets ...string) (*minio.Client, error) {
+	return open(ctx, endpoint, access, secret, region, useSSL, false, buckets...)
+}
+
+func open(ctx context.Context, endpoint, access, secret, region string, useSSL, create bool, buckets ...string) (*minio.Client, error) {
 	c, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(access, secret, ""),
 		Secure: useSSL,
@@ -26,6 +36,9 @@ func Open(ctx context.Context, endpoint, access, secret, region string, useSSL b
 		ok, err := c.BucketExists(ctx, b)
 		if err != nil {
 			return nil, fmt.Errorf("s3: bucket %s: %w", b, err)
+		}
+		if !ok && !create {
+			return nil, fmt.Errorf("s3: bucket %s does not exist (s3.manage_buckets is off: igs creates none)", b)
 		}
 		if !ok {
 			if err := c.MakeBucket(ctx, b, minio.MakeBucketOptions{Region: region}); err != nil {

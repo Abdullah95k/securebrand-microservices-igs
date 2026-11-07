@@ -6,6 +6,7 @@ package proxy
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,45 +25,53 @@ import (
 )
 
 // Endpoint is one proxy exit to use for an identity's lifetime.
+//
+// Exits and buckets are named by tier and number, never by address (the
+// owner's rule D4): the names appear in logs, metric labels and Valkey keys,
+// and an address or a provider's host must appear in none of them. URL holds
+// the address and credentials; it is never logged.
 type Endpoint struct {
 	Tier      string
-	URL       string // empty for direct
+	URL       string // empty for direct; never logged
 	SessionID string
 	Country   string
 	ExpiresAt time.Time // zero = no sticky expiry
+	// Index is a static endpoint's position in its tier's list, from 1.
+	Index int
 	// Bucket groups exits the platform likely treats alike: the /24 of a
 	// static endpoint, or a gateway and country. Breakers work per bucket.
+	// Named "<tier>/b<n>" (static) or "<tier>/gw[-<country>]" (gateway).
 	Bucket string
 }
 
 // Exit names the IP the endpoint sends from, for pacing and spreading
-// identities: a static endpoint's host and port, a gateway session's id
-// (each sticky session is its own IP). Direct egress has none: the pod's
-// own address is not shared across the fleet.
+// identities: "<tier>#<n>" for the nth endpoint of a static list, and
+// "<tier>#s<session>" for a gateway session (each sticky session is its own
+// IP). Direct egress has none: the pod's own address is not shared across
+// the fleet.
 func (e Endpoint) Exit() string {
 	switch {
 	case e.URL == "":
 		return ""
 	case e.SessionID != "":
-		return e.Tier + "|" + e.SessionID
+		return e.Tier + "#s" + e.SessionID
+	case e.Index > 0:
+		return e.Tier + "#" + strconv.Itoa(e.Index)
 	}
+	// An endpoint built outside a tier: a hash of its host stands in for
+	// the number, so the name still holds no address.
+	host := e.URL
 	if u, err := url.Parse(e.URL); err == nil && u.Host != "" {
-		return e.Tier + "|" + u.Host
+		host = u.Host
 	}
-	return e.Tier + "|" + e.Bucket
+	h := sha256.Sum256([]byte(host))
+	return e.Tier + "#h" + hex.EncodeToString(h[:4])
 }
 
-// Redacted returns the URL without credentials, for logs.
-func (e Endpoint) Redacted() string {
-	if e.URL == "" {
-		return "direct"
-	}
-	u, err := url.Parse(e.URL)
-	if err != nil {
-		return "invalid"
-	}
-	u.User = nil
-	return u.String()
+// ExitTier is the tier of an exit name.
+func ExitTier(exit string) string {
+	t, _, _ := strings.Cut(exit, "#")
+	return t
 }
 
 // Tier produces endpoints. Next returns the next endpoint for which allow
@@ -183,7 +192,7 @@ func New(cfg config.Proxy) (*Pool, error) {
 		slog.Info("proxy: breaker", "bucket", bucket, "from", from.String(), "to", to.String())
 	}
 	p.rests.OnChange = func(exit string, from, to breaker.State) {
-		tier, _, _ := strings.Cut(exit, "|")
+		tier := ExitTier(exit)
 		switch {
 		case to == breaker.Open && from != breaker.Open:
 			metrics.ExitsResting.WithLabelValues(tier).Inc()
@@ -198,10 +207,7 @@ func New(cfg config.Proxy) (*Pool, error) {
 			if len(t.Endpoints) == 0 {
 				return nil, fmt.Errorf("proxy: tier %s has no endpoints", t.Name)
 			}
-			sl := &staticList{name: t.Name, endpoints: t.Endpoints, country: t.Country}
-			for _, e := range t.Endpoints {
-				sl.buckets = append(sl.buckets, staticBucket(t.Name, e))
-			}
+			sl := &staticList{name: t.Name, endpoints: t.Endpoints, country: t.Country, buckets: staticBuckets(t.Name, t.Endpoints)}
 			p.tiers[t.Name] = sl
 			metrics.Exits.WithLabelValues(t.Name).Set(float64(len(t.Endpoints)))
 		case "gateway":
@@ -350,26 +356,41 @@ func restState(s breaker.State) string {
 	return "in use"
 }
 
-// staticBucket is the /24 of an IPv4 endpoint (the /48 of an IPv6 one),
-// else its host and port: a provider that names its exits by port on one
-// host (Decodo's ISP list is isp.decodo.com:10001, :10002, ...) gives each
-// port its own exit IP, so one blocked port must not cool down the others.
-func staticBucket(tier, raw string) string {
+// staticBuckets names each endpoint's bucket "<tier>/b<n>", numbering the
+// distinct groups in list order. A group is the /24 of an IPv4 endpoint (the
+// /48 of an IPv6 one), else its host and port: a provider that names its
+// exits by port on one host gives each port its own exit IP, so one blocked
+// port must not cool down the others.
+func staticBuckets(tier string, endpoints []string) []string {
+	n := map[string]int{}
+	out := make([]string, len(endpoints))
+	for i, e := range endpoints {
+		g := staticGroup(e)
+		if _, ok := n[g]; !ok {
+			n[g] = len(n) + 1
+		}
+		out[i] = tier + "/b" + strconv.Itoa(n[g])
+	}
+	return out
+}
+
+// staticGroup is the address group an endpoint's bucket stands for. It is
+// only compared, never shown.
+func staticGroup(raw string) string {
 	host := raw
 	if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
 		host = u.Hostname()
 		if net.ParseIP(host) == nil && u.Port() != "" {
-			return tier + "|" + net.JoinHostPort(host, u.Port())
+			return net.JoinHostPort(host, u.Port())
 		}
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		if v4 := ip.To4(); v4 != nil {
-			host = fmt.Sprintf("%d.%d.%d.0/24", v4[0], v4[1], v4[2])
-		} else {
-			host = (&net.IPNet{IP: ip.Mask(net.CIDRMask(48, 128)), Mask: net.CIDRMask(48, 128)}).String()
+			return fmt.Sprintf("%d.%d.%d.0/24", v4[0], v4[1], v4[2])
 		}
+		return (&net.IPNet{IP: ip.Mask(net.CIDRMask(48, 128)), Mask: net.CIDRMask(48, 128)}).String()
 	}
-	return tier + "|" + host
+	return host
 }
 
 type direct struct{}
@@ -399,7 +420,7 @@ func (s *staticList) Buckets() []string { return s.buckets }
 func (s *staticList) Static() []Endpoint {
 	out := make([]Endpoint, len(s.endpoints))
 	for i, e := range s.endpoints {
-		out[i] = Endpoint{Tier: s.name, URL: e, Country: s.country, Bucket: s.buckets[i]}
+		out[i] = Endpoint{Tier: s.name, URL: e, Country: s.country, Index: i + 1, Bucket: s.buckets[i]}
 	}
 	return out
 }
@@ -407,7 +428,7 @@ func (s *staticList) Static() []Endpoint {
 func (s *staticList) Next(allow func(Endpoint) bool) (Endpoint, error) {
 	for range s.endpoints {
 		i := (s.next.Add(1) - 1) % uint64(len(s.endpoints))
-		if ep := (Endpoint{Tier: s.name, URL: s.endpoints[i], Country: s.country, Bucket: s.buckets[i]}); allow(ep) {
+		if ep := (Endpoint{Tier: s.name, URL: s.endpoints[i], Country: s.country, Index: int(i) + 1, Bucket: s.buckets[i]}); allow(ep) {
 			return ep, nil
 		}
 	}
@@ -422,12 +443,13 @@ type gateway struct {
 
 func (g *gateway) Name() string { return g.cfg.Name }
 
+// bucket is the gateway's one bucket, "<tier>/gw" with its country: a
+// tier has one gateway.
 func (g *gateway) bucket() string {
-	host := g.cfg.Gateway
-	if u, err := url.Parse(g.cfg.Gateway); err == nil && u.Host != "" {
-		host = u.Host
+	if g.cfg.Country != "" {
+		return g.cfg.Name + "/gw-" + g.cfg.Country
 	}
-	return g.cfg.Name + "|" + host + "|" + g.cfg.Country
+	return g.cfg.Name + "/gw"
 }
 
 func (g *gateway) Buckets() []string  { return []string{g.bucket()} }

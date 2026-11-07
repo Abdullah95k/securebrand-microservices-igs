@@ -16,6 +16,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 )
 
@@ -41,11 +42,17 @@ const maxVetAttempts = 3
 // Vetter is profile discovery's leader loop (igs-scheduler): every
 // ig.discovery.interval it decides the candidates whose vet came back,
 // queues for another vet those seen again long after their decision, and
-// starts vets for the most seen candidates, up to vet_in_flight at once.
+// starts vets for the most seen candidates, up to vet_in_flight at once,
+// while regular collection keeps up (hold.go).
 type Vetter struct {
 	DB       *pgxpool.Pool // schema ig
 	Dispatch *dispatch.Dispatcher
 	Cfg      *config.Config
+	// Rests, when set, are the exit rests the crawlers share: vets wait
+	// while most exits of a tier rest (ig.discovery.hold_resting_share).
+	Rests RestLoader
+	// held is the last hold reason, for logging its changes.
+	held string
 }
 
 // Tick runs one round.
@@ -67,8 +74,15 @@ func (v *Vetter) Tick(ctx context.Context) error {
 	if err := v.promote(ctx); err != nil {
 		return fmt.Errorf("discovery: promote capped: %w", err)
 	}
-	if err := v.start(ctx); err != nil {
-		return fmt.Errorf("discovery: start vets: %w", err)
+	reason, err := v.hold(ctx)
+	if err != nil {
+		return fmt.Errorf("discovery: schedule check: %w", err)
+	}
+	v.setHeld(reason)
+	if reason == "" {
+		if err := v.start(ctx); err != nil {
+			return fmt.Errorf("discovery: start vets: %w", err)
+		}
 	}
 	return v.gauges(ctx)
 }
@@ -127,7 +141,7 @@ func (v *Vetter) rescore(ctx context.Context) error {
 				if err := v.registerKept(ctx, x.username, pk, score, sb, x.s, x.vet); err != nil {
 					return err
 				}
-				slog.Info("discovery: candidate registered on a grown audience", "candidate", x.username, "score", score, "sources", x.s.Sources)
+				slog.Info("discovery: candidate registered on a grown audience", plog.Account(x.pk, "u:"+x.username), "score", score, "sources", x.s.Sources)
 			}
 			metrics.DiscoveryVets.WithLabelValues("rescored_" + status).Inc()
 		}
@@ -183,7 +197,7 @@ func (v *Vetter) decide(ctx context.Context) error {
 		}
 		var vet Vet
 		if err := json.Unmarshal(x.vet, &vet); err != nil {
-			slog.Warn("discovery: unreadable vet", "candidate", x.username, "err", err)
+			slog.Warn("discovery: unreadable vet", plog.Account(x.pk, "u:"+x.username), "err", err)
 			vet = Vet{}
 		}
 		pk := x.pk
@@ -216,7 +230,7 @@ func (v *Vetter) decide(ctx context.Context) error {
 		}
 		if status == StatusRegistered {
 			if err := Register(ctx, v.DB, v.Dispatch, v.Cfg, x.username, pk); err != nil {
-				return fmt.Errorf("register %s: %w", x.username, err)
+				return fmt.Errorf("register %s: %w", plog.AccountName(pk, "u:"+x.username), err)
 			}
 		}
 		metrics.DiscoveryVets.WithLabelValues(status).Inc()
@@ -237,7 +251,7 @@ func (v *Vetter) decide(ctx context.Context) error {
 			WHERE username = $1`, x.username, status, score, sb, pk, x.s.Sources); err != nil {
 			return err
 		}
-		slog.Info("discovery: candidate decided", "candidate", x.username, "status", status, "score", score)
+		slog.Info("discovery: candidate decided", plog.Account(pk, "u:"+x.username), "status", status, "score", score)
 	}
 	return nil
 }
@@ -298,7 +312,7 @@ func (v *Vetter) start(ctx context.Context) error {
 		j, _, err := v.Dispatch.Create(ctx, dispatch.Request{Kind: dispatch.KindDiscovery, Lane: igstaskv1.Lane_LANE_P2, Mode: "full",
 			ProfileRef: "u:" + c.username, Limits: lim, Vet: true, Params: map[string]any{"candidate": c.username}})
 		if err != nil {
-			slog.Warn("discovery: vet not started", "candidate", c.username, "err", err)
+			slog.Warn("discovery: vet not started", plog.Account(c.pk, "u:"+c.username), "err", err)
 			continue
 		}
 		// The previous read is in discovery_vets; the candidate's vet column
@@ -329,7 +343,7 @@ func (v *Vetter) room(ctx context.Context) (bool, error) {
 // or a capped one let through) and keeps the decision in discovery_vets.
 func (v *Vetter) registerKept(ctx context.Context, username string, pk int64, score float64, signals []byte, s Sightings, vet []byte) error {
 	if err := Register(ctx, v.DB, v.Dispatch, v.Cfg, username, pk); err != nil {
-		return fmt.Errorf("register %s: %w", username, err)
+		return fmt.Errorf("register %s: %w", plog.AccountName(pk, "u:"+username), err)
 	}
 	seen, _ := json.Marshal(s)
 	var upk *int64

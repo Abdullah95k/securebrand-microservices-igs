@@ -165,6 +165,9 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		Jobs: jobs.New(rdb), Ckpt: checkpoint.New(rdb), DB: db, Suppression: supp,
 		Emit: &emit.Emitter{HMACKey: []byte(g.Privacy.AuthorHMACKey), Pseudonymize: g.Privacy.PIIMode == "pseudonymized", Suppression: supp},
 	}
+	if g.ExitPageLoadsPerDay > 0 {
+		deps.PageLoads = ratelimit.NewPageLoads(rdb, cfg.Kafka.TopicPrefix)
+	}
 	worker := &stage.Worker{D: deps, MaxAttempts: uint32(cfg.Crawler.MaxAttempts), MaxTotalAttempts: uint32(cfg.Crawler.MaxTotalAttempts),
 		LeaseTTL: cfg.Crawler.LeaseTTL, RetryScale: o.RetryScale,
 		Stages: map[igstaskv1.Kind]stage.Stage{
@@ -175,6 +178,12 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 	c.Components = []run.Func{
 		func(ctx context.Context) error { return reg.Run(ctx, g.RegistryRefresh) },
 		func(ctx context.Context) error { return supp.Run(ctx, cfg.Crawler.SuppressionRefresh) },
+	}
+	if g.KeepIdentities > 0 {
+		// Every identity this crawler holds, checkpointed every 2 minutes
+		// under a lease, so a crawler that dies leaves them to the others
+		// (B5); and the identities of crawlers that died, adopted.
+		c.Components = append(c.Components, pool.RunCheckpoint)
 	}
 	if g.ShareExitRests {
 		proxies.ShareRests(ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix))
@@ -220,7 +229,7 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		}
 	}
 	if o.RawS3 != nil && g.CaptureRaw != "none" {
-		sink := rawsink.New(o.RawS3, cfg.S3.RawBucket)
+		sink := rawsink.New(o.RawS3, cfg.S3.RawBucket, cfg.S3.RawPrefix, cfg.S3.RawKeepPrefix)
 		gql.Raw, gql.CaptureAll = sink, g.CaptureRaw == "all"
 		c.Components = append(c.Components, func(ctx context.Context) error { return sink.Run(ctx, time.Minute) })
 	}

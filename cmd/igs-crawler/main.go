@@ -22,7 +22,6 @@ import (
 	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 )
 
@@ -63,7 +62,7 @@ func runCrawler(ctx context.Context, cfg *config.Config, stages []string) error 
 	defer producer.Close()
 	var raw *minio.Client
 	if cfg.IG.CaptureRaw != "none" {
-		if raw, err = s3x.Open(ctx, cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Region, cfg.S3.UseSSL, cfg.S3.RawBucket); err != nil {
+		if raw, err = igapp.OpenS3(ctx, cfg, cfg.S3.RawBucket); err != nil {
 			return err
 		}
 	}

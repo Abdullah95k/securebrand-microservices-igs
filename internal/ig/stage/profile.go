@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
+	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/graphql"
@@ -361,7 +363,7 @@ func (s *ProfileStage) unavailable(ctx context.Context, t *igstaskv1.Task, sc *i
 	if err := b.Wait(ctx); err != nil {
 		return retry(t, "", "30s", err.Error(), c)
 	}
-	slog.Debug("profile unavailable", "profile", sc.ProfileRef, "why", why)
+	slog.Debug("profile unavailable", plog.Account(sc.UserPk, sc.ProfileRef), "why", why)
 	return done(c)
 }
 
@@ -568,6 +570,10 @@ func (s *ProfileStage) endGrid(ctx context.Context, t *igstaskv1.Task, sc *igsta
 	}
 	if t.Limits.GetIncludeReels() && st.Extra["user_id"] != "" {
 		st.Cursor = phaseReels + ":"
+		if st.Extra == nil {
+			st.Extra = map[string]string{}
+		}
+		st.Extra["reels"] = s.reelsWindow(ctx, t, sc)
 	} else {
 		st.Cursor = phaseEnd
 	}
@@ -579,6 +585,11 @@ func (s *ProfileStage) endGrid(ctx context.Context, t *igstaskv1.Task, sc *igsta
 func (s *ProfileStage) reelsPage(ctx context.Context, t *igstaskv1.Task, id *session.Identity, sc *igstaskv1.ProfileScope,
 	st *checkpoint.State, c map[string]int64, cur, page string) *Outcome {
 	d := s.D
+	// A segment that continues the reels tab has a checkpoint of its own:
+	// it decides the window again (the same way, as the pass hasn't ended).
+	if st.Extra["reels"] == "" {
+		st.Extra["reels"] = s.reelsWindow(ctx, t, sc)
+	}
 	vars := map[string]any{"user_id": st.Extra["user_id"], "first": ReelsPageSize}
 	if cur != "" {
 		vars["cursor"] = cur
@@ -606,6 +617,13 @@ func (s *ProfileStage) reelsPage(ctx context.Context, t *igstaskv1.Task, id *ses
 	if a := t.Limits.GetMaxAgeSeconds(); a > 0 {
 		maxAge = d.now().Add(-time.Duration(a) * time.Second)
 	}
+	// A scheduled run reads only the reels window (ig.schedule.reels_window).
+	full := st.Extra["reels"] == reelsFull
+	if u := atoi64(strings.TrimPrefix(st.Extra["reels"], "since:")); !full && u > 0 {
+		if since := time.Unix(u, 0).UTC(); since.After(maxAge) {
+			maxAge = since
+		}
+	}
 	src := emit.Source{JobID: t.JobId, Query: "reels", DocID: resp.Query.DocID, ParserVersion: parse.ReelsVersion, Mode: t.Mode,
 		RawRef: resp.RawRef}
 	b := d.Producer.NewBatch()
@@ -632,10 +650,39 @@ func (s *ProfileStage) reelsPage(ctx context.Context, t *igstaskv1.Task, id *ses
 	}
 	if old || !res.PageInfo.HasNext || res.PageInfo.EndCursor == "" {
 		st.Cursor = phaseEnd
+		if full {
+			c["reels_full_passes"]++
+		}
+		if err := d.saveReelsPass(ctx, sc.UserPk, full); err != nil {
+			slog.Warn("profile: reels cursor", plog.Account(sc.UserPk, sc.ProfileRef), "err", err)
+		}
 		return nil
 	}
 	st.Cursor = phaseReels + ":" + res.PageInfo.EndCursor
 	return nil
+}
+
+// reelsFull marks a reels pass that reads back to limits.max_age_days.
+const reelsFull = "full"
+
+// reelsWindow decides how far back this run reads the reels tab: reelsFull,
+// or "since:<unix seconds>". A scheduled (incremental) run reads
+// ig.schedule.reels_window back, unless the profile had no full pass within
+// ig.schedule.reels_full_every; backfills and full runs always read it all.
+func (s *ProfileStage) reelsWindow(ctx context.Context, t *igstaskv1.Task, sc *igstaskv1.ProfileScope) string {
+	g := s.D.Cfg.IG.Schedule
+	if t.Mode != commonv1.CrawlMode_CRAWL_MODE_INCREMENTAL || g.ReelsWindow <= 0 {
+		return reelsFull
+	}
+	now := s.D.now()
+	last, err := s.D.lastReelsFull(ctx, sc.UserPk)
+	if err != nil {
+		slog.Warn("profile: reels cursor", plog.Account(sc.UserPk, sc.ProfileRef), "err", err)
+	}
+	if err != nil || last.IsZero() || now.Sub(last) >= g.ReelsFullEvery {
+		return reelsFull
+	}
+	return "since:" + strconv.FormatInt(now.Add(-g.ReelsWindow).Unix(), 10)
 }
 
 // watermarkFor is the newest stored post time on a scheduled (incremental)

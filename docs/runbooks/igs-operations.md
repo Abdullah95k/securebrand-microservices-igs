@@ -26,6 +26,8 @@ Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and
 | Block rate | classes `rate_limited`, `login_wall`, `checkpoint`; `igs:ig_block_ratio:rate5m`; `igs_fleet_block_rate` | < 5% (Phase 0's threshold) |
 | Fleet ceiling | `igs:ig_leader:aimd_ceiling_rps`, `igs:ig_leader:fleet_rps` | ceiling stable or rising; fleet rate close to it while there is backlog |
 | Identity churn | `igs_identity_retired_total{tier,reason}` | mostly `max_requests` (identities retire after 500 to 750 requests by design) |
+| Identity pool | `igs_identities{tier,state}`; `igs_identity_shortfall_total{tier,reason}` | `waiting` 0; shortfalls flat ([Identity pool](#identity-pool)) |
+| Page loads per exit | `increase(igs_exit_page_loads_total[1d])` by `exit` | even across exits; under `ig.exit_page_loads_per_day` when set |
 | Exits | `igs_exits_resting{tier}` against `igs_exits{tier}`; `igs_exit_rests_total{tier,reason}`; `igs_identity_hops_total{stage,class}` | few exits resting; rests and failovers flat |
 | Parked tasks | `igs_tasks_total{outcome="parked"}` | 0: a task parks only while every exit rests |
 | Daily budget | `igs_budget_projected{kind}` against `igs_budget_limit{kind}`; `igs_budget_backfill_paused` | under the limit; 0 |
@@ -68,7 +70,8 @@ The fleet therefore reads at most exits × `ig.exit_rps`: 2.5 requests a second 
 **Rotation.**
 - Identities spread over the exits. A task gets an idle identity on an exit no other task uses; failing that, a new identity on such an exit; failing that, the idle identity on the least used exit.
 - An identity retires after 500 to 750 requests (`ig.identity_max_requests_min`/`_max`), at its fifth rate limit in a row, at once on a login wall or a checkpoint, and when its exit starts resting.
-- A static exit is one IP: its host and port (Decodo names its exits by port). A gateway session is its own exit.
+- A static exit is one IP: its host and port (some providers name their exits by port on one host). A gateway session is its own exit.
+- **Exits are named by tier and position, never by address:** the nth endpoint of tier `isp` in `proxies.yaml` is `isp#n` in logs, metrics and Valkey keys, and its breaker bucket is `isp/b<k>` (endpoints in one /24 share a bucket). A gateway session is `<tier>#s<session>`, its bucket `<tier>/gw-<country>`. To find an exit, count its position in `proxies.yaml`; keep the order stable.
 
 **Exit rests.** One answer is enough to rest an exit, since the limit is per IP:
 
@@ -83,7 +86,11 @@ The fleet therefore reads at most exits × `ig.exit_rps`: 2.5 requests a second 
 - Separately, the exit's bucket (its /24, or its host and port) opens its breaker at a 15% failure rate over a minute.
 - **Rests hold for every pod** (`ig.share_exit_rests`): a pod that rests an exit records it in Valkey, and every crawler and registry-sync pod reads the shared rests every `ig.exit_rest_sync` (2 s). So a limited IP sees one 429 for the whole fleet, not one per pod. A failed probe's longer rest is shared the same way. After a rest each pod may probe the exit once, but the exit's fleet-wide pacing spaces those probes 4 s apart, and the first failed one rests it again for all. `TestIdentitiesAndRestsOutliveAPod` checks a rest taken in one crawler holds in another.
 
-**Sessions across restarts.** A crawler pod that stops (a rollout, a scale-down) keeps its idle identities in Valkey for `ig.keep_identities` (1 h): their cookies and tokens, never the proxy credentials. The pods that start next take them up exit by exit (`igs_identity_unparked_total`), so a rolling restart does not load a page on every exit again. A pod that crashes loses its identities; every page load still waits for its exit's pacing, so even then the IPs do not all load pages at once.
+**Sessions across restarts.** A crawler pod that stops (a rollout, a scale-down) keeps its idle identities in Valkey for `ig.keep_identities` (1 h): their cookies and tokens, never the proxy credentials. The pods that start next take them up exit by exit (`igs_identity_unparked_total`), so a rolling restart does not load a page on every exit again.
+- **A pod that dies** (killed, out of memory, its node lost) can't park. So every running crawler also checkpoints every identity it holds, idle or in use, every 2 minutes, under a 5-minute lease.
+- Once a dead pod's lease ends, another crawler adopts its last checkpoint within a minute and parks those identities exit by exit (`igs_identity_adopted_total`, and a log line with their age). So at most 6 minutes after a crash, the dead pod's sessions are available again.
+- A clean stop parks and drops the checkpoint, so nothing is handed out twice.
+- Every page load still waits for its exit's pacing, so even a crash with no checkpoint does not make the IPs all load pages at once.
 
 **IPs shared with fbs, yts and tks.** igs paces and rests an exit only for its own requests. When the same IPs also carry the other collectors' traffic:
 - Instagram's limit counts only requests to Instagram, so igs's pacing stays right.
@@ -104,6 +111,25 @@ What to do when exits keep resting:
 2. **Rate limits:** a steady stream of `rate_limited` rests means `ig.exit_rps` is above what Instagram tolerates per IP. Lower it, or add exits to keep the throughput.
 3. **Checkpoints and page walls:** these mean the provider's IPs are flagged. Replace those endpoints in the `igs-proxies` Secret.
 4. **Every exit resting:** the crawl stops until rests end. If it lasts, add exits from another provider or subnet.
+
+## Identity pool
+
+An identity is made when a task needs one: a fresh browser identity on an exit, bootstrapped by its first page load. There is no fixed pool to fill; what limits it is the exits and each pod's cap (1.3 identities per task slot).
+
+- **`igs_identities{tier,state}`** is each pod's identities: `idle` (ready for the next task), `leased` (in use by a task) and `waiting` (tasks waiting at the pod's cap). Sum over pods for the fleet.
+- **`igs_identity_shortfall_total{tier,reason}`** counts the tasks that got no identity:
+  - `exits_cooling`: every exit of the tier rests or cools down; the task parks;
+  - `no_other_exit`: a failover found no exit but the one it left; the task retries;
+  - `at_cap`: the pod was at its cap; the task waited.
+- **`IgsIgIdentityPoolLow`** fires when `exits_cooling` or `at_cap` shortfalls go on for 15 minutes.
+  - `exits_cooling`: see "What to do when exits keep resting" in [Rotation, retries and failover](#rotation-retries-and-failover); `IgsIgTasksParked` fires as well.
+  - `at_cap`: the pod has more tasks in flight than identities allowed. That shouldn't happen with the default cap; check for identities leaking (`leased` growing while `igs_tasks_total` is flat) and restart the pod.
+
+**Page loads per exit.** Each page load (a profile or post page; a fresh identity's first one included) counts in `igs_exit_page_loads_total{tier,exit}`: a static exit by name (`isp#3`), a gateway's sessions by bucket. Instagram flags IPs that load too many pages for fresh visitors (3 of 10 ISP exits in Phase 0), and how many a day an IP tolerates is not yet measured. The daily count per exit is `increase(igs_exit_page_loads_total[1d])`.
+
+- **The daily limit, `ig.exit_page_loads_per_day`** (0, off): once a static exit reaches it in a UTC day, counted fleet-wide in Valkey, it rests until the day ends at 00:00 UTC (03:00 Iraq time), reason `page_load_limit`. Its tasks move to other exits. Pods learn of the rest within `ig.exit_rest_sync`, so the fleet can go a few loads over.
+- It stays off until the pilot measures what an IP tolerates (the owner, 6 November 2026). Set it from the pilot's numbers: the most page loads a day on exits that were never walled, with a margin.
+- While it rests, the exit also sends no GraphQL request, so a limit set too low cuts throughput: watch `igs_exits_resting` after setting it.
 
 ## Daily budget
 
@@ -127,9 +153,7 @@ igs keeps what it collects forever (the owner, 2026-11-03): profiles and their s
 
 **Raw responses are kept** (`ig.capture_raw: all`, architecture §2.5): every GraphQL answer and post page goes to the raw bucket as zstd JSONL (`raw/<query>/<yyyy/mm/dd/hh>/...`, failures under `raw-failures/`). Every event carries the reference of the response it came from (`raw_ref`: `s3://bucket/key#line`), so a parser fix or a new field can be applied to past data without collecting again. They take about as much as the proxy traffic before compression, a fifth to a tenth of it after: plan the raw bucket for 0.1 to 0.5 GB a day per 1,000 long-tail profiles, more with hot and warm ones.
 
-These still expire, being operational:
-- finished jobs after `jobs_days` (90);
-- media rows after `media_rows_days` (30) once their files are deleted.
+Nothing expires by age, the job log included (the owner, 6 November 2026): `jobs_days` and `media_rows_days` are 0. A media row stays after its file is deleted, as the record of what was downloaded. Plan Postgres for about 8,000 jobs a day per 1,000 long-tail profiles (a few KB each).
 
 Media files are deleted once the analysis service acknowledged them (or after `media.ttl`, if set).
 
@@ -142,7 +166,7 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
 1. **Sightings.** Crawlers count the accounts they meet in the posts they read: tagged accounts, co-authors, mentions, and commenters (commenters only with `pii_mode: full`). Erased people are never counted.
    - They also record which registered accounts each one was met in (`ig.discovery_sources`). How many different registered accounts link to an account is its Iraqi audience (`sources`).
    - Each sighting adds to the account's priority: a co-author 3, a tag or a mention 2, a comment 1, a sighting on a post located in Iraq 2 more, and each new registered account it is met in 3.
-2. **Vetting.** Every `interval`, the leader scheduler vets the highest-priority accounts at `min_priority` (2) or above, up to `vet_in_flight` (50) at once. A vet is a backfill-lane (p2) job of kind `discovery`:
+2. **Vetting.** Every `interval`, the leader scheduler vets the highest-priority accounts at `min_priority` (2) or above, up to `vet_in_flight` (50) at once, [while regular collection keeps up](#discovery-waits-for-regular-collection). A vet is a backfill-lane (p2) job of kind `discovery`:
    - it reads the profile and its newest 12 posts' captions, 2 or 3 requests;
    - it writes them to `ig.discovery_candidates`;
    - it publishes nothing, so accounts that are not registered never reach the analysis.
@@ -202,12 +226,28 @@ Operations:
 - **Metrics:**
   - `igs_discovery_sightings_total{source}`;
   - `igs_discovery_vets_total{outcome}`;
-  - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet.
+  - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet;
+  - `igs_discovery_held{reason}`, 1 while vets wait for regular collection (below).
 - **Tuning:**
   - Raise `threshold` if registered profiles turn out not to be Iraqi; lower it, or `min_priority`, to find more.
   - Vets share the exits with crawling (about 10 s of one exit's time each) and wait behind scheduled runs (lane p2). The daily budget holds them with backfill.
   - To slow discovery, lower `vet_in_flight`.
-  - **Daily cap:** `max_new_per_day` (0, no cap, by default) is the most profiles discovery registers a day. The day starts at 00:00 UTC, 03:00 Iraq time. Over it, candidates wait as `capped` (`igs_discovery_candidates{status="capped"}`) and are registered on the next days. Profiles registered by hand or with `accept` neither count towards it nor wait for it. Setting the cap back to 0 lets every capped candidate through on the next vetter tick.
+  - **Daily cap:** `max_new_per_day` (0, no cap, by default) is the most profiles discovery registers a day. The day starts at 00:00 UTC, 03:00 Iraq time. Over it, candidates wait as `capped` (`igs_discovery_candidates{status="capped"}`) and are registered on the next days. Profiles registered by hand or with `accept` neither count towards it nor wait for it. Setting the cap back to 0 lets every capped candidate through on the next vetter tick. Production runs without a cap (the owner, 6 November 2026); tests, staging and a canary may set one.
+
+### Discovery waits for regular collection
+
+Discovery ranks below regular collection (the owner, 6 November 2026). Each vetter tick, before starting vets, the leader checks two things:
+
+| Check | Setting (default) | Vets wait while |
+|---|---|---|
+| The schedule is on time | `ig.discovery.hold_when_behind` (true) | an enabled, unpaused profile is overdue by its own interval (3 h for the long tail, 10 min for hot), or a scheduled run is still queued or running its full interval after it started (its next slot gets skipped) |
+| No tier is mostly resting | `ig.discovery.hold_resting_share` (0.5) | more than half of a static proxy tier's exits rest (rate limit, checkpoint or login page), as the crawlers share them in Valkey (`ig.share_exit_rests`). Gateway tiers are left out: their exits are sessions, with no fixed number |
+
+- `igs_discovery_held{reason}` is 1 while vets wait: `schedule_behind`, `exits_resting`, or `rests_unknown` (Valkey did not answer; vets wait rather than guess). The scheduler logs each change.
+- Vets already running finish. Deciding, rescoring and registering go on: they read nothing from Instagram.
+- While discovery waits, `igs_discovery_candidates{status="new"}` grows. That is expected; once collection keeps up again, the vetter works through the queue, highest priority first.
+- If it waits for hours, collection itself is behind: see [Schedule](#schedule) (`IgsIgScheduleLag`) and [Block storm](#block-storm-block-rate--10).
+- `hold_when_behind: false` and `hold_resting_share: 0` turn the checks off.
 
 ### The place list
 
@@ -323,6 +363,16 @@ igsctl kafka apply
 
 `igsctl schemas apply` registers the `ig.*` subjects (`<topic>-value`, `BACKWARD_TRANSITIVE`); `schemas check` only checks them. Both leave out the `content.*` subjects unless `--include-content` (a registry of igs's own).
 
+## Valkey unavailable
+
+**Alert `IgsIgValkeyUnavailable`:** crawlers have been waiting for Valkey for 2 minutes.
+
+The fleet-wide rate limit (each exit's pace, `ig.exit_rps`, and the query limits) lives in Valkey, and it **fails closed**. While Valkey does not answer, no request goes to Instagram: each one waits, trying again with a growing gap (up to 5 seconds), until Valkey answers or the task's time runs out. A crawler never runs on its own pace alone, because several pods would then use one exit faster than its limit.
+
+1. Check Valkey itself: is it up, and is it reachable from the crawler pods? `igs_ratelimit_store_errors_total{kind}` counts the checks it did not answer.
+2. Nothing else is needed: crawling resumes by itself once Valkey answers. Tasks that ran out of time go to the retry topics as usual.
+3. Valkey loses nothing that matters: exit rests and parked identities rebuild within minutes ([backups](igs-backups.md)).
+
 ## Kafka lag
 
 - **On-demand lag (`IgsIgOnDemandLag`):** p0 tasks wait.
@@ -338,6 +388,13 @@ igsctl kafka apply
   - KEDA scales the persister on `ig.comment.v1`, `ig.post.v1` and `ig.post_metrics.v1` lag.
 - **Normalizer lag (`IgsIgNormalizerLag`):** `content.*` events reach ClickHouse, the analysis and the alerts late (the shared contract below).
   - KEDA scales igs-normalizer on the same topics' lag; check its pods and Kafka.
+- **A handler keeps panicking (`IgsIgHandlerPanics`, critical):** a record makes its consumer's code panic. The consumer turns the panic into an error, so the record is retried with backoff and its partition waits behind it: that partition's lag grows while the others move.
+  - The log line `kafka: handler panicked` names the group, topic, partition and offset, with the stack. `igs_kafka_handler_panics_total{group}` counts them.
+  - Fix the bug and roll out; the record goes through once it no longer panics. (The crawler's own tasks are different: a task that panics is dead-lettered at once, so `IgsIgHandlerPanics` comes from the persister, the normalizer, the media downloader or the eraser.)
+
+**Rebalances.** When Kafka moves a partition to another pod (a rollout, a scale-up), the pod that loses it cancels its records still running there and starts none of those still waiting, and never commits them, so the new owner runs them once (ported from fbs `cfc4295`, `ca4769e`, `907e08a`).
+
+**The leader lock.** The leader scheduler holds a Postgres advisory lock on one connection and checks it every few seconds, each check bounded to 3 s: a hung connection counts as lost, and the leader's work stops before another scheduler can take the lock. A connection whose unlock fails is closed, never returned to the pool still holding the lock (fbs `9b1863c`).
 
 The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka exporter is needed. The crawler groups are `igs-ig-crawler-<stage>-<lane>`, the persister's is `igs-ig-persister`, the normalizer's `igs-ig-normalizer` and the downloader's `igs-ig-media-downloader`. All of them carry `kafka.topic_prefix`.
 
@@ -415,6 +472,16 @@ A job ends `partial` when posts failed, or when a grid ended before the job's ag
 ## Schedule
 
 The planner runs each scheduled profile at its tier's interval, and its profile query every `ig.schedule.profile_refresh` (24 h). The post refresh re-reads the comments and counts of posts from the last `ig.schedule.post_refresh_window` (7 days), `post_refresh_per_run` posts at a time; each post's refreshes start at its profile's interval and double.
+
+**The reels tab** gives each reel's views (and its likes and comment count). A scheduled run reads it back `ig.schedule.reels_window` (7 days). Once a profile's last full pass is `ig.schedule.reels_full_every` (7 days) old, its next scheduled run reads the tab back to `limits.max_age_days` (a year) instead, so older reels' views are refreshed weekly. A profile's first read (its backfill) and any full run always read it all.
+- Each profile's last full pass is `last_full_at` in `crawl_cursors` (scope `profile_reels`); the last windowed pass is `last_incremental_at`. A job's `reels_full_passes` counter counts its full passes.
+- To read every profile's tab in full on its next run (for example after an outage longer than a week), clear the full-pass times in the igs database:
+
+  ```sql
+  UPDATE ig.crawl_cursors SET last_full_at = NULL WHERE scope_type = 'profile_reels';
+  ```
+
+- `reels_window: 0` reads the tab back to `max_age_days` on every run (the behaviour before 6 November 2026): about 20 more requests per visit for a profile with 1,000 reels a year.
 
 **Tiers** (`ig.schedule.tiers`, architecture §8):
 

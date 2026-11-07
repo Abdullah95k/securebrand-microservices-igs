@@ -50,7 +50,16 @@ type Deps struct {
 	Suppression *suppress.Suppression
 	// Discovery counts the accounts met in posts (M11); nil when off.
 	Discovery *discovery.Collector
+	// PageLoads counts page loads per exit and day fleet-wide, for
+	// ig.exit_page_loads_per_day; nil when the limit is off.
+	PageLoads PageLoadCounter
 	Now       func() time.Time
+}
+
+// PageLoadCounter counts a page load on an exit on now's UTC day and
+// returns the day's count (ratelimit.PageLoads).
+type PageLoadCounter interface {
+	Add(ctx context.Context, exit string, now time.Time) (int64, error)
 }
 
 func (d *Deps) now() time.Time {
@@ -186,6 +195,9 @@ func (d *Deps) load(ctx context.Context, id *session.Identity, url string, lane 
 	fresh := !id.Bootstrapped()
 	pl, err := d.Loader.Load(ctx, id, url)
 	d.observeLoad(pl, err, lane)
+	if pl != nil && pl.Status > 0 {
+		d.countPageLoad(ctx, id)
+	}
 	if pl != nil && pl.Class == detect.LoginWall && fresh && id.Endpoint.URL != "" && d.Cfg.IG.PageWallRest > 0 {
 		d.Pool.RestExit(id, d.Cfg.IG.PageWallRest, "page_wall")
 	}
@@ -196,6 +208,47 @@ func (d *Deps) load(ctx context.Context, id *session.Identity, url string, lane 
 		return pl, fmt.Errorf("%w: no tokens on %s", session.ErrBootstrap, url)
 	}
 	return pl, nil
+}
+
+// countPageLoad counts a page load that reached the platform on id's exit
+// (igs_exit_page_loads_total) and, with ig.exit_page_loads_per_day, in
+// the fleet's count for the day: a static exit that reaches the limit
+// rests until the UTC day ends, so its tasks move to other exits. Pods
+// share rests within ig.exit_rest_sync, so the fleet may run a few loads
+// over.
+func (d *Deps) countPageLoad(ctx context.Context, id *session.Identity) {
+	ep := id.Endpoint
+	metrics.ExitPageLoads.WithLabelValues(ep.Tier, exitLabel(ep)).Inc()
+	limit := d.Cfg.IG.ExitPageLoadsPerDay
+	x := ep.Exit()
+	if limit <= 0 || d.PageLoads == nil || x == "" || ep.SessionID != "" {
+		return
+	}
+	now := d.now()
+	n, err := d.PageLoads.Add(ctx, x, now)
+	if err != nil {
+		slog.Warn("page loads: count failed", "exit", x, "err", err)
+		return
+	}
+	if n >= int64(limit) {
+		end := now.UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
+		d.Pool.RestExit(id, end.Sub(now), "page_load_limit")
+	}
+}
+
+// exitLabel names ep in igs_exit_page_loads_total: a static exit by name,
+// a gateway's sessions by their bucket (one series per country, not per
+// session), direct egress as "direct".
+func exitLabel(ep proxy.Endpoint) string {
+	switch {
+	case ep.SessionID != "" && ep.Bucket != "":
+		return ep.Bucket
+	case ep.SessionID != "":
+		return ep.Tier
+	case ep.Exit() != "":
+		return ep.Exit()
+	}
+	return "direct"
 }
 
 // classOutcome maps a non-OK response class to an outcome for task t.
@@ -333,6 +386,42 @@ func (d *Deps) saveWatermark(ctx context.Context, userPK int64, newest, oldest t
 			last_full_at = COALESCE(EXCLUDED.last_full_at, crawl_cursors.last_full_at),
 			last_incremental_at = COALESCE(EXCLUDED.last_incremental_at, crawl_cursors.last_incremental_at),
 			updated_at = now()`, userPK, nw, ol, state, reason, full)
+	return err
+}
+
+// lastReelsFull is when the profile's reels tab was last read back to the
+// age window (crawl_cursors, scope profile_reels); zero if never, or without
+// a store.
+func (d *Deps) lastReelsFull(ctx context.Context, userPK int64) (time.Time, error) {
+	if d.DB == nil || userPK == 0 {
+		return time.Time{}, nil
+	}
+	var at *time.Time
+	err := d.DB.QueryRow(ctx, `SELECT last_full_at FROM crawl_cursors
+		WHERE scope_type = 'profile_reels' AND scope_id = $1 AND ordering = 'default'`, userPK).Scan(&at)
+	if errors.Is(err, pgx.ErrNoRows) || at == nil {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return *at, nil
+}
+
+// saveReelsPass records the end of a reels pass: a full one (back to the age
+// window) sets last_full_at, a windowed one last_incremental_at.
+func (d *Deps) saveReelsPass(ctx context.Context, userPK int64, full bool) error {
+	if d.DB == nil || userPK == 0 {
+		return nil
+	}
+	_, err := d.DB.Exec(ctx, `
+		INSERT INTO crawl_cursors (scope_type, scope_id, ordering, state, last_full_at, last_incremental_at, updated_at)
+		VALUES ('profile_reels', $1, 'default', 'complete', CASE WHEN $2 THEN now() END, CASE WHEN NOT $2 THEN now() END, now())
+		ON CONFLICT (scope_type, scope_id, ordering) DO UPDATE SET
+			state = 'complete',
+			last_full_at = COALESCE(EXCLUDED.last_full_at, crawl_cursors.last_full_at),
+			last_incremental_at = COALESCE(EXCLUDED.last_incremental_at, crawl_cursors.last_incremental_at),
+			updated_at = now()`, userPK, full)
 	return err
 }
 

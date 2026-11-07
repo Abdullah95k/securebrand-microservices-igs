@@ -17,6 +17,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/clients"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
+	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
@@ -29,7 +30,6 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/pg"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/run"
-	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/s3x"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 )
@@ -78,7 +78,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	lag := &scheduler.LagGauges{Admin: kadm.NewClient(producer.Client()), Prefix: cfg.Kafka.TopicPrefix}
 	eraser := &iggdpr.Eraser{DB: db, Producer: producer}
 	if cfg.S3.Endpoint != "" {
-		if eraser.S3, err = s3x.Open(ctx, cfg.S3.Endpoint, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.Region, cfg.S3.UseSSL, cfg.S3.MediaBucket); err != nil {
+		if eraser.S3, err = igapp.OpenS3(ctx, cfg, cfg.S3.MediaBucket); err != nil {
 			return err
 		}
 	}
@@ -101,6 +101,9 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	}
 	if cfg.IG.Discovery.Enabled {
 		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg}
+		if cfg.IG.ShareExitRests {
+			vetter.Rests = ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix)
+		}
 		loops = append(loops, func(ctx context.Context) error {
 			return scheduler.Every(ctx, "discovery", cfg.IG.Discovery.Interval, vetter.Tick)
 		}, func(ctx context.Context) error {

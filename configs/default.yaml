@@ -62,6 +62,15 @@ s3:
   region: "us-east-1"
   media_bucket: "igs-media"
   raw_bucket: "igs-raw"
+  backups_bucket: ""
+  # Key prefixes: raw failures (kept), the other raw responses, media files.
+  # The platform's shared buckets use igs/keep/, igs/30d/ and igs/.
+  raw_keep_prefix: "raw-failures/"
+  raw_prefix: "raw/"
+  media_prefix: "ig/"
+  # Create missing buckets and set the media expiry rule (media.ttl). Off
+  # for buckets the platform owns.
+  manage_buckets: true
 
 fb:
   # Base URL of the Facebook web surface. Tests and local dev point this at fakefb.
@@ -313,17 +322,16 @@ privacy:
   pii_mode: full        # full | pseudonymized
   author_hmac_key: "dev-only-change-me"
   download_author_avatars: false
-  # igs keeps collected data forever (the owner, 2026-11-03): comments,
-  # authors and post metrics are never dropped by age (0). Erasure requests
-  # still delete a person's data. The job log, raw failure captures and
-  # deleted media rows are operational and still expire.
+  # igs keeps everything forever (the owner, 2026-11-03 and 2026-11-06):
+  # comments, authors, post metrics, media rows and the job log are never
+  # dropped by age (0). Erasure requests still delete a person's data.
   retention:
     comments_days: 0
     authors_inactive_days: 0
     metrics_days: 0
     raw_payload_days: 0   # raw responses are kept with the data (architecture §2.5)
-    media_rows_days: 30
-    jobs_days: 90
+    media_rows_days: 0
+    jobs_days: 0
 
 # fbs-registry-sync: every interval it loads the canary pages, scans them and
 # their JS bundles for Relay doc_ids, records new ones as candidates, checks
@@ -374,6 +382,11 @@ ig:
   rate_limit_rest: 10m
   checkpoint_rest: 30m
   page_wall_rest: 30m
+  # Page loads (profile and post pages) per static exit and UTC day,
+  # fleet-wide; an exit that reaches it rests until the day ends (03:00
+  # Iraq time). 0: no limit. Off until the pilot measures what an IP
+  # tolerates (igs_exit_page_loads_total gives the counts).
+  exit_page_loads_per_day: 0
   # A task whose identity is blocked moves to a fresh identity on another
   # exit and carries on, this many times a run, before it waits for a retry.
   block_hops: 2
@@ -442,6 +455,11 @@ ig:
     jitter: 0.1
     post_refresh_window: 168h    # posts of the last 7 days: comments and counts refreshed
     post_refresh_per_run: 30
+    # The reels tab, for each reel's views (owner, 6 Nov 2026): a scheduled
+    # run reads it 7 days back; once a week per profile, back to
+    # limits.max_age_days. 0: the whole age window on every run.
+    reels_window: 168h
+    reels_full_every: 168h
     # No profile is read more often than this (the hot tier, a custom interval).
     min_interval: 5m
     # Tiers (architecture §8). Hot is pinned (API, igsctl profiles tier,
@@ -490,8 +508,17 @@ ig:
     min_followers: 0
     flush_every: 10s
     # Profiles registered per UTC day (03:00 Iraq time); 0 = no cap. Over
-    # it, candidates wait as "capped", registered on the next days.
+    # it, candidates wait as "capped", registered on the next days. No cap
+    # in production (owner, 6 Nov 2026); tests, staging and a canary may
+    # set one.
     max_new_per_day: 0
+    # Discovery ranks below regular collection (owner, 6 Nov 2026): no new
+    # vet while a scheduled profile is a full interval overdue or its run
+    # still going a full interval after it started, or while more than
+    # hold_resting_share of a static proxy tier's exits rest (0: never
+    # held for rests). Running vets carry on.
+    hold_when_behind: true
+    hold_resting_share: 0.5
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

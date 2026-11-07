@@ -143,14 +143,14 @@ Postgres stores a reel's metrics only when they change. **But `igs-content-write
 | `comments`, `comment_authors`, `comment_edits`, `comment_metrics` | Comments, their authors, replaced texts, likes and replies on change | Yes (not authors) | 10,000 to 200,000 comments |
 | `media`, `media_acks` | Media metadata and file lifecycle; acknowledgements | No | About 5,000 rows |
 | `highlights` | The highlights list | No | Small |
-| `jobs`, `crawl_cursors`, `post_refresh`, `profile_schedule`, `profile_registrations` | Working state | No | About 8,000 jobs (jobs kept 90 days) |
+| `jobs`, `crawl_cursors`, `post_refresh`, `profile_schedule`, `profile_registrations` | Working state | No | About 8,000 jobs a day (kept forever since REQ-008 fix 10) |
 | `queries`, `client_params`, `registry_sync_runs` | GraphQL registry | No | Small |
 | `discovery_candidates`, `discovery_vets`, `discovery_sources`, `discovery_keywords` | Discovery | No | Depends on discovery being on |
 | `api_clients`, `erasure_requests`, `suppression` | API keys, privacy | No | Small |
 
 Retention:
 - Content and history are **kept forever** (owner, 3 November): `privacy.retention.comments_days`, `metrics_days` and `authors_inactive_days` are 0.
-- What still expires: jobs after 90 days, deleted media rows after 30 days.
+- What still expired: jobs after 90 days, deleted media rows after 30 days. *Since REQ-008 fix 10 (6 November), nothing expires by age: `jobs_days` and `media_rows_days` are 0.*
 
 **Valkey.** Every key starts with `igs:`.
 
@@ -581,7 +581,7 @@ I made no changes for this review: no code, config or servers. I only read the c
 
 The repository doesn't record that droplet's address, so I can't tell whether it is the shared pilot server. If it is:
 - igs never left anything running there;
-- the probe's output folder `phase0/out-ig/` holds real data (CSV files and profile pictures). It's worth deleting once you no longer need it.
+- the probe's output folder `phase0/out-ig/` holds real data (CSV files and profile pictures). Keep it: the owner keeps all collected data (6 November 2026).
 
 CI runs igs only against the fake Instagram, on GitHub's machines.
 
@@ -601,7 +601,7 @@ pgrep -fc 'igs-'
 docker ps --format '{{.Names}}' | grep -c igs
 ```
 
-3. Size of any probe output left on disk. Good: nothing printed, or a size you expect.
+3. Size of the probe output kept on disk (it is real data: keep it). Good: a size you expect.
 
 ```bash
 find / -maxdepth 5 -type d -name out-ig 2>/dev/null -exec du -sh {} \;

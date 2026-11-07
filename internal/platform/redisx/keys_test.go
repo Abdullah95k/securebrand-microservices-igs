@@ -61,6 +61,14 @@ func TestEveryKeyIsPrefixed(t *testing.T) {
 	rep.Observe(detect.OK, "p1", 100)
 	must(rep.Flush(ctx))
 
+	parked := ratelimit.NewParkedIdentities(r, "")
+	must(parked.Put(ctx, "isp#1", []byte("{}"), time.Minute))
+	must(parked.Checkpoint(ctx, "crawler-a", []byte("[]"), time.Minute, time.Hour))
+	must(ratelimit.NewExitRests(r, "").Publish(ctx, "isp#1", time.Now().Add(time.Minute)))
+	if _, err := ratelimit.NewPageLoads(r, "").Add(ctx, "isp#1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
 	keys := mr.Keys()
 	if len(keys) < 8 {
 		t.Fatalf("only %d keys written: %v", len(keys), keys)

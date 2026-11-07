@@ -37,7 +37,8 @@ func NewMedia(cfg *config.Config, db *pgxpool.Pool, s3 *minio.Client, producer *
 		switch r {
 		case "downloader":
 			d := &media.Downloader{DB: db, S3: s3, Bucket: cfg.S3.MediaBucket, Producer: producer, HTTP: media.NewHTTPClient(),
-				TTL: cfg.Media.TTL, MaxBytes: cfg.Media.MaxBytes, Presign: cfg.Media.Presign, PresignTTL: cfg.Media.PresignTTL}
+				TTL: cfg.Media.TTL, MaxBytes: cfg.Media.MaxBytes, Presign: cfg.Media.Presign, PresignTTL: cfg.Media.PresignTTL,
+				Prefix: cfg.S3.MediaPrefix}
 			c, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "igs-ig-media-downloader",
 				Topics: []string{topics.TaskMedia}, MaxInflight: max(cfg.Media.Concurrency, 1), DrainTimeout: 60 * time.Second}, d.Handle)
 			if err != nil {
@@ -46,7 +47,8 @@ func NewMedia(cfg *config.Config, db *pgxpool.Pool, s3 *minio.Client, producer *
 			comps = append(comps, c.Run)
 		case "janitor":
 			j := &media.Janitor{DB: db, S3: s3, Bucket: cfg.S3.MediaBucket, Producer: producer,
-				RequiredConsumers: cfg.Media.RequiredConsumers, MaxRetryableFailures: cfg.Media.MaxRetryableFailures, TTL: cfg.Media.TTL}
+				RequiredConsumers: cfg.Media.RequiredConsumers, MaxRetryableFailures: cfg.Media.MaxRetryableFailures, TTL: cfg.Media.TTL,
+				Prefix: cfg.S3.MediaPrefix}
 			c, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "igs-ig-media-janitor",
 				Topics: []string{topics.MediaProcessed}, MaxInflight: 32, DrainTimeout: 20 * time.Second}, j.Handle)
 			if err != nil {
@@ -63,8 +65,10 @@ func NewMedia(cfg *config.Config, db *pgxpool.Pool, s3 *minio.Client, producer *
 			return nil, fmt.Errorf("unknown igs-media role %q (want %v)", r, MediaRoles)
 		}
 	}
-	if slices.Contains(roles, "downloader") {
-		media.Lifecycle(context.Background(), s3, cfg.S3.MediaBucket, cfg.Media.TTL)
+	// Only on a bucket igs owns: the rule replaces the bucket's whole
+	// lifecycle, which on the platform's shared bucket is not igs's to set.
+	if slices.Contains(roles, "downloader") && cfg.S3.ManageBuckets {
+		media.Lifecycle(context.Background(), s3, cfg.S3.MediaBucket, cfg.S3.MediaPrefix, cfg.Media.TTL)
 	}
 	return comps, nil
 }
