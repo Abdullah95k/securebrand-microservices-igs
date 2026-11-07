@@ -180,8 +180,11 @@ func remoteWS(ctx context.Context, addr string) (string, error) {
 	var v struct {
 		WS string `json:"webSocketDebuggerUrl"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil || v.WS == "" {
-		return "", fmt.Errorf("browser: remote %s gave no browser websocket (%v)", addr, err)
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return "", fmt.Errorf("browser: remote %s: reading /json/version: %w", addr, err)
+	}
+	if v.WS == "" {
+		return "", fmt.Errorf("browser: remote %s gave no browser websocket", addr)
 	}
 	return v.WS, nil
 }
