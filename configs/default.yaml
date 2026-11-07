@@ -63,9 +63,12 @@ s3:
   media_bucket: "igs-media"
   raw_bucket: "igs-raw"
   backups_bucket: ""
-  # Key prefixes: raw failures (kept), the other raw responses, media files.
-  # The platform's shared buckets use igs/keep/, igs/30d/ and igs/.
+  # Key prefixes: raw failures and the raw sample (both kept), the other
+  # raw responses (a bucket rule may expire them), media files. The
+  # platform's shared buckets use igs/keep/failures/, igs/keep/sample/,
+  # igs/30d/ and igs/. None may start another.
   raw_keep_prefix: "raw-failures/"
+  raw_sample_prefix: "raw-sample/"
   raw_prefix: "raw/"
   media_prefix: "ig/"
   # Create missing buckets and set the media expiry rule (media.ttl). Off
@@ -403,6 +406,10 @@ ig:
   # collecting again; each event carries its response's raw_ref.
   # failures keeps only the failed ones, none nothing.
   capture_raw: all         # all | failures | none
+  # Kept for good, besides the failures: this share of the OK responses,
+  # under s3.raw_sample_prefix instead of s3.raw_prefix (D-004: failures
+  # and 1% forever, the rest 30 days). With all or failures.
+  raw_sample: 0.01
   proxy:
     tiers: []
     routing:

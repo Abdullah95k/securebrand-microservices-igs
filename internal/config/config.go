@@ -171,13 +171,16 @@ type S3 struct {
 	RawBucket   string `koanf:"raw_bucket"`
 	// BackupsBucket receives the Postgres backups (the chart's backup job).
 	BackupsBucket string `koanf:"backups_bucket"`
-	// Key prefixes inside the buckets. Raw responses: RawKeepPrefix for
-	// failures, kept forever; RawPrefix for the rest, which a bucket rule
-	// may expire. Media files: MediaPrefix. With the platform's shared
-	// buckets: igs/keep/, igs/30d/ and igs/ (REQ-008 fix 11a).
-	RawPrefix     string `koanf:"raw_prefix"`
-	RawKeepPrefix string `koanf:"raw_keep_prefix"`
-	MediaPrefix   string `koanf:"media_prefix"`
+	// Key prefixes inside the buckets. Raw responses (D-004): failures
+	// under RawKeepPrefix and a sample of the rest (ig.raw_sample) under
+	// RawSamplePrefix, both kept forever; the rest under RawPrefix, which
+	// a bucket rule may expire. Media files: MediaPrefix. With the
+	// platform's shared buckets: igs/keep/failures/, igs/keep/sample/,
+	// igs/30d/ and igs/ (REQ-008 fixes 11a and 17).
+	RawPrefix       string `koanf:"raw_prefix"`
+	RawKeepPrefix   string `koanf:"raw_keep_prefix"`
+	RawSamplePrefix string `koanf:"raw_sample_prefix"`
+	MediaPrefix     string `koanf:"media_prefix"`
 	// ManageBuckets lets igs create its buckets when missing and set the
 	// media bucket's expiry rule. Off for buckets the platform owns: igs
 	// then only checks they exist, and never touches their lifecycle.
@@ -453,6 +456,22 @@ func MustLoadFromFlags(fs *flag.FlagSet, args []string) *Config {
 	return c
 }
 
+// distinctPrefixes reports whether every prefix is set and none starts
+// another.
+func distinctPrefixes(ps ...string) bool {
+	for i, a := range ps {
+		if a == "" {
+			return false
+		}
+		for j, b := range ps {
+			if i != j && strings.HasPrefix(b, a) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Validate rejects configs that would misbehave at runtime.
 func (c *Config) Validate() error {
 	var errs []error
@@ -476,9 +495,8 @@ func (c *Config) Validate() error {
 	if s := c.S3; s.MediaPrefix == "" || !strings.HasSuffix(s.MediaPrefix, "/") {
 		errs = append(errs, errors.New("s3.media_prefix must be set and end with /: igs deletes orphaned media under it"))
 	}
-	if s := c.S3; s.RawPrefix == "" || s.RawKeepPrefix == "" ||
-		strings.HasPrefix(s.RawPrefix, s.RawKeepPrefix) || strings.HasPrefix(s.RawKeepPrefix, s.RawPrefix) {
-		errs = append(errs, errors.New("s3.raw_prefix and s3.raw_keep_prefix must be set and neither may start the other: an expiry rule on raw_prefix must not reach the kept failures"))
+	if s := c.S3; !distinctPrefixes(s.RawPrefix, s.RawKeepPrefix, s.RawSamplePrefix) {
+		errs = append(errs, errors.New("s3.raw_prefix, s3.raw_keep_prefix and s3.raw_sample_prefix must be set and none may start another: an expiry rule on raw_prefix must not reach the kept failures and sample, and each kind keeps a prefix of its own"))
 	}
 	if c.Media.TTL < 0 {
 		errs = append(errs, errors.New("media.ttl must not be negative (0: keep until analysed)"))

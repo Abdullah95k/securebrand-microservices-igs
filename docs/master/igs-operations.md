@@ -173,7 +173,7 @@ Retention:
 
 | Bucket and prefix | Holds | Size today | Growth (estimate, per 1,000 accounts) | Lifecycle rules |
 |---|---|---|---|---|
-| `igs-raw`, `raw/` and `raw-failures/` | Every raw response, as zstd JSON lines | 0 | 2 to 4 GB a day | None: kept forever |
+| `igs-raw`, `raw/`, `raw-failures/` and `raw-sample/` (on the platform's bucket `igs/30d/`, `igs/keep/failures/`, `igs/keep/sample/`) | Every raw response, as zstd JSON lines: failures and a 1% sample kept for good, the rest under `raw/` (D-004) | 0 | 2 to 4 GB a day, almost all under `raw/` | `raw/` (`igs/30d/`): the platform's 30-day rule. The others: none, kept forever |
 | `igs-media`, `ig/` | Media files until analysed | 0 (`include_media` off) | Unknown until media is turned on | Expiry rule only if `media.ttl` is set (0 means none) |
 
 **Which state must be backed up, and which can be rebuilt.**

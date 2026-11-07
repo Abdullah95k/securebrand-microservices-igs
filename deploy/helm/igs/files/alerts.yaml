@@ -149,6 +149,21 @@ groups:
             Crawling resumes by itself once Valkey answers. Check Valkey and
             the crawlers' connection to it (igs_ratelimit_store_errors_total).
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#valkey-unavailable
+      - alert: IgsIgRawResponsesNotKept
+        # Raw responses (REQ-008 fix 17): an upload that fails is tried
+        # again; responses are refused only once the backlog is full, and
+        # lost only when a pod stops before it could write them.
+        expr: sum(increase(igs_raw_not_kept_total[15m])) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "Raw responses not kept: {{ $value | humanize }} in 15 minutes"
+          description: >-
+            Uploads to the raw bucket keep failing (igs_raw_upload_failures_total,
+            igs_raw_backlog_bytes). Responses past the backlog limit get no
+            raw_ref; lines a stopping pod could not write leave raw_refs
+            without their object, each object logged by the crawler.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#raw-responses-not-kept
       - alert: IgsIgTasksParked
         expr: sum(rate(igs_tasks_total{outcome="parked"}[10m])) > 0
         for: 15m
@@ -255,7 +270,7 @@ groups:
           summary: "{{ $labels.query }}: {{ $value | humanizePercentage }} of responses miss required fields"
           description: >-
             Instagram changed the response shape. Raw failing responses are in
-            the raw bucket under raw-failures/<query>/.
+            the raw bucket under s3.raw_keep_prefix, by query.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#schema-drift
       - alert: IgsIgOptionalFieldDrift
         # Instagram renamed or dropped a field the parser treats as

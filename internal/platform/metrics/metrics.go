@@ -25,6 +25,12 @@ func counterVec(name, help string, labels ...string) *prometheus.CounterVec {
 	return c
 }
 
+func counter(name, help string) prometheus.Counter {
+	c := prometheus.NewCounter(prometheus.CounterOpts{Namespace: "igs", Name: name, Help: help})
+	Registry.MustRegister(c)
+	return c
+}
+
 func histVec(name, help string, buckets []float64, labels ...string) *prometheus.HistogramVec {
 	h := prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "igs", Name: name, Help: help, Buckets: buckets}, labels)
 	Registry.MustRegister(h)
@@ -115,8 +121,16 @@ var (
 	// ExitShareRequests and ExitShareWait: requests of a class capped at a
 	// share of each exit's rate (ig.discovery.exit_share), and the time
 	// they waited for it.
-	ExitShareRequests    = counterVec("exit_share_requests_total", "Requests of a class capped at a share of each proxy exit's rate (discovery: ig.discovery.exit_share), by class.", "class")
-	ExitShareWait        = counterVec("exit_share_wait_seconds_total", "Seconds requests of a capped class waited for their share of the exit's rate, by class.", "class")
+	ExitShareRequests = counterVec("exit_share_requests_total", "Requests of a class capped at a share of each proxy exit's rate (discovery: ig.discovery.exit_share), by class.", "class")
+	ExitShareWait     = counterVec("exit_share_wait_seconds_total", "Seconds requests of a capped class waited for their share of the exit's rate, by class.", "class")
+	// Raw responses (internal/crawl/rawsink): lines kept, by kind (raw,
+	// failure, sample); responses not kept for want of room (backlog) and
+	// lines whose object was never written (lost); failed uploads, tried
+	// again on the next flush; bytes waiting for upload.
+	RawKept              = counterVec("raw_kept_total", "Raw responses kept, by kind (raw: expires with its prefix; failure and sample: kept for good).", "kind")
+	RawNotKept           = counterVec("raw_not_kept_total", "Raw responses not kept: backlog (uploads failing, no reference handed out) or lost (a stopping pod could not write an object; its references dangle).", "reason")
+	RawUploadFailures    = counter("raw_upload_failures_total", "Raw object uploads that failed; each is tried again on the next flush.")
+	RawBacklog           = gauge("raw_backlog_bytes", "Raw response bytes in this pod waiting for upload.")
 	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")
 	AIMDCeiling          = gauge("aimd_ceiling_rps", "Fleet-wide platform request ceiling set by AIMD.")
