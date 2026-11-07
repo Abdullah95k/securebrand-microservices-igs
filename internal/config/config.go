@@ -37,34 +37,9 @@ type Config struct {
 	RegistrySync RegistrySync `koanf:"registry_sync"`
 	// IG configures igs, the Instagram scraper.
 	IG IG `koanf:"ig"`
-	// ClickHouse is igs's earlier content store (igsctl clickhouse
-	// migrate). The platform's ClickHouse now reads the content.* topics
-	// (securebrand-contracts v1.2.0); igs writes no rows to it.
-	ClickHouse ClickHouse `koanf:"clickhouse"`
 	// Platform is what the platform's credentials Secret says besides the
 	// stores (PlatformEnv).
 	Platform Platform `koanf:"platform"`
-}
-
-// ClickHouse locates the shared content store and shapes its schema.
-type ClickHouse struct {
-	// Addr lists native-protocol addresses (host:9000); empty: no writer.
-	Addr     []string `koanf:"addr"`
-	Database string   `koanf:"database"`
-	Username string   `koanf:"username"`
-	Password string   `koanf:"password"`
-	Secure   bool     `koanf:"secure"`
-	// Cluster, when set, creates every table ON CLUSTER with Replicated
-	// engines (at least two replicas, three Keeper nodes: architecture §4).
-	Cluster string `koanf:"cluster"`
-	// StoragePolicy and ColdAfter tier old partitions to object storage:
-	// with both set, partitions move to the policy's 'cold' volume once
-	// their time is ColdAfter old.
-	StoragePolicy string        `koanf:"storage_policy"`
-	ColdAfter     time.Duration `koanf:"cold_after"`
-	// The writer inserts BatchSize rows, or what came within Linger.
-	BatchSize int           `koanf:"batch_size"`
-	Linger    time.Duration `koanf:"linger"`
 }
 
 // RegistrySync configures the service that discovers rotated doc_ids on

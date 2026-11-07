@@ -24,7 +24,7 @@ The same image holds every binary. Ops port `:9090` on each (`/metrics`, `/healt
 | `igs-media --roles downloader` (media-downloader) | Downloads media files, but only for jobs that ask (`include_media`, **off**). Announces `ig.media.ready.v1`. | Long-running | 2, KEDA 2 to 12 | Yes | None (S3) |
 | `igs-media --roles janitor` (media-janitor) | Deletes files once analysis acknowledges them (`ig.media.processed.v1`), or after an optional TTL (`media.ttl: 0` means none). | Long-running | 1 | No need | None |
 | `igs-registry-sync` (registry-sync) | Keeps Instagram's GraphQL query IDs current. It reads canary profiles' pages and scripts, then tests and promotes new IDs. | Long-running | 1 (Valkey lock) | No | Registry rows in Postgres |
-| `igsctl` (Helm hook Jobs) | `migrate up/down/status`, `kafka apply`, `schemas apply/check`, `clickhouse migrate`, `apikey`, `registry`, `dlq replay`, `profiles`, `keywords`. | Jobs and CLI | Per install or upgrade | - | - |
+| `igsctl` (Helm hook Jobs) | `migrate up/down/status`, `kafka apply`, `schemas apply/check`, `apikey`, `registry`, `dlq replay`, `profiles`, `keywords`. | Jobs and CLI | Per install or upgrade | - | - |
 | `igs-spike` | Phase 0 kit: the probe, `phase0` runs, the tagged-tab test. **Not deployed.** The owner runs it by hand. | One-off | - | - | Local output files |
 | `fakeig`, `devs3` | Fake Instagram and local S3, for tests and staging. | Test only | - | - | - |
 
@@ -54,7 +54,6 @@ The same image holds every binary. Ops port `:9090` on each (`/metrics`, `/healt
    1. `igsctl migrate up` (goose, schema `ig`, migrations `00001` to `00008`, partitions created ahead);
    2. `igsctl kafka apply` (`configs/ig/topics.yaml`);
    3. `igsctl schemas apply` (`hooks.schemas`, off by default but **on in `examples/production.yaml`**; see section 4);
-   4. `igsctl clickhouse migrate`, only with `hooks.clickhouse: true` (off: the platform's ClickHouse reads `content.*` itself).
 
    `paused: true` stops every hook and scales the components down, which is used for restores.
 4. **Where it runs today.**
@@ -75,7 +74,7 @@ The same image holds every binary. Ops port `:9090` on each (`/metrics`, `/healt
 | Kafka or Redpanda, with Schema Registry | Redpanda in CI; any Kafka 3.x | Work topics `igs.*` (tasks, retries, dead letters), platform topics `ig.*`, draft `content.*` | Can share a cluster: topic names never collide with fbs's (a test checks this); `kafka.topic_prefix` is available. Plain protobuf on the wire; the registry is used for compatibility checks only | 0. **Note:** `configs/ig/topics.yaml` creates **27 topics, 915 partitions, replication 3** (2,745 partition replicas). That is sized for 300,000 accounts and too many for a small managed cluster. Set lower for the pilot and the first months |
 | Valkey or Redis | Valkey 8 in CI | Exit pacing and rests, kept identities, checkpoints, leases, done markers, rate limits, budget | Can share: every key starts with `igs:` | Small. Done markers at 300,000 accounts: about 58 million keys, about 5 GB (sized in `igs-operations.md`) |
 | Object storage (S3) | Any S3 API (minio client) | `igs-raw` (every raw response, kept forever); `igs-media` (media until analysed) | Separate buckets per service recommended | 0. **Estimate:** raw about 2 to 4 GB a day per 1,000 accounts, kept forever |
-| ClickHouse | 25.8 in CI | igs writes none. The platform's writer reads `content.*` into its own ClickHouse. igs's earlier tables (`migrations/clickhouse`) are created only by `igsctl clickhouse migrate` | The platform's | 0 |
+| ClickHouse | - | None. igs neither reads nor writes it: the platform's writer reads `content.*` into the platform's ClickHouse | The platform's | 0 |
 | Browser (Chromium) | In the `-browser` image | Fallback for page loads only | No | **Off** (`ig.browser.enabled: false`) |
 | GPU or AI APIs | None | - | - | - |
 | Other | None | KEDA and Prometheus Operator are optional | - | - |
@@ -181,7 +180,7 @@ Retention:
 - The author HMAC key: **must be kept in two places.**
 - Valkey: rebuilds itself in minutes; losing it costs fresh page loads.
 - Kafka: a pipe; its 7-day retention bridges a restore.
-- ClickHouse: can be rebuilt from Kafka for 7 days, but should still be backed up.
+- ClickHouse: the platform's. igs can publish again what the `ig.*` topics still hold (7 days).
 
 The runbook is `docs/runbooks/igs-backups.md`, and the restore drill is tested in CI (`internal/ig/e2e/backup_test.go`).
 
@@ -202,7 +201,7 @@ The runbook is `docs/runbooks/igs-backups.md`, and the restore drill is tested i
 | `*.cdninstagram.com`, `*.fbcdn.net` (for example `scontent.cdninstagram.com`) | Media and profile pictures, only when media download is on |
 | `l.instagram.com` | Appears only inside bio-link data; **igs never calls it** |
 
-Inside the cluster, igs also calls Postgres, Kafka, the Schema Registry, Valkey, S3 and ClickHouse.
+Inside the cluster, igs also calls Postgres, Kafka, the Schema Registry, Valkey and S3.
 
 **Network policy** (REQ-008 fix 21; `networkPolicy` in the chart, fbs's key names). With `networkPolicy.egress.enabled`, igs's pods reach only:
 
@@ -266,7 +265,6 @@ Important settings and their defaults (`ig:` section):
 - `IGS_KAFKA__SCHEMA_REGISTRY__USERNAME` and `IGS_KAFKA__SCHEMA_REGISTRY__PASSWORD`;
 - `IGS_S3__ACCESS_KEY` and `IGS_S3__SECRET_KEY`;
 - `IGS_IG__PRIVACY__AUTHOR_HMAC_KEY`;
-- `IGS_CLICKHOUSE__PASSWORD`;
 - `proxies.yaml`, a file holding `ig.proxy.tiers`;
 - the KEDA Kafka authentication secret;
 - TLS certificate files, if used.
@@ -397,7 +395,7 @@ Are any logged?
 
 ## 9. Observability
 
-**Health.** `/healthz` reports the process is alive. `/readyz` checks each binary's own dependencies: Postgres, Kafka, Valkey, S3 or ClickHouse, as that binary uses them.
+**Health.** `/healthz` reports the process is alive. `/readyz` checks each binary's own dependencies: Postgres, Kafka, Valkey or S3, as that binary uses them.
 
 **Metrics.**
 - Prefix `igs_`, 58 metric variables.

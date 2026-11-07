@@ -10,7 +10,7 @@ import (
 )
 
 // opens matches the calls that open a store and can wait on it.
-var opens = regexp.MustCompile(`pg\.Open(Schema)?\(|clients\.(Redis|Kafka)\(|igapp\.OpenS3\(|clickhouse\.Open\(`)
+var opens = regexp.MustCompile(`pg\.Open(Schema)?\(|clients\.(Redis|Kafka)\(|igapp\.OpenS3\(`)
 
 // Every igs binary that serves starts its ops server before it opens a
 // store, so a liveness probe never finds nothing listening while a busy

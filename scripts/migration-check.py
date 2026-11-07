@@ -11,7 +11,7 @@ against the base revision:
 - a new migration comes after every existing one in its directory;
 - a new migration's Up section only adds: no DROP TABLE or COLUMN, no
   RENAME, no change of a column's type, no SET NOT NULL, no NOT NULL column
-  without a DEFAULT, no TRUNCATE (ClickHouse: no MODIFY COLUMN either).
+  without a DEFAULT, no TRUNCATE, no MODIFY COLUMN.
 
 A migration that has to break this says so in a comment, with the reason and
 the release plan: `-- igs:breaking: <reason>`. It is then reported, not
@@ -26,7 +26,7 @@ import re
 import subprocess
 import sys
 
-DIRS = ("migrations/ig", "migrations/clickhouse")
+DIRS = ("migrations/ig",)
 MARKER = re.compile(r"--\s*igs:breaking:\s*(\S.*)", re.I)
 RULES = [
     (re.compile(r"\bDROP\s+(TABLE|COLUMN|VIEW|SCHEMA|MATERIALIZED\s+VIEW)\b", re.I), "drops a table, view or column"),

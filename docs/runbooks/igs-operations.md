@@ -449,7 +449,7 @@ The migrate hook upgrades the schema before the new pods start. The old pods kee
 `scripts/migration-check.py`, run by CI on every change, refuses:
 - an edit, rename or removal of a migration already on main (it has run in production; add a new one instead);
 - a new migration numbered before an existing one;
-- in a new migration's Up section: DROP TABLE or COLUMN, RENAME, a column type change, SET NOT NULL, a NOT NULL column without a DEFAULT, TRUNCATE (ClickHouse: MODIFY COLUMN).
+- in a new migration's Up section: DROP TABLE or COLUMN, RENAME, a column type change, SET NOT NULL, a NOT NULL column without a DEFAULT, TRUNCATE, MODIFY COLUMN.
 
 To remove or rename something, use two releases:
 1. Stop using it in the code, and release.

@@ -196,10 +196,6 @@ hooks:
   # own).
   schemas: false
   schemasIncludeContent: false
-  # `igsctl clickhouse migrate`: igs's own ClickHouse tables, from before
-  # the shared contract (REQ-019). The platform's writer fills the shared
-  # store now and igs-content-writer is gone; off unless asked for.
-  clickhouse: false
   # Every hook job's container (a namespace with a ResourceQuota refuses
   # pods without them).
   resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi}}
