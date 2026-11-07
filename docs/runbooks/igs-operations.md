@@ -175,7 +175,8 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
    | Signal | Points |
    |---|---|
    | Iraq named, in any script, or 🇮🇶 | 3 |
-   | An Iraqi phone number (+964, 07xx) | 3 |
+   | An Iraqi phone number: +964 or 00964, or 07xx xxx xxxx (the Iraqi grouping) | 3 |
+   | Any other 07 mobile number, unspaced or grouped otherwise (07700900123 is also a UK mobile's shape) | 1 |
    | An `.iq` link | 2 |
    | A place in an Iraqi governorate in the name or bio ([the place list](#the-place-list)) | 2; 3 for two or more governorates; 1 if only in captions |
    | Kurdistan named | 1.5 |
@@ -190,7 +191,7 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
    - **Network cap:** the last three rows (network evidence) add up to at most 4. That is enough alone only with ten or more registered accounts linking to the account from posts located in Iraq. So an Iraqi influencer whose profile says nothing of Iraq is added once a real Iraqi audience surrounds them. The same goes for a foreign account that targets Iraqis.
    - **World stars:** an account with a million followers or more and nothing of Iraq of its own gets at most 2 from the network. A world star Iraqi fans tag is not added.
    - **Examples** (`TestInfluencers`):
-     - an Iraqi influencer with Baghdad, 🇮🇶 or an 07xx number in the bio is added at the first link;
+     - an Iraqi influencer with Baghdad, 🇮🇶 or an Iraqi-grouped 07xx number in the bio is added at the first link;
      - one writing Iraqi dialect is added at the first link too;
      - a Kurdish one writing Sorani, one with an Arabic bio and no place, one writing only in English, and an Arabic-language foreigner are added once ten Iraqi accounts link to them from Iraq;
      - a Gulf account naming Dubai and a global English star are not added.
