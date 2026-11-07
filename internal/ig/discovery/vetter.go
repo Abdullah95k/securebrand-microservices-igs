@@ -51,8 +51,33 @@ type Vetter struct {
 	// Rests, when set, are the exit rests the crawlers share: vets wait
 	// while most exits of a tier rest (ig.discovery.hold_resting_share).
 	Rests RestLoader
+	// KeywordContext, when set, counts for each candidate the different
+	// places of the shared list it was met near in others' recent posts
+	// and comments (Instagram keyword discovery, igdisc): the score's
+	// keyword_context signal. Unset, the signal is never given. An error
+	// fails the tick (it reads the vetter's own database): no candidate is
+	// decided without its keyword evidence, and the next tick tries again.
+	KeywordContext func(ctx context.Context, usernames []string) (map[string]int, error)
+	// KeywordsGrown, when set, names candidates below the threshold whose
+	// keyword_context would now be higher than in their stored score
+	// (evidence that arrived after their decision): rescore scores them
+	// again from their stored read, as for a grown audience.
+	KeywordsGrown func(ctx context.Context) ([]string, error)
 	// held is the last hold reason, for logging its changes.
 	held string
+}
+
+// keywords returns KeywordContext's counts for usernames, or none when it
+// is unset.
+func (v *Vetter) keywords(ctx context.Context, usernames []string) (map[string]int, error) {
+	if v.KeywordContext == nil || len(usernames) == 0 {
+		return nil, nil
+	}
+	m, err := v.KeywordContext(ctx, usernames)
+	if err != nil {
+		return nil, fmt.Errorf("keyword context: %w", err)
+	}
+	return m, nil
 }
 
 // Tick runs one round.
@@ -89,11 +114,21 @@ func (v *Vetter) Tick(ctx context.Context) error {
 
 // rescore scores again, from their stored read, the candidates below the
 // threshold whose Iraqi audience grew since their decision (more registered
-// accounts link to them): no new read of Instagram is needed. Those now at
-// the threshold are registered.
+// accounts link to them), or whose keyword evidence did (KeywordsGrown): no
+// new read of Instagram is needed. Those now at the threshold are
+// registered.
 func (v *Vetter) rescore(ctx context.Context) error {
+	grown := []string{}
+	if v.KeywordsGrown != nil {
+		g, err := v.KeywordsGrown(ctx)
+		if err != nil {
+			return fmt.Errorf("keywords grown: %w", err)
+		}
+		grown = append(grown, g...)
+	}
 	rows, err := v.DB.Query(ctx, `SELECT username, coalesce(user_pk, 0), vet, tags, coauthors, mentions, comments, iraq_context, sources
-		FROM discovery_candidates WHERE status = 'below' AND vet IS NOT NULL AND sources > sources_at_decision LIMIT 1000`)
+		FROM discovery_candidates WHERE status = 'below' AND vet IS NOT NULL
+			AND (sources > sources_at_decision OR username = ANY($1::text[])) LIMIT 1000`, grown)
 	if err != nil {
 		return err
 	}
@@ -110,8 +145,17 @@ func (v *Vetter) rescore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	names := make([]string, 0, len(list))
+	for _, x := range list {
+		names = append(names, x.username)
+	}
+	kw, err := v.keywords(ctx, names)
+	if err != nil {
+		return err
+	}
 	d := v.Cfg.IG.Discovery
 	for _, x := range list {
+		x.s.Keywords = kw[x.username]
 		var vet Vet
 		if err := json.Unmarshal(x.vet, &vet); err != nil {
 			continue
@@ -181,8 +225,19 @@ func (v *Vetter) decide(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	names := make([]string, 0, len(list))
+	for _, x := range list {
+		if x.vet != nil {
+			names = append(names, x.username)
+		}
+	}
+	kw, err := v.keywords(ctx, names)
+	if err != nil {
+		return err
+	}
 	d := v.Cfg.IG.Discovery
 	for _, x := range list {
+		x.s.Keywords = kw[x.username]
 		if x.vet == nil {
 			status := StatusNew
 			if x.attempts >= maxVetAttempts {

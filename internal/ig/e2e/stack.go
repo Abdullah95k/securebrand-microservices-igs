@@ -41,6 +41,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igdisc"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
@@ -124,6 +125,10 @@ func Start(t *testing.T, o Options) *Stack {
 	db := testenv.PostgresIG(t)
 	rdb := testenv.Redis(t)
 	ctx := context.Background()
+	// igdisc's tables (ig.igdisc_*), as igsctl migrate up applies them.
+	if err := igdisc.MigrateUp(ctx, db); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := config.Load("")
 	if err != nil {
@@ -280,6 +285,10 @@ func (s *Stack) StartScheduler() {
 	}
 	if s.Cfg.IG.Discovery.Enabled {
 		vetter := &discovery.Vetter{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
+		if s.Cfg.IG.IGDisc.Enabled {
+			vetter.KeywordContext = igdisc.KeywordContextFunc(s.DB)
+			vetter.KeywordsGrown = igdisc.KeywordsGrownFunc(s.DB, discovery.KeywordWeight, discovery.KeywordCap)
+		}
 		if s.Cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(s.Redis, s.Cfg.Kafka.TopicPrefix)
 		}

@@ -74,6 +74,11 @@ type Sightings struct {
 	// Sources is how many different registered accounts it was met in:
 	// its Iraqi audience.
 	Sources int `json:"sources"`
+	// Keywords is how many different places of the shared list (Iraq, the
+	// Kurdistan Region, a governorate) it was met near in others' recent
+	// posts and comments: Instagram keyword discovery's evidence (igdisc,
+	// Track 1; Vetter.KeywordContext).
+	Keywords int `json:"keywords,omitempty"`
 }
 
 // Priority weighs sightings for the vetting queue (ig.discovery.min_priority).
@@ -91,6 +96,10 @@ const (
 	// threshold (4) only with ten or more registered accounts linking to the
 	// account and sightings on posts located in Iraq.
 	NetworkCap = 4.0
+	// KeywordWeight a place, up to KeywordCap: the keyword_context signal.
+	// A keyword match alone never reaches the threshold.
+	KeywordWeight = 0.5
+	KeywordCap    = 1.0
 )
 
 // Signals are a score's parts, stored with it so an operator can see why a
@@ -122,7 +131,9 @@ func (s Signals) Sum() float64 {
 //     co-author with or comment as it: one 1, two 1.5, three 2, five 2.5,
 //     ten or more 3;
 //   - seen_in_iraq, sightings on posts located in Iraq: 1.5;
-//   - coauthor, a collab post with a registered account: 0.5.
+//   - coauthor, a collab post with a registered account: 0.5;
+//   - keyword_context, met near the shared list's places in others' recent
+//     posts and comments (igdisc): 0.5 a place, at most 1.
 //
 // So an Iraqi account that says nothing of Iraq itself (an English-only
 // influencer) is added once ten registered accounts link to it from posts
@@ -201,6 +212,9 @@ func Score(v Vet, s Sightings) Signals {
 	}
 	if s.Coauthors > 0 {
 		add("coauthor", 0.5)
+	}
+	if s.Keywords > 0 {
+		add("keyword_context", math.Min(KeywordWeight*float64(s.Keywords), KeywordCap))
 	}
 	limit := NetworkCap
 	if v.Followers >= GlobalFollowers && !ownSignal {

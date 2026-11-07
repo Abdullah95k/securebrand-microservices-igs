@@ -91,6 +91,26 @@ type IG struct {
 	Privacy IGPrivacy `koanf:"privacy"`
 	// Discovery finds profiles to register (M11).
 	Discovery IGDiscovery `koanf:"discovery"`
+	// IGDisc is Instagram keyword discovery (docs/master/igdisc-plan.md).
+	IGDisc IGDisc `koanf:"igdisc"`
+}
+
+// IGDisc is Instagram keyword discovery, Track 1: accounts met in a post or
+// comment made within Window that names a keyword of the shared list are
+// noted as evidence (ig.igdisc_evidence) and vetted sooner; the evidence
+// adds discovery's keyword_context signal. It reads nothing from
+// Instagram and feeds profile discovery, so it needs ig.discovery.enabled.
+// Commenters count only with privacy.pii_mode full and discovery's
+// commenters source.
+type IGDisc struct {
+	Enabled bool `koanf:"enabled"`
+	// Window: only posts and comments made this recently count (R8: 6h).
+	Window time.Duration `koanf:"window"`
+	// FlushEvery is how often crawlers write the evidence they found.
+	FlushEvery time.Duration `koanf:"flush_every"`
+	// Priority each new piece of evidence adds to the candidate's vet
+	// priority.
+	Priority float64 `koanf:"priority"`
 }
 
 // IGLimits are the defaults applied to jobs that do not override them.
@@ -249,6 +269,14 @@ func (c *Config) validateIG() []error {
 		}
 		if d.HoldRestingShare < 0 || d.HoldRestingShare > 1 {
 			errs = append(errs, errors.New("ig.discovery.hold_resting_share must be in [0, 1]"))
+		}
+	}
+	if k := g.IGDisc; k.Enabled {
+		if !g.Discovery.Enabled {
+			errs = append(errs, errors.New("ig.igdisc needs ig.discovery.enabled: it feeds profile discovery's candidates"))
+		}
+		if k.Window <= 0 || k.FlushEvery <= 0 || k.Priority < 0 {
+			errs = append(errs, errors.New("ig.igdisc: window and flush_every must be > 0; priority not negative"))
 		}
 	}
 	if g.ExitPageLoadsPerDay < 0 {

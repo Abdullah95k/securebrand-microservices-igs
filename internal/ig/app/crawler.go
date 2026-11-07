@@ -27,6 +27,7 @@ import (
 	igdetect "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/detect"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igdisc"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/stage"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
@@ -195,6 +196,20 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		c.Components = append(c.Components, deps.Discovery.Run, func(ctx context.Context) error {
 			return keywords.Watch(ctx, db, discovery.KeywordsRefresh, discovery.UseKeywords)
 		})
+		if k := g.IGDisc; k.Enabled {
+			// Instagram keyword discovery, Track 1: the recorder sees what
+			// the collector sees and notes keyword evidence.
+			rec, err := igdisc.NewRecorder(db, igdisc.Config{Window: k.Window, FlushEvery: k.FlushEvery, Priority: k.Priority,
+				Commenters: g.Privacy.PIIMode == "full" && slices.Contains(g.Discovery.Sources, "commenters")})
+			if err != nil {
+				return nil, fmt.Errorf("igdisc: %w", err)
+			}
+			rec.Suppressed = supp.PageSuppressed
+			deps.Discovery.Also = rec
+			c.Components = append(c.Components, rec.Run, func(ctx context.Context) error {
+				return igdisc.WatchIndex(ctx, db, discovery.KeywordsRefresh, rec.UseIndex)
+			})
+		}
 	}
 	if g.AIMD.Enabled || g.BudgetOn() {
 		// Outcomes feed AIMD's block rate and the budget's daily use.

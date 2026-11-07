@@ -519,6 +519,18 @@ ig:
     # held for rests). Running vets carry on.
     hold_when_behind: true
     hold_resting_share: 0.5
+  # Instagram keyword discovery, Track 1 (docs/master/igdisc-plan.md,
+  # docs/igdisc/): accounts met in a post or comment made in the last
+  # `window` that names a keyword of the shared list (ig.discovery_keywords)
+  # are noted as evidence (ig.igdisc_evidence) and vetted sooner; the
+  # evidence adds discovery's keyword_context signal (0.5 a place, at most
+  # 1: never enough alone). Reads nothing from Instagram. Needs
+  # ig.discovery.enabled; commenters count only with pii_mode full.
+  igdisc:
+    enabled: false
+    window: 6h
+    flush_every: 10s
+    priority: 2
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

@@ -21,6 +21,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igdisc"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
@@ -101,6 +102,10 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	}
 	if cfg.IG.Discovery.Enabled {
 		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg}
+		if cfg.IG.IGDisc.Enabled {
+			vetter.KeywordContext = igdisc.KeywordContextFunc(db)
+			vetter.KeywordsGrown = igdisc.KeywordsGrownFunc(db, discovery.KeywordWeight, discovery.KeywordCap)
+		}
 		if cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix)
 		}
