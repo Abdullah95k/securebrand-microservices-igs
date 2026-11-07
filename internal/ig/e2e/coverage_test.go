@@ -56,6 +56,13 @@ func TestPostCoverage(t *testing.T) {
 			if c.status != "unavailable" || c.reason == nil || *c.reason != "login_wall" || c.state != "none" {
 				t.Errorf("walled post %d: %s %v %s, want unavailable (login_wall), none", pt.PK, c.status, show(c.reason), c.state)
 			}
+			// No empty metrics sample: only a reel's, from the reels tab.
+			var samples, empty int
+			if err := s.DB.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE like_count IS NULL AND comment_count IS NULL
+				AND play_count IS NULL) FROM post_metrics WHERE media_pk = $1`, pt.PK).Scan(&samples, &empty); err != nil ||
+				empty > 0 || (samples > 0) != pt.Video {
+				t.Errorf("walled post %d: %d metrics samples, %d empty (%v)", pt.PK, samples, empty, err)
+			}
 		case c.state != "complete" || c.collected == nil || *c.collected != int64(len(pt.Comments)):
 			t.Errorf("post %d: %s, %v collected, want complete with %d", pt.PK, c.state, show(c.collected), len(pt.Comments))
 		}

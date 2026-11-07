@@ -472,7 +472,7 @@ A job ends `partial` when posts failed, or when a grid ended before the job's ag
 **Walled posts** (REQ-008 fix 15). About 2.6% of post pages show only a login wall to logged-out readers. After three fresh identities see the wall, igs:
 - stores and publishes the post from what the grid gave: its ID, shortcode, time, type and pinned flag, with status `unavailable` and `status_reason` `login_wall`;
 - leaves its counts empty, never 0. A walled reel still gets the views, likes and comment count the reels tab serves;
-- reads none of its comments (`comments_state` `none`), and publishes no media;
+- reads none of its comments (`comments_state` `none`), and publishes no media and no metrics sample (an unavailable post's page gave no counts);
 - counts it in the job's `posts_gated`, and `posts_walled_published` when it was published. A post already stored keeps what was read before.
 
 Walled posts get no refreshes. If a later full run reads the page, the post becomes `visible`. A post that is gone (deleted, archived or made private) has `status_reason` `not_found`. On `content.post.v1`, a walled post isn't `is_deleted`: its extras say `"status": "unavailable", "status_reason": "login_wall"`.

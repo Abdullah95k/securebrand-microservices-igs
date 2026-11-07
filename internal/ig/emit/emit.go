@@ -107,6 +107,11 @@ func (e *Emitter) Post(ctx context.Context, b *kafka.Batch, src Source, p *igv1.
 	if err := b.AddProto(ctx, topics.Post, key(p.MediaPk), p); err != nil {
 		return err
 	}
+	// An unavailable post (gone, or its page walled) was read without its
+	// counts: it gets no sample, never an empty one (REQ-008 fix 15).
+	if p.Status == igv1.PostStatus_POST_STATUS_UNAVAILABLE {
+		return nil
+	}
 	return e.Metrics(ctx, b, src, &igv1.PostMetrics{MediaPk: p.MediaPk, OwnerPk: p.OwnerPk, TakenAt: p.TakenAt,
 		LikeCount: p.LikeCount, CommentCount: p.CommentCount, PlayCount: p.PlayCount, CountsHidden: p.CountsHidden})
 }
