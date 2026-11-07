@@ -38,7 +38,7 @@ func main() {
 }
 
 func runSync(ctx context.Context, cfg *config.Config, once bool) (int, error) {
-	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return 0, err
 	}

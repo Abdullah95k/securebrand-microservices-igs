@@ -32,6 +32,11 @@ secretEnv:
 config:
   service: {name: igs, env: prod}
   log: {level: info, format: json}
+  # The platform's Postgres is a transaction-mode PgBouncer with 50 server
+  # connections for every service: a few connections per process, short
+  # transactions (the pool queues the rest).
+  postgres:
+    max_conns: 4
   # The platform's Valkey has no VALKEY_DB key: by its convention igs uses
   # logical database 2.
   redis:

@@ -60,7 +60,7 @@ func run(cfg *config.Config, o soak.Options, chaos bool, crawlers, valkey string
 	var db *pgxpool.Pool
 	var err error
 	for {
-		if db, err = pg.OpenSchema(ctx, cfg.Postgres.DSN, 4, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM)); err == nil {
+		if db, err = pg.OpenSchema(ctx, cfg.Postgres.DSN, 4, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled)); err == nil {
 			if err = soak.Ready(ctx, o.API, o.FakeIG); err == nil {
 				break
 			}

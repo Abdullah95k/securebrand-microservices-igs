@@ -40,7 +40,7 @@ import (
 const TopicsFile = "ig/topics.yaml"
 
 func openDB(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
-	return pg.OpenSchema(ctx, cfg.Postgres.DSN, 4, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
+	return pg.OpenSchema(ctx, cfg.Postgres.DSN, 4, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 }
 
 var igRegistry = registry.In(registry.IGTables)
@@ -53,7 +53,7 @@ var igRegistry = registry.In(registry.IGTables)
 // first install the schema does not exist yet, and pg.OpenSchema refuses
 // it. The migrations set their own search path.
 func migrate(ctx context.Context, cfg *config.Config, sub string) error {
-	pub, err := pg.Open(ctx, cfg.Postgres.DSN, 2, pg.WithCA(cfg.Postgres.CAPEM))
+	pub, err := pg.Open(ctx, cfg.Postgres.DSN, 2, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return err
 	}

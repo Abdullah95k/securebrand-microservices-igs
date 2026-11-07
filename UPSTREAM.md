@@ -18,6 +18,8 @@ To port an fbs change: `git remote add upstream https://github.com/Abdullah95k/s
 
 The Go module here is `github.com/abdullah95k/securebrand-microservices-igs` (fbs: `github.com/abdullah95k/securebrand-microservices`), so a cherry-picked fbs change conflicts on any import line it touches. Resolve those by keeping this repository's paths, then run `go build ./...`. If it adds or changes a `.proto` file, run `buf generate` afterwards.
 
+**Diverged from fbs:** `internal/platform/leader` elects with a lease row (`ig.leases`), not fbs's session advisory lock (2026-11-07, REQ-008 fix 11c). The platform's Postgres is a transaction-mode pool, where a session lock can stay with a pooled server session. fbs's later changes to its leader lock don't apply here.
+
 ## Ported from fbs
 
 | Date | fbs commit | What | igs PR |

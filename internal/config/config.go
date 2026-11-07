@@ -121,6 +121,10 @@ type Postgres struct {
 	// POSTGRES_CA_CERT): with TLS on, the server's certificate must chain
 	// to it (pg.WithCA). Empty: not given.
 	CAPEM string `koanf:"ca_pem"`
+	// Pooled: the server sits behind a transaction-mode pool (PgBouncer),
+	// so no session state is set; the role's search_path must be schema ig
+	// (pg.Pooled). The platform's credentials turn it on.
+	Pooled bool `koanf:"pooled"`
 }
 
 type Redis struct {

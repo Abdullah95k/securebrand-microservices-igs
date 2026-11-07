@@ -47,7 +47,7 @@ func main() {
 }
 
 func createClient(ctx context.Context, cfg *config.Config, name string, scopes []string, rate int) error {
-	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, 2, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, 2, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return err
 	}
@@ -63,14 +63,14 @@ func createClient(ctx context.Context, cfg *config.Config, name string, scopes [
 }
 
 func serve(ctx context.Context, cfg *config.Config) error {
-	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	read := db
 	if cfg.Postgres.ReadDSN != "" {
-		if read, err = pg.OpenSchema(ctx, cfg.Postgres.ReadDSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM)); err != nil {
+		if read, err = pg.OpenSchema(ctx, cfg.Postgres.ReadDSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled)); err != nil {
 			return err
 		}
 		defer read.Close()

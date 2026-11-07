@@ -50,6 +50,9 @@ func (c *Config) applyPlatform(getenv func(string) string) error {
 			u.RawQuery = url.Values{"sslmode": {mode}}.Encode()
 		}
 		c.Postgres.DSN = u.String()
+		// The platform's Postgres is reached through a transaction-mode
+		// PgBouncer only (docs/master/igs-production.md).
+		c.Postgres.Pooled = true
 	}
 	// The servers' certificates may be signed by the platform's own CA
 	// (POSTGRES_CA_CERT, KAFKA_CA_CERT, VALKEY_CA_CERT); an empty value

@@ -54,11 +54,22 @@ From the platform's answers (7 November 2026):
 - **An empty value** means no CA was given: the system roots apply, and `require` encrypts without checking the server.
 - **A value that is no PEM certificate** stops the pod at start.
 
-**igs needs a direct Postgres connection, or a pool in session mode, not a transaction-mode pool:**
-- the scheduler's leader lock is a session advisory lock;
-- igs's connections keep prepared statements.
+**The platform's Postgres is a transaction-mode PgBouncer** (`POSTGRES_HOST:5432`, the only endpoint; 50 server connections shared by every service). With the platform's credentials, igs runs in pooled mode (`postgres.pooled`):
+- **No session state.** igs sends no startup parameters and sets nothing per session.
+  - The scheduler's leader and registry-sync's single run use a lease row (`ig.leases`), taken and renewed one statement at a time. They don't use session advisory locks.
+  - Temporary tables and the persister's locks last one transaction (`ON COMMIT DROP`, `pg_advisory_xact_lock`).
+  - Migrations use `SET LOCAL`.
+- **No named prepared statements:** every pool runs statements unnamed (`cache_describe`).
+- **A few connections per process:** `postgres.max_conns: 4` in `values-production.yaml`.
+- **The role's search path must be `ig`.** igs's queries don't name the schema, and in pooled mode igs doesn't set it, so the platform sets it once for the role igs connects as:
 
-igs sends no startup parameters: it sets its schema (`search_path` `ig`) with a `SET` after connecting.
+  ```sql
+  ALTER ROLE <igs's POSTGRES_USER> SET search_path TO ig, public;
+  ```
+
+  igs checks this at start and stops, naming the setting, when it's missing. The role also creates schema `ig` and its tables (the migrate hook).
+
+Outside the platform (a direct connection), igs sets its search path itself, after connecting.
 
 **`proxies`**, key `proxies.yaml`: the ISP exits, as a config layer (`ig.proxy.tiers`, one tier named `isp`); `phase0/proxies.example.yaml` shows the shape.
 
