@@ -69,12 +69,14 @@ From the platform's answers (7 November 2026):
 
   igs checks this at start and stops, naming the setting, when it's missing. The role also creates schema `ig` and its tables (the migrate hook).
 
+  **When the database is busy at start** (REQ-023 item 5): every igs binary and `igsctl` (the migrate hook) tries again for about 3 minutes, backing off from 1 s to 15 s, while Postgres or PgBouncer says it is out of connections or starting. These are SQLSTATE 53300, 57P03 and 53000, and PgBouncer's "no more connections allowed", "server login has been failing" and "query_wait_timeout". Each try is logged (`pg: the database is busy; trying again`). A wrong password, a missing database or a missing schema fail at once.
+
 Outside the platform (a direct connection), igs sets its search path itself, after connecting.
 
 **`proxies`**, key `proxies.yaml`: the ISP exits, as a config layer (`ig.proxy.tiers`, one tier named `isp`); `phase0/proxies.example.yaml` shows the shape.
-- Only the components that reach Instagram mount it: `crawler-profile`, `crawler-post` and `registry-sync`. They wait for the Secret, so they never start without their proxies.
+- Only the components that reach Instagram mount it: `crawler-profile`, `crawler-post` and `registry-sync`. They wait for the Secret, so they never start without their proxies. `crawler-retry` reaches nothing on the web but mounts it too: the crawler binary builds the proxy pool at start, and refuses routing that names a tier it doesn't have.
 - The scheduler mounts it as optional. Discovery's hold counts each tier's exits from it, so once the Secret exists, restart the scheduler. Through GitOps, set or change an annotation on its pods: `components.scheduler.podAnnotations` (for example `igs/proxies-added: "2026-11-07"`). `podAnnotations` at the top level applies to every component. Until the restart, discovery isn't held when most exits rest.
-- The migrate hook, the API, the persister, the normalizer, the media services and `crawler-retry` never mount it. igs migrates and starts before the proxies exist.
+- The migrate hook, the API, the persister, the normalizer and the media services never mount it. igs migrates and starts before the proxies exist.
 - `make igs-chart-check` checks this (`scripts/chart-secrets.py`).
 
 **`igs-keys`**, key `IGS_IG__PRIVACY__AUTHOR_HMAC_KEY`: igs's own key for the authors' HMAC, never fbs's. The platform's setup makes it once (32 random bytes as 64 hex characters, platform PR #11) and protects it so it never changes. igs won't start in production without it.
