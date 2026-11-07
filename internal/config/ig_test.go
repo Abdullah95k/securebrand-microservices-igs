@@ -15,6 +15,9 @@ func TestIGDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := c.IG
+	if k := g.IGDisc; k.Enabled || k.Window != 6*time.Hour || k.FlushEvery != 10*time.Second || k.Priority != 2 {
+		t.Fatalf("igdisc: %+v", k)
+	}
 	if g.BaseURL != "https://www.instagram.com" || g.RegistrySeed != "ig/queries.seed.yaml" {
 		t.Fatalf("surface: %s %s", g.BaseURL, g.RegistrySeed)
 	}
@@ -86,6 +89,10 @@ func TestIGValidate(t *testing.T) {
 		{"reels window", func(c *Config) { c.IG.Schedule.ReelsWindow = -time.Hour }, "ig.schedule.reels_window"},
 		{"reels full pass", func(c *Config) { c.IG.Schedule.ReelsFullEvery = 0 }, "ig.schedule.reels_window"},
 		{"resting share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.HoldRestingShare = 1.5 }, "ig.discovery.hold_resting_share"},
+		{"igdisc without discovery", func(c *Config) { c.IG.IGDisc.Enabled = true }, "ig.igdisc needs ig.discovery.enabled"},
+		{"igdisc window", func(c *Config) {
+			c.IG.Discovery.Enabled, c.IG.IGDisc.Enabled, c.IG.IGDisc.Window = true, true, 0
+		}, "ig.igdisc: window"},
 		{"identities", func(c *Config) { c.IG.IdentityMaxRequestsMax = 10 }, "ig.identity_max_requests_min"},
 		{"video", func(c *Config) { c.IG.Limits.VideoPolicy = "4k" }, "ig.limits.video_policy"},
 		{"pii", func(c *Config) { c.IG.Privacy.PIIMode = "none" }, "ig.privacy.pii_mode"},
