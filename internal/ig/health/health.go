@@ -18,6 +18,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/iraqtime"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/ratelimit"
 )
 
@@ -278,7 +279,7 @@ func lag(ctx context.Context, s Sources) Check {
 
 // Iraq is the owner's time zone (UTC+3, no daylight saving), for the times
 // the report shows.
-var Iraq = time.FixedZone("Iraq", 3*3600)
+var Iraq = iraqtime.Zone
 
 func round(d time.Duration) string {
 	if d >= time.Hour {

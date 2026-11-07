@@ -37,6 +37,14 @@ jobs:
           else
             echo "no buf module on the base branch yet"
           fi
+      - name: Migrations keep the previous release working
+        run: |
+          python3 scripts/migration-check.py --self-test
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            python3 scripts/migration-check.py --base "origin/${{ github.base_ref }}"
+          else
+            python3 scripts/migration-check.py --base HEAD^
+          fi
       - name: Fixtures contain no real signed URLs
         run: |
           if grep -rlE 'oh=00_|_nc_cat=' testdata/; then

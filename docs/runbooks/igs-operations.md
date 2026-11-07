@@ -440,6 +440,19 @@ Every binary starts its ops server (:9090) first, then opens its stores.
 
 So a pod that is Running but not Ready, logging these lines, waits for the database. Look at the database's connections, not at igs. After 3 minutes it exits with the database's error and Kubernetes starts it again.
 
+## Schema changes
+
+The migrate hook upgrades the schema before the new pods start. The old pods keep running on the new schema until they are replaced, and again after a rollback. So a migration only adds: new tables, new columns that are nullable or have a DEFAULT, new indexes, new defaults (REQ-008 fix 23).
+
+`scripts/migration-check.py`, run by CI on every change, refuses:
+- an edit, rename or removal of a migration already on main (it has run in production; add a new one instead);
+- a new migration numbered before an existing one;
+- in a new migration's Up section: DROP TABLE or COLUMN, RENAME, a column type change, SET NOT NULL, a NOT NULL column without a DEFAULT, TRUNCATE (ClickHouse: MODIFY COLUMN).
+
+To remove or rename something, use two releases:
+1. Stop using it in the code, and release.
+2. Then drop it, in a migration that says so: `-- igs:breaking: <why, and the release that stopped using it>`. The check reports the marked migration instead of refusing it.
+
 ## Security checks
 
 The `security` workflow (REQ-008 fix 22) runs on every change, on main and on Sundays at 05:17 Iraq time. `make security` runs the first two locally.

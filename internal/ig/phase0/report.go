@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/probe"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/iraqtime"
 )
 
 // Thresholds are the GO / NO-GO criteria. The defaults come from the
@@ -211,6 +213,8 @@ func (k *Kit) run(ctx context.Context) error {
 // TierSummary is one tier's result.
 type TierSummary struct {
 	Tier             string               `json:"tier"`
+	StartedAt        time.Time            `json:"started_at"`
+	FinishedAt       time.Time            `json:"finished_at"`
 	Profiles         int                  `json:"profiles"`
 	BootstrapSuccess float64              `json:"bootstrap_success"`
 	PageLoadWalls    int                  `json:"page_load_walls"`
@@ -248,7 +252,7 @@ var blocked = map[string]bool{"rate_limited": true, "login_wall": true, "checkpo
 
 // Summarize judges one tier's run.
 func Summarize(tr TierRun, th Thresholds, costPerGB, requestsPerDay float64) TierSummary {
-	s := TierSummary{Tier: tr.Tier, Profiles: len(tr.Profiles), Requests: tr.Requests, ClassRate: map[string]float64{},
+	s := TierSummary{Tier: tr.Tier, StartedAt: tr.StartedAt, FinishedAt: tr.FinishedAt, Profiles: len(tr.Profiles), Requests: tr.Requests, ClassRate: map[string]float64{},
 		GridStops: map[string]int{}, CostPerGBUSD: costPerGB}
 	var days, posts []float64
 	var ok, fullyRead, judged int
@@ -403,6 +407,9 @@ func Format(res Result, th Thresholds) string {
 			v = "NO-GO"
 		}
 		fmt.Fprintf(&b, "== %s: %s\n", t.Tier, v)
+		if !t.StartedAt.IsZero() {
+			fmt.Fprintf(&b, "  ran %s\n", iraqtime.Span(t.StartedAt, t.FinishedAt))
+		}
 		fmt.Fprintf(&b, "  profiles %d, bootstrap %.1f%% (%d page loads walled first), queries %d, block rate %.2f%%\n",
 			t.Profiles, t.BootstrapSuccess*100, t.PageLoadWalls, t.Queries, t.BlockRate*100)
 		fmt.Fprintf(&b, "  grids: complete %.1f%% (stops %v; %d cut by the kit's page cap, not counted), median %.0f days, %.0f posts\n",

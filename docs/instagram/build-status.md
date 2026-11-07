@@ -158,7 +158,7 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
 
 ## What the owner needs to do
 
-**Go-live:** follow [`igs-go-live.md`](../runbooks/igs-go-live.md). First buy ISP exits for the volume you want: each exit keeps about 270 to 540 profiles fresh on the 3-hour schedule. Then tag a release, create the Secrets, install, run a canary of 50 to 100 profiles for a day, and ramp.
+**Go-live:** follow [`igs-go-live.md`](../runbooks/igs-go-live.md). First buy ISP exits for the volume you want: each exit keeps about 270 to 540 profiles fresh on the 3-hour schedule. Then tag a release, create the Secrets, install, run a canary of 50 to 100 profiles for 3 days, and ramp.
 
 **Any time:** record C1 (brief §6):
 1. Open a post by clicking it in a profile grid.
@@ -265,3 +265,7 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
 - **2026-11-07 (production start-up):** every binary now starts its health endpoint before it connects to the database. In production the database was short of connections, a pod waited for one, and the liveness check killed it first: the media janitor restarted 8 times. Now the pod waits, reports "starting", and logs every 10 seconds that it is waiting.
 - **2026-11-07 (REQ-008 fix 22a, security checks):** a `security` workflow runs on every change and every Sunday. It scans the whole git history for credentials (gitleaks; the 11 findings it had were checked by hand and are key names, test fakes and fixture tokens), checks the Go code for known vulnerabilities (govulncheck), and scans both images (Trivy), failing on a serious vulnerability that has a fix. Dependabot proposes dependency updates weekly. Its first run found two known vulnerabilities on igs's code paths, both now fixed: a brotli decoder that could use too much memory on a crafted response (v1.2.6 to v1.2.7) and a certificate check in Go itself (1.27.2 to 1.27.3).
 - **2026-11-07 (REQ-008 fix 22b, credentials per component):** the platform can give each component its own Kafka user and Spaces key through a Secret per component. igs lists what each component needs: which topics it reads and writes, and which bucket it reads, writes or deletes in. Only the components that use the object store need a key; the retry relay no longer opens it. The database stays one user in production for now, since every extra user costs connections the shared database doesn't have.
+- **2026-11-07 (REQ-008 fix 23, smaller items):**
+  - **Schema changes** can't break the running release: CI refuses a migration that drops, renames or tightens anything, or edits one already run, unless it is marked as a planned two-step change.
+  - **Times you read** (the Phase 0 report, the tagged-tab summary, the soak result, `igsctl health`) are in Iraq time and say so.
+  - **The go-live canary** is now 3 days in a row with every signal healthy, instead of one day.

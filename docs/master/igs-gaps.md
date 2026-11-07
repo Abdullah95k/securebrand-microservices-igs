@@ -31,7 +31,7 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 | A3 | **Met** | `deploy/helm/igs`: every setting under `config:` in values, rendered to the config file. Hosts, ports and credentials come from values and secrets. `make chart-check` (kubeconform) and `make igs-chart-smoke` in CI | (`configs/ig/topics.yaml` holds the production sizes, 99 partitions with replication 3; see C2) | - |
 | A4 | **Met** | `internal/config`: the embedded defaults, then files, then `IGS_*` variables. `Config.Validate` refuses bad values and names them | - | - |
 | A5 | **Met** | Secrets come from Kubernetes secrets as environment variables, and `proxies.yaml` as a mounted file (`docs/runbooks/igs-go-live.md` §4). Nothing is baked in; fixtures are scrubbed | - | - |
-| A6 | **Partly** | goose migrations `migrations/ig/00001` to `00008`, run by the `igsctl migrate up` hook. All are additive so far | Nothing **checks** that the previous release still runs on the new schema. Fix: a CI job that runs the last release's e2e smoke against the new migrations, and a rule in the PR template | 1 day |
+| A6 | **Met** | REQ-008 fix 23: `scripts/migration-check.py` in CI keeps migrations additive (merged ones never edited; new ones in order; no drop, rename, retype or NOT NULL without default unless marked `-- igs:breaking:`), a PR template rule, and the runbook's two-release way | - | - |
 
 ## B. Runtime behaviour
 
@@ -43,7 +43,7 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 | B4 | **Met** | On SIGTERM a crawler stops taking work, checkpoints and parks its identities within 75 s (grace 90 s). Restart chaos tests are in `internal/ig/e2e` | - | - |
 | B5 | **Partly** | Checkpoints under leases (`internal/crawl/checkpoint`), so another pod resumes a task. Exit rests are shared in Valkey. Idle identities are parked on shutdown and reused by the next pod (M12a) | Identities are parked **only on a graceful stop** (`internal/scrape/session/park.go`, called from `internal/ig/app/crawler.go`). After a crash or an out-of-memory kill they're lost, and every exit loads a page again. Fix: park idle identities every few minutes as well as at shutdown | 0.5 day |
 | B6 | **Partly** | Scales out (KEDA on lag). Fleet-wide limits are in Valkey: per-exit rate `exit_rps` 0.25, AIMD global rate, exit rests, the daily budget | **The shared limiter fails open** when Valkey is unavailable (`internal/scrape/ratelimit/ratelimit.go`, "redis unavailable, failing open"). Several pods could then drive one exit faster than `exit_rps`. Fix: fail closed (wait and retry), or fall back to a local per-exit limit of `exit_rps` divided by the crawler pod count | 0.5 day |
-| B7 | **Partly** | Internally everything is UTC; runbooks state Iraq time | Owner-facing output from `igs-spike` and `igsctl` prints UTC (RFC 3339) times and doesn't say Iraq time. Fix: print Iraq time, labelled, in owner-facing summaries | 0.5 day |
+| B7 | **Met** | Internally everything is UTC; data files and logs stay UTC. The summaries a person reads say Iraq time, labelled (REQ-008 fix 23, `internal/platform/iraqtime`): `igsctl health`, the Phase 0 report's run times, the tagged-tab summary, the soak's verdict line | - | - |
 
 ## C. Reliability
 
@@ -108,7 +108,7 @@ By the igs session, 5 November 2026 (Iraq time), from `Abdullah95k/securebrand-m
 |---|---|---|---|---|
 | H1 | **Met** | `docs/runbooks/igs-operations.md`: every alert, block storm, registry stale (a platform change), schema drift, Kafka lag, persister quarantine and DLQ replay, stuck and partial jobs, schedule, budget, discovery, erasure, capacity. `igs-go-live.md`: install, upgrade, canary, ramp, pause and roll back. `igs-backups.md`, `igs-phase0.md`, `igs-probe.md`, `igs-registry-sync.md` | Backfill is described inside "Schedule" and the API, not as its own section. A small doc addition | 0.25 day |
 | H2 | **Met** | `docs/runbooks/igs-backups.md` (Postgres point-in-time recovery and a daily schema dump, ClickHouse `BACKUP`, S3 versioning and replication, secrets); a restore drill tested in CI (`internal/ig/e2e/backup_test.go`) | - | - |
-| H3 | **Partly** | `igs-go-live.md` §8 to §9: a canary of 50 to 100 profiles **for a day**, then a ramp | The standard asks for 2 to 3 days. Fix: change the runbook to 3 days | 0.1 day |
+| H3 | **Met** | `igs-go-live.md` §8 to §9: a canary of 50 to 100 profiles **for 3 days** in a row with every signal healthy, then a ramp (REQ-008 fix 23) | - | - |
 | H4 | **Partly** | Estimates in the readiness review and `igs-operations.md` §13 (requests, GB, IPs, compute, storage) | **Estimates, not measured**, and the first one missed the reels re-read. Fix: the pilot report | In the pilot |
 
 ## I. Security
