@@ -72,6 +72,10 @@ From the platform's answers (7 November 2026):
 Outside the platform (a direct connection), igs sets its search path itself, after connecting.
 
 **`proxies`**, key `proxies.yaml`: the ISP exits, as a config layer (`ig.proxy.tiers`, one tier named `isp`); `phase0/proxies.example.yaml` shows the shape.
+- Only the components that reach Instagram mount it: `crawler-profile`, `crawler-post` and `registry-sync`. They wait for the Secret, so they never start without their proxies.
+- The scheduler mounts it as optional. Discovery's hold counts each tier's exits from it, so once the Secret exists, restart the scheduler. Through GitOps, set or change an annotation on its pods: `components.scheduler.podAnnotations` (for example `igs/proxies-added: "2026-11-07"`). `podAnnotations` at the top level applies to every component. Until the restart, discovery isn't held when most exits rest.
+- The migrate hook, the API, the persister, the normalizer, the media services and `crawler-retry` never mount it. igs migrates and starts before the proxies exist.
+- `make igs-chart-check` checks this (`scripts/chart-secrets.py`).
 
 **`igs-keys`**, key `IGS_IG__PRIVACY__AUTHOR_HMAC_KEY`: igs's own key for the authors' HMAC, never fbs's. The platform's setup makes it once (32 random bytes as 64 hex characters, platform PR #11) and protects it so it never changes. igs won't start in production without it.
 

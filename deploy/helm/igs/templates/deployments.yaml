@@ -1,6 +1,7 @@
 {{- $root := . -}}
 {{- range $name, $c := .Values.components }}
 {{- if $c.enabled }}
+{{- $pod := dict "root" $root "proxies" ($c.proxies | default "") }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -25,6 +26,9 @@ spec:
         checksum/config: {{ toYaml $root.Values.config | sha256sum }}
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
+        {{- with merge (deepCopy ($c.podAnnotations | default dict)) ($root.Values.podAnnotations | default dict) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
@@ -42,7 +46,7 @@ spec:
           image: "{{ $root.Values.image.repository }}:{{ $tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           command: {{- toYaml $c.command | nindent 12 }}
-          env: {{- include "igs.env" $root | nindent 12 }}
+          env: {{- include "igs.env" $pod | nindent 12 }}
           {{- include "igs.envFrom" $root | nindent 10 }}
           ports:
             - {name: metrics, containerPort: 9090}
@@ -59,8 +63,8 @@ spec:
             failureThreshold: 3
           resources: {{- toYaml $c.resources | nindent 12 }}
           securityContext: {{- toYaml $root.Values.securityContext | nindent 12 }}
-          volumeMounts: {{- include "igs.volumeMounts" $root | nindent 12 }}
-      volumes: {{- include "igs.volumes" $root | nindent 8 }}
+          volumeMounts: {{- include "igs.volumeMounts" $pod | nindent 12 }}
+      volumes: {{- include "igs.volumes" $pod | nindent 8 }}
 {{- if $c.pdb }}
 ---
 apiVersion: policy/v1

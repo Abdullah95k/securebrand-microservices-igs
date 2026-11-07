@@ -3,7 +3,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -15,7 +17,8 @@ import (
 )
 
 // Load merges defaults, the files in paths (comma separated, later files
-// win; e.g. a ConfigMap then a Secret) and environment variables starting
+// win; e.g. a ConfigMap then a Secret; a path starting with ? may be
+// missing) and environment variables starting
 // with envPrefix into out. List values in env vars are comma separated.
 func Load(defaults []byte, paths, envPrefix string, out any) (*koanf.Koanf, error) {
 	k := koanf.New(".")
@@ -24,10 +27,16 @@ func Load(defaults []byte, paths, envPrefix string, out any) (*koanf.Koanf, erro
 	}
 	for _, path := range strings.Split(paths, ",") {
 		path = strings.TrimSpace(path)
+		// A path starting with ? is optional: skipped when the file does
+		// not exist (a Secret mounted as optional that is not there yet).
+		path, optional := strings.CutPrefix(path, "?")
 		if path == "" {
 			continue
 		}
 		if _, err := os.Stat(path); err != nil {
+			if optional && errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
 			return nil, fmt.Errorf("config: %w", err)
 		}
 		if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {

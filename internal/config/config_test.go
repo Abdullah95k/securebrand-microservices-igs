@@ -31,6 +31,31 @@ func TestLoadLayers(t *testing.T) {
 	}
 }
 
+// A file marked optional (?path) is skipped when it is not there, as the
+// scheduler's proxies file before the platform adds it; it is read when it
+// is. An unmarked missing file is an error.
+func TestLoadOptionalFile(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.yaml")
+	px := filepath.Join(dir, "proxies.yaml")
+	_ = os.WriteFile(a, []byte("crawler:\n  yield_pages: 7\n"), 0o644)
+	c, err := Load(a + ",?" + px)
+	if err != nil || c.Crawler.YieldPages != 7 || len(c.IG.Proxy.Tiers) != 0 {
+		t.Fatalf("optional file missing: %v %+v", err, c)
+	}
+	if _, err := Load(a + "," + px); err == nil {
+		t.Fatal("a missing file that is not optional must fail")
+	}
+	_ = os.WriteFile(px, []byte("ig:\n  proxy:\n    tiers:\n      - {name: isp, kind: static_list, endpoints: [\"http://u:p@1.2.3.4:1\"]}\n"), 0o600)
+	if c, err := Load(a + ",?" + px); err != nil || len(c.IG.Proxy.Tiers) != 1 {
+		t.Fatalf("optional file present: %v", err)
+	}
+	// A missing directory counts as a missing file.
+	if _, err := Load(a + ",?" + dir + "/missing-dir/x.yaml"); err != nil {
+		t.Fatalf("a missing optional file under a missing directory is skipped too: %v", err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	c, _ := Load("")
 	c.Service.Env = "prod"

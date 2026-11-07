@@ -12,6 +12,7 @@
 {{- if .Values.hooks.schemas }}{{ $jobs = append $jobs (dict "name" "schemas" "args" $schemaArgs) }}{{ end -}}
 {{- if and .Values.hooks.clickhouse (index .Values.components "content-writer" "enabled") }}{{ $jobs = append $jobs (dict "name" "clickhouse" "args" (list "clickhouse" "migrate")) }}{{ end -}}
 {{- if .Values.paused }}{{ $jobs = list }}{{ end -}}
+{{- $hook := dict "root" $root "proxies" "" }}
 {{- range $jobs }}
 ---
 apiVersion: batch/v1
@@ -34,12 +35,12 @@ spec:
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag | default $root.Chart.AppVersion }}"
           command: ["/usr/local/bin/igsctl"]
           args: {{- toYaml .args | nindent 12 }}
-          env: {{- include "igs.env" $root | nindent 12 }}
+          env: {{- include "igs.env" $hook | nindent 12 }}
           {{- include "igs.envFrom" $root | nindent 10 }}
           securityContext: {{- toYaml $root.Values.securityContext | nindent 12 }}
           {{- with $root.Values.hooks.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
-          volumeMounts: {{- include "igs.volumeMounts" $root | nindent 12 }}
+          volumeMounts: {{- include "igs.volumeMounts" $hook | nindent 12 }}
       volumes: {{- include "igs.hookVolumes" $root | nindent 8 }}
 {{- end }}

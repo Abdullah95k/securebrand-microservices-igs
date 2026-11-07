@@ -169,10 +169,10 @@ Grow in steps while the canary's signals stay healthy:
 
 1. Each day, add at most about **twice the profiles already registered**, and no more than the exits can backfill that day: 1,000 profiles need about 42 exit-hours.
 2. Keep the schedule lag under 3 hours. When it grows while few exits rest, add exits before adding profiles.
-3. Add exits by updating `igs-proxies`, then restart the crawlers:
+3. Add exits by updating `igs-proxies`, then restart the pods that read it: the crawlers, registry-sync, and the scheduler (discovery's hold counts the exits):
 
 ```bash
-kubectl -n igs rollout restart deploy/igs-crawler-profile deploy/igs-crawler-post deploy/igs-registry-sync
+kubectl -n igs rollout restart deploy/igs-crawler-profile deploy/igs-crawler-post deploy/igs-registry-sync deploy/igs-scheduler
 ```
 
 Profile discovery adds Iraqi profiles without a cap, from the profiles you register ([how](igs-operations.md#profile-discovery)). It is on in the chart's values. Each discovered profile needs exits like any other, so watch the same signals. To slow it, lower `config.ig.discovery.vet_in_flight`, raise `threshold`, or set a daily cap (`max_new_per_day`); to stop it, set `enabled: false`. Check its first registrations by hand:
