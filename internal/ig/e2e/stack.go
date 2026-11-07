@@ -125,6 +125,10 @@ func Start(t *testing.T, o Options) *Stack {
 	db := testenv.PostgresIG(t)
 	rdb := testenv.Redis(t)
 	ctx := context.Background()
+	// igdisc's tables (ig.igdisc_*), as igsctl migrate up applies them.
+	if err := igdisc.MigrateUp(ctx, db); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := config.Load("")
 	if err != nil {

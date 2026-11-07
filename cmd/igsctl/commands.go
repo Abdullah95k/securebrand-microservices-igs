@@ -27,6 +27,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dlq"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igdisc"
 	igtopics "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
@@ -64,12 +65,21 @@ func migrate(ctx context.Context, cfg *config.Config, sub string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(strings.Join(lines, "\n"))
+		disc, err := igdisc.MigrateStatus(ctx, pub)
+		if err != nil {
+			return err
+		}
+		fmt.Println(strings.Join(append(lines, disc...), "\n"))
 		return nil
 	case "down":
 		return store.MigrateIGDown(ctx, pub)
 	}
 	if err := store.MigrateIGUp(ctx, pub); err != nil {
+		return err
+	}
+	// Instagram keyword discovery's tables (ig.igdisc_*), with goose
+	// versions of their own.
+	if err := igdisc.MigrateUp(ctx, pub); err != nil {
 		return err
 	}
 	db, err := openDB(ctx, cfg)
