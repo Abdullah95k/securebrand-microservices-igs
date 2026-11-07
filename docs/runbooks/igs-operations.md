@@ -18,6 +18,27 @@ Deployment is the `deploy/helm/igs` chart. Its hooks run `igsctl migrate up` and
 - the probe: [`igs-probe.md`](igs-probe.md);
 - doc_id rotations: [`igs-registry-sync.md`](igs-registry-sync.md).
 
+## Health
+
+**What to run first** (REQ-008 fix 19). One read-only command reports igs's state:
+
+```bash
+kubectl -n igs exec deploy/igs-scheduler -- igsctl health
+```
+
+It prints one line per check, then what to do for each line that isn't OK, with times in Iraq time. It exits 1 when a line is `BAD`. Valkey or Kafka that don't answer give a `?` line rather than stopping the report.
+
+| Line | What it reads | `OK` | Not OK, and where to look |
+|---|---|---|---|
+| profiles on the schedule | enabled profiles by tier, and those paused | some profiles | `WARN` with none: nothing to collect; register profiles |
+| schedule | profiles overdue by their own interval (3 h long tail, 10 min hot), the oldest | none overdue | `BAD`: [Schedule](#schedule) |
+| jobs, last hour | jobs created in the last hour by outcome, plus those still running or queued | failures under a fifth | `WARN`: a failed job's reason in `GET /v1/jobs/{id}`; [Stuck jobs](#stuck-jobs) |
+| last data stored | the newest profile read and post seen | a profile read within 3 h | `BAD` while profiles are on the schedule: [No data](#no-data) |
+| proxy exits resting | per static tier, exits resting now (shared in Valkey) | at most half | `WARN`: [Block storm](#block-storm-block-rate--10) |
+| Kafka lag | the five igs consumer groups furthest behind | each under 10,000 | `WARN`: [Kafka lag](#kafka-lag) |
+
+The scheduler's pod has the proxy tiers when the `proxies` Secret exists, so its exits line names each tier. The command works from any igs pod and changes nothing.
+
 ## Key signals
 
 | Signal | Metric | Healthy |
@@ -358,6 +379,23 @@ When page loads stop carrying the tokens and doc_ids the client needs (JavaScrip
 1. The failing responses are in the raw bucket under `s3.raw_keep_prefix` (`raw-failures/<query>/`, or `igs/keep/failures/<query>/` on the platform's bucket), whatever `ig.capture_raw` is, short of `none`.
 2. Fix the parser in `internal/ig/parse` against them. Add the scrubbed response as a golden fixture (`internal/ig/fixtures`), then release.
 3. `IgsIgOptionalFieldDrift` is the quiet version: an optional field went missing far more often than a week ago. Nothing fails, but the data loses the field.
+
+## No data
+
+`IgsIgNoData` fires when the persister stored no profile, post or comment for 3 hours (one long-tail interval) while profiles are on the schedule. Unchanged rows count, so a quiet account doesn't trigger it.
+
+1. Run `igsctl health` ([Health](#health)): it shows whether the schedule runs, whether jobs finish and when data was last stored.
+2. **Jobs aren't created** (`jobs, last hour` shows none): the scheduler has no leader (`IgsIgSchedulerNoLeader`) or can't reach Postgres. Check the scheduler's logs.
+3. **Jobs are created but don't finish:** the crawlers aren't running (replicas at 0, waiting for the `proxies` Secret), every exit rests (`IgsIgExitsMostlyResting`), or Kafka refuses igs's topics (`TOPIC_AUTHORIZATION_FAILED` in the logs).
+4. **Jobs finish but nothing is stored:** the persister is down or behind ([Kafka lag](#kafka-lag)), or it quarantines everything ([Persister quarantine](#persister-quarantine)).
+
+## Memory near limit
+
+`IgsIgMemoryNearLimit` fires when a container's working set has stayed above 90% of its memory limit for 10 minutes. Past the limit the kernel kills it (`OOMKilled`), losing what it held: a crawler's raw responses waiting for upload, a persister's open batch.
+
+1. Look at the container's memory over the last day. A steady climb that never falls back is a leak: note the component and the time it started, and restart the pod meanwhile. A level that follows load is sizing.
+2. For sizing, raise the component's `components.<name>.resources.limits.memory` in the chart values. On the production cluster, check the namespace's quota first.
+3. Crawlers with the browser fallback on (`ig.browser.enabled`) use far more: a headless Chromium per pod.
 
 ## Raw responses not kept
 

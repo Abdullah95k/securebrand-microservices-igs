@@ -42,6 +42,8 @@ groups:
         expr: max(igs_schedule_lag_seconds{tier="ig"} * on (instance) group_left () (igs_scheduler_leader == 1))
       - record: igs:ig_leader:kafka_consumer_lag
         expr: max by (group, topic) (igs_kafka_consumer_lag{group=~"igs-ig-.*"} * on (instance) group_left () (igs_scheduler_leader == 1))
+      - record: igs:ig_leader:profiles_scheduled
+        expr: sum(igs_profiles_scheduled * on (instance) group_left () (igs_scheduler_leader == 1))
 
   - name: igs.ig.instagram
     rules:
@@ -421,6 +423,40 @@ groups:
             Add crawler capacity or ISP exits, or lengthen
             ig.schedule.interval.
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#schedule
+      - alert: IgsIgNoData
+        # REQ-008 fix 19 (F3): nothing stored for one full long-tail
+        # interval (3 h), in which every registered profile is read at least
+        # once, while profiles are on the schedule. Counts rows written and
+        # rows read again unchanged: a quiet account still counts.
+        expr: |
+          (sum(increase(igs_persist_rows_total{entity=~"profile|post|comment"}[3h])) or vector(0)) == 0
+            and on () igs:ig_leader:profiles_scheduled > 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "No profile, post or comment stored for 3 hours"
+          description: >-
+            Profiles are on the schedule, yet the persister stored nothing,
+            not even an unchanged profile. Crawling, publishing or storing has
+            stopped: run igsctl health.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#no-data
+      - alert: IgsIgMemoryNearLimit
+        # REQ-008 fix 19 (F3): a container's working set near its memory
+        # limit; past it the kernel kills it (OOMKilled), losing what it
+        # held (a crawler's raw responses waiting for upload, for one).
+        expr: |
+          max by (namespace, pod, container) (container_memory_working_set_bytes{pod=~"igs-.*", container!="", container!="POD"})
+            / max by (namespace, pod, container) (kube_pod_container_resource_limits{pod=~"igs-.*", resource="memory"}) > 0.9
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.pod }} ({{ $labels.container }}) uses {{ $value | humanizePercentage }} of its memory limit"
+          description: >-
+            The container is close to its memory limit and will be killed
+            when it crosses it. Look for growth (a leak shows as a steady
+            climb) and raise the component's resources.limits.memory if its
+            load explains it.
+          runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#memory-near-limit
       - alert: IgsIgMediaDownloadsFailing
         expr: |
           sum(rate(igs_media_download_total{outcome="failed"}[1h]))
