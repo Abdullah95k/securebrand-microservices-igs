@@ -620,7 +620,10 @@ type Account struct {
 	Kind     string `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
 	Verified bool   `protobuf:"varint,5,opt,name=verified,proto3" json:"verified,omitempty"`
 	Category string `protobuf:"bytes,6,opt,name=category,proto3" json:"category,omitempty"`
-	// Signals of the account's country (Iraq, for igs's discovery).
+	// Signals of the account's country, sorted, each "<country>:<signal>"
+	// with the country as ISO 3166-1 alpha-2. igs publishes the signs of Iraq
+	// in the profile's own words: IQ:iraq_named, IQ:iraq_phone, IQ:iq_link,
+	// IQ:iraq_city, IQ:kurdistan, IQ:sorani_kurdish, IQ:iraqi_dialect.
 	CountrySignals []string `protobuf:"bytes,7,rep,name=country_signals,json=countrySignals,proto3" json:"country_signals,omitempty"`
 	Bio            string   `protobuf:"bytes,8,opt,name=bio,proto3" json:"bio,omitempty"`
 	Website        string   `protobuf:"bytes,9,opt,name=website,proto3" json:"website,omitempty"`

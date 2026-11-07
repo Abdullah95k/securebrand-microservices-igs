@@ -265,6 +265,18 @@ entities:
     history: latest
     personal_data: true
     notes: Published but not stored in Postgres (no column).
+  - name: country_signals
+    meaning: Signs of the account's country in its own words (derived by igs)
+    type: list of text, sorted
+    example: '["IQ:iq_link", "IQ:iraq_named"]'
+    present: sometimes
+    present_pct: null
+    source: the profile's name, bio, category, website and bio links, scored as discovery does (discovery.CountrySignals)
+    stored_at: not stored (computed when published)
+    published_at: Account.country_signals
+    history: latest
+    personal_data: false
+    notes: 'REQ-008 fix 18. Each value is <country>:<signal>, the country an ISO 3166-1 alpha-2 code (IQ only, so far), sorted. The seven signals: iraq_named (Iraq named, any script, or the flag), iraq_phone (+964, 00964 or 07xx xxx xxxx), iq_link (a .iq link), iraq_city (a place in an Iraqi governorate), kurdistan, sorani_kurdish (Sorani letters), iraqi_dialect. Arabic script alone and a bare 07 number are left out, as are network evidence and captions. Empty when the profile says nothing of Iraq.'
   - name: highlight_count
     meaning: Number of highlights
     type: int32
