@@ -112,6 +112,11 @@ var (
 	// fails closed, so a request waits while Valkey does not answer.
 	RateLimitStoreErrors = counterVec("ratelimit_store_errors_total", "Fleet-wide rate limit checks Valkey did not answer (the request waited and tried again), by key kind.", "kind")
 	RateLimitWaiting     = gauge("ratelimit_waiting_for_store", "Requests in this pod waiting for Valkey before the fleet-wide rate limit lets them go.")
+	// ExitShareRequests and ExitShareWait: requests of a class capped at a
+	// share of each exit's rate (ig.discovery.exit_share), and the time
+	// they waited for it.
+	ExitShareRequests    = counterVec("exit_share_requests_total", "Requests of a class capped at a share of each proxy exit's rate (discovery: ig.discovery.exit_share), by class.", "class")
+	ExitShareWait        = counterVec("exit_share_wait_seconds_total", "Seconds requests of a capped class waited for their share of the exit's rate, by class.", "class")
 	QueryShortCircuit    = counterVec("ig_query_short_circuit_total", "Requests not sent because the query's breaker is open.", "query")
 	SchedulerLeader      = gauge("scheduler_leader", "1 on the scheduler pod that holds the leader lock.")
 	AIMDCeiling          = gauge("aimd_ceiling_rps", "Fleet-wide platform request ceiling set by AIMD.")

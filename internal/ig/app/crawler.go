@@ -130,8 +130,9 @@ func NewCrawler(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, rdb *
 		MaxRequestsMin: g.IdentityMaxRequestsMin, MaxRequestsMax: g.IdentityMaxRequestsMax,
 		MaxPerTier: max(16, slots*len(stages)*13/10),
 		ExitRPS:    g.ExitRPS, ExitPacer: ratelimit.NewRedis(rdb),
-		Rest:  map[detect.Class]time.Duration{detect.RateLimited: g.RateLimitRest, detect.Checkpoint: g.CheckpointRest},
-		Store: ratelimit.NewParkedIdentities(rdb, cfg.Kafka.TopicPrefix), KeepFor: g.KeepIdentities,
+		Shares: map[string]float64{session.ShareDiscovery: g.Discovery.ExitShare},
+		Rest:   map[detect.Class]time.Duration{detect.RateLimited: g.RateLimitRest, detect.Checkpoint: g.CheckpointRest},
+		Store:  ratelimit.NewParkedIdentities(rdb, cfg.Kafka.TopicPrefix), KeepFor: g.KeepIdentities,
 	}, proxies, fps, o.DoerFactory)
 	if err != nil {
 		return nil, err

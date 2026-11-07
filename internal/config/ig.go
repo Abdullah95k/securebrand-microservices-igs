@@ -217,6 +217,11 @@ type IGDiscovery struct {
 	// ig.share_exit_rests). Vets already running carry on.
 	HoldWhenBehind   bool    `koanf:"hold_when_behind"`
 	HoldRestingShare float64 `koanf:"hold_resting_share"`
+	// ExitShare caps discovery's vets at this fraction of each proxy
+	// exit's rate (ig.exit_rps), fleet-wide, so regular collection keeps
+	// the rest (D-027). 0 = no cap. Applies while ig.exit_rps paces the
+	// exits.
+	ExitShare float64 `koanf:"exit_share"`
 }
 
 // IGPrivacy keeps igs's person keys apart from fbs's (ADR 0005 §1).
@@ -255,6 +260,9 @@ func (c *Config) validateIG() []error {
 		}
 		if d.HoldRestingShare < 0 || d.HoldRestingShare > 1 {
 			errs = append(errs, errors.New("ig.discovery.hold_resting_share must be in [0, 1]"))
+		}
+		if d.ExitShare < 0 || d.ExitShare > 1 {
+			errs = append(errs, errors.New("ig.discovery.exit_share must be in [0, 1]"))
 		}
 	}
 	if g.ExitPageLoadsPerDay < 0 {

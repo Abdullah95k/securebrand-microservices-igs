@@ -69,6 +69,11 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	if sc == nil {
 		return Outcome{Result: Fail, Reason: "profile task without profile scope"}
 	}
+	if sc.Vet {
+		// A vet's requests take at most discovery's share of each exit
+		// (ig.discovery.exit_share).
+		ctx = session.WithShare(ctx, session.ShareDiscovery)
+	}
 	if d.Suppression.PageSuppressed(sc.UserPk) {
 		return done(map[string]int64{"profiles_suppressed": 1})
 	}

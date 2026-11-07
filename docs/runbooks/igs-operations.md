@@ -228,10 +228,11 @@ Operations:
   - `igs_discovery_sightings_total{source}`;
   - `igs_discovery_vets_total{outcome}`;
   - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet;
-  - `igs_discovery_held{reason}`, 1 while vets wait for regular collection (below).
+  - `igs_discovery_held{reason}`, 1 while vets wait for regular collection (below);
+  - `igs_exit_share_requests_total{class="discovery"}` and `igs_exit_share_wait_seconds_total{class="discovery"}`: vets' requests, and the time they waited for discovery's share of their exit (below).
 - **Tuning:**
   - Raise `threshold` if registered profiles turn out not to be Iraqi; lower it, or `min_priority`, to find more.
-  - Vets share the exits with crawling (about 10 s of one exit's time each) and wait behind scheduled runs (lane p2). The daily budget holds them with backfill.
+  - Vets share the exits with crawling (about 10 s of one exit's time each) and wait behind scheduled runs (lane p2). They take at most a tenth of each exit's rate (`exit_share`, below). The daily budget holds them with backfill.
   - To slow discovery, lower `vet_in_flight`.
   - **Daily cap:** `max_new_per_day` (0, no cap, by default) is the most profiles discovery registers a day. The day starts at 00:00 UTC, 03:00 Iraq time. Over it, candidates wait as `capped` (`igs_discovery_candidates{status="capped"}`) and are registered on the next days. Profiles registered by hand or with `accept` neither count towards it nor wait for it. Setting the cap back to 0 lets every capped candidate through on the next vetter tick. Production runs without a cap (the owner, 6 November 2026); tests, staging and a canary may set one.
 
@@ -249,6 +250,13 @@ Discovery ranks below regular collection (the owner, 6 November 2026). Each vett
 - While discovery waits, `igs_discovery_candidates{status="new"}` grows. That is expected; once collection keeps up again, the vetter works through the queue, highest priority first.
 - If it waits for hours, collection itself is behind: see [Schedule](#schedule) (`IgsIgScheduleLag`) and [Block storm](#block-storm-block-rate--10).
 - `hold_when_behind: false` and `hold_resting_share: 0` turn the checks off.
+
+**Discovery's share of each exit** (D-027). Vets send at most `ig.discovery.exit_share` (0.1) of each proxy exit's rate (`ig.exit_rps`), counted across every crawler pod in Valkey (key `exit:<exit>:discovery`, beside the exit's own `exit:<exit>`). A vet's request waits for discovery's share of its exit first, then for the exit like any other request. So with `exit_rps` 0.25, vets send at most one request every 40 s per exit, and scheduled and on-demand work keep the other nine tenths even while discovery is busy. It is a cap, not a reservation: when no vet is running, regular collection uses the whole exit.
+- It covers vets only: discovery's sightings come from what regular collection already reads and send nothing. Backfills, also lane p2, are not capped by it.
+- `igs_exit_share_wait_seconds_total{class="discovery"}` rising faster than `igs_exit_share_requests_total` means vets queue for their share: discovery is held back by the cap, as intended. To let it go faster, raise `exit_share` (at most 1); `0` removes the cap.
+- Discovery's ceiling follows: exits × `exit_rps` × `exit_share` requests a second. With 10 exits at 0.25 and 0.1, that is 0.25 a second, about 21,600 vet requests a day.
+- A vet waiting for its share keeps its crawler slot in lane p2, which backfills also use. `vet_in_flight` (50, fleet-wide) bounds that, against 96 p2 slots per crawler pod. If backfills of new profiles queue behind vets, lower `vet_in_flight`.
+- With `exit_rps: 0` (no exit pacing), there is no share either.
 
 ### The place list
 

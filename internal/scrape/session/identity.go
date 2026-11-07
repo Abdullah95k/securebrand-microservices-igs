@@ -60,6 +60,30 @@ type Identity struct {
 	// whether the exit rests (both set by the pool).
 	exitWait func(context.Context) error
 	resting  func() bool
+	// shareWait paces a class's requests (WithShare) at its share of the
+	// exit's rate (set by the pool with exitWait).
+	shareWait func(ctx context.Context, class string) error
+}
+
+// ShareDiscovery is the share class of discovery's vets.
+const ShareDiscovery = "discovery"
+
+// shareKey carries a request's share class in its context (WithShare).
+type shareKey struct{}
+
+// WithShare marks the requests made with ctx as class's. On an exit paced
+// fleet-wide (PoolConfig.ExitRPS), a class with a share in
+// PoolConfig.Shares sends at most that fraction of the exit's rate, on top
+// of the exit's own pace: discovery's vets take at most a tenth of each
+// exit (ig.discovery.exit_share), and regular collection keeps the rest.
+func WithShare(ctx context.Context, class string) context.Context {
+	return context.WithValue(ctx, shareKey{}, class)
+}
+
+// ShareOf is the share class WithShare set on ctx, or "".
+func ShareOf(ctx context.Context) string {
+	c, _ := ctx.Value(shareKey{}).(string)
+	return c
 }
 
 // ErrExitResting means the identity's exit rests (a rate limit, a
@@ -115,6 +139,13 @@ func (id *Identity) Wait(ctx context.Context) error {
 	}
 	if err := id.limiter.Wait(ctx); err != nil {
 		return err
+	}
+	// A class's share first, then the exit's pace, which every request
+	// shares: the class never holds more than its share of the exit.
+	if class := ShareOf(ctx); class != "" && id.shareWait != nil {
+		if err := id.shareWait(ctx, class); err != nil {
+			return err
+		}
 	}
 	if id.exitWait != nil {
 		if err := id.exitWait(ctx); err != nil {
