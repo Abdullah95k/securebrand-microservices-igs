@@ -36,9 +36,28 @@ type Ops struct {
 	ready   atomic.Bool
 	started *http.Server
 	served  chan error
+
+	// The readiness checks' last result, reused for checkEvery.
+	checkEvery time.Duration
+	resultMu   sync.Mutex
+	checkedAt  time.Time
+	failure    string // "" when every check passed
 }
 
-func NewOps(addr string) *Ops { return &Ops{addr: addr, checks: map[string]Check{}} }
+// CheckEvery is how long /readyz reuses its checks' result. Each check is a
+// round trip to a store, and Kubernetes asks every 10 seconds: through the
+// platform's PgBouncer, a database touched that often never lets its idle
+// server connections close, and the shared database runs out of them
+// (production, 7 Nov 2026). Once a minute is enough for readiness: a store
+// that fails makes the work fail and retry at once anyway.
+const CheckEvery = time.Minute
+
+// checkTimeout bounds one round of checks. They run on their own context, so
+// a probe that gives up first (Kubernetes' default timeout is 1 s) doesn't
+// cancel them and leave a false failure for the next minute.
+const checkTimeout = 3 * time.Second
+
+func NewOps(addr string) *Ops { return &Ops{addr: addr, checks: map[string]Check{}, checkEvery: CheckEvery} }
 
 // AddCheck registers a readiness check.
 func (o *Ops) AddCheck(name string, c Check) {
@@ -56,19 +75,36 @@ func (o *Ops) Handler() http.Handler {
 			http.Error(w, "starting: opening the stores", http.StatusServiceUnavailable)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-		o.mu.RLock()
-		defer o.mu.RUnlock()
-		for name, c := range o.checks {
-			if err := c(ctx); err != nil {
-				http.Error(w, name+": "+err.Error(), http.StatusServiceUnavailable)
-				return
-			}
+		if failure := o.readiness(); failure != "" {
+			http.Error(w, failure, http.StatusServiceUnavailable)
+			return
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 	return mux
+}
+
+// readiness is the checks' result: the last one if it is younger than
+// checkEvery, else a new one. Concurrent probes wait for the same round.
+func (o *Ops) readiness() string {
+	o.resultMu.Lock()
+	defer o.resultMu.Unlock()
+	if !o.checkedAt.IsZero() && time.Since(o.checkedAt) < o.checkEvery {
+		return o.failure
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	defer cancel()
+	o.failure = ""
+	o.mu.RLock()
+	for name, c := range o.checks {
+		if err := c(ctx); err != nil {
+			o.failure = name + ": " + err.Error()
+			break
+		}
+	}
+	o.mu.RUnlock()
+	o.checkedAt = time.Now()
+	return o.failure
 }
 
 // Start listens at once and serves in the background, not ready yet. It

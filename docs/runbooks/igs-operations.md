@@ -438,6 +438,8 @@ Every binary starts its ops server (:9090) first, then opens its stores.
 - `/readyz` answers 503 `starting: opening the stores` until they are open.
 - Opening PostgreSQL retries for up to 3 minutes while the server is out of connection slots. The log says so: `pg: the database is busy; trying again` before each wait, and `pg: still waiting for the database` every 10 seconds while one attempt hangs, for example in a pooler's queue.
 
+Once running, `/readyz` checks the stores (PostgreSQL, Valkey, Kafka, as the component uses them) **at most once a minute** and answers from that result in between. Kubernetes probes every 10 seconds, and through the platform's PgBouncer a database touched that often never lets its idle server connections close. So a store that goes down shows as NotReady up to a minute later; the work itself fails and retries at once. `/healthz` never touches a store.
+
 So a pod that is Running but not Ready, logging these lines, waits for the database. Look at the database's connections, not at igs. After 3 minutes it exits with the database's error and Kubernetes starts it again.
 
 ## Schema changes

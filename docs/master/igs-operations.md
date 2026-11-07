@@ -192,7 +192,7 @@ The runbook is `docs/runbooks/igs-backups.md`, and the restore drill is tested i
 
 **Inbound:**
 - `:8080` is the REST API (`igs-api` only).
-- `:9090` is the ops port on every binary: `/metrics`, `/healthz`, `/readyz`.
+- `:9090` is the ops port on every binary: `/metrics`, `/healthz`, `/readyz`. `/healthz` touches no store. `/readyz` checks the stores at most once a minute and reuses the result, so idle pods don't keep the platform's PgBouncer server connections busy.
 
 **Outbound.** Through the proxy tiers unless noted:
 
