@@ -66,10 +66,12 @@ kubectl -n igs exec -i deploy/igs-api -- igsctl profiles import --file - < pilot
 It exits with 1 when something is BAD, and says what to look at.
 
 ```bash
-kubectl -n igs exec deploy/igs-api -- igsctl health
+kubectl -n igs exec deploy/igs-crawler-profile -- igsctl health
 ```
 
-**Stop.** This pauses every pilot account's schedule. Their data stays, and nothing more is read for them.
+Run it in a crawler pod: the api pod doesn't mount the proxies, so it can't show each tier's exits.
+
+**Stop.** This pauses every pilot account's schedule. Their data stays, and no new visit starts. Tasks already queued still run, a backfill's post pages included: to stop the reading itself, see "Stop all reading at once" below.
 
 ```bash
 kubectl -n igs exec -i deploy/igs-api -- igsctl profiles pause --file - < pilot-first-50.txt
@@ -89,15 +91,19 @@ kubectl -n igs exec -i deploy/igs-api -- igsctl profiles resume --file - < pilot
 kubectl -n igs exec -i deploy/igs-api -- igsctl profiles resume --file - < pilot-rest.txt
 ```
 
-**Stop all reading at once**, for example a block storm on every exit: the platform sets the four crawler deployments back to 0 in the Argo CD application. That is the same hold as before the pilot.
+**Stop all reading at once**, for example when most exits rest: the platform sets crawler-profile, crawler-post and crawler-retry to 0 in the Argo CD application. Queued tasks wait in Kafka. The task topics keep 24 hours, so set them back within about 20 hours, or the queued backfill expires: its jobs end partial, and later visits read the posts again. Leave registry-sync at 1: it loads 3 canary pages every 30 minutes.
+
+On 7 Nov this was needed two hours in: the backfill's post pages walled 9 of the 10 exits (section 4, "Why exits rest").
 
 ## 4. What to watch
 
 | Signal | Healthy | Where |
 |---|---|---|
-| Block rate | under 5% | `igs:ig_block_ratio:rate5m` (0 while nothing is blocked; before #108 the rule gave no series then) |
-| Exits resting | a few at a time, not most | `igs_exits_resting` / `igs_exits` (`igs_exits_resting` has no series until an exit first rests: read it as 0) |
-| Why exits rest | mostly `rate_limited`; `checkpoint` or `page_wall` on one exit means replace it with a spare | `igs_exit_rests_total` by reason |
+| Exits resting | **at most half** of a tier (igsctl warns above that). The first signal of a wall: resting exits send nothing, so the block rate can stay low while most exits rest | `igs_exits_resting` / `igs_exits`, `igsctl health` in a crawler pod |
+| Data stored per hour | not down by more than half from the hour before, while there is work queued | `igs_persist_rows_total` by entity |
+| Block rate | under 5%, read with exits resting: it covers only the exits still sending | `igs:ig_block_ratio:rate5m` (0 while nothing is blocked; before #108 the rule gave no series then) |
+| Exits resting, by tier | as above (`igs_exits_resting` has no series until an exit first rests: read it as 0) | `igs_exits_resting` / `igs_exits` |
+| Why exits rest | mostly `rate_limited`. `checkpoint` or `page_wall` on one exit means replace it with a spare. `page_wall` on most exits means Instagram is walling page loads from them: stop all reading (section 3) and lower the pace | `igs_exit_rests_total` by reason |
 | Schedule lag | well under 3 hours | `igs:ig_leader:schedule_lag_seconds` |
 | Parked tasks, dead letters | near 0 | `igs_dlq_total`, `igsctl health` |
 | Data stored | grows every hour | `igs_persist_rows_total` by entity |
