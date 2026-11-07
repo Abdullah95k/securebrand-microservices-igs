@@ -16,6 +16,13 @@ Every `ig.registry_sync.interval` (30 minutes):
    igs checks the highlights query only on a canary that has some. Without
    one, highlights stays unchecked on every run, no run counts as a
    success, and `IgsIgRegistrySyncNotRunning` fires after 3 hours.
+
+Its requests go through the crawlers' exits and honour their rests, but
+keep a pace of their own on each exit: a fifth of `ig.exit_rps`. Before,
+they queued for the crawlers' slots. The fleet-wide pacer has no queue, so
+with about 20 crawler sessions per exit each check waited about 80
+seconds, and every run hit its 10-minute timeout while the crawlers read
+(the pilot, 7 Nov 2026). With the crawlers stopped, the same runs finished.
 2. Scans the page and its script bundles (`static.cdninstagram.com`) for
    Relay operation ids. That Instagram's bundles declare them, as Facebook's
    do, is open question U6; when they do not, and `ig.browser.enabled` is
