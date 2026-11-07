@@ -34,7 +34,9 @@ spec:
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
-      {{- if and $c.browser $root.Values.image.browserTag }}
+      {{- $browser := and $c.browser $root.Values.image.browserTag }}
+      {{- $sidecar := and $browser $root.Values.browserContainer.enabled }}
+      {{- if $browser }}
       # The pod's pause process becomes PID 1 and reaps Chromium's orphans.
       shareProcessNamespace: true
       {{- end }}
@@ -42,11 +44,16 @@ spec:
       containers:
         - name: {{ $name }}
           {{- $tag := $root.Values.image.tag | default $root.Chart.AppVersion }}
-          {{- if and $c.browser $root.Values.image.browserTag }}{{ $tag = $root.Values.image.browserTag }}{{ end }}
+          {{- if and $browser (not $sidecar) }}{{ $tag = $root.Values.image.browserTag }}{{ end }}
           image: "{{ $root.Values.image.repository }}:{{ $tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           command: {{- toYaml $c.command | nindent 12 }}
           env: {{- include "igs.env" $pod | nindent 12 }}
+            {{- if $sidecar }}
+            # Renders open a browser context in the chromium container.
+            - name: IGS_IG__BROWSER__REMOTE
+              value: "http://127.0.0.1:{{ $root.Values.browserContainer.port }}"
+            {{- end }}
           {{- include "igs.envFrom" $root | nindent 10 }}
           ports:
             - {name: metrics, containerPort: 9090}
@@ -64,7 +71,37 @@ spec:
           resources: {{- toYaml $c.resources | nindent 12 }}
           securityContext: {{- toYaml $root.Values.securityContext | nindent 12 }}
           volumeMounts: {{- include "igs.volumeMounts" $pod | nindent 12 }}
+        {{- if $sidecar }}
+        - name: chromium
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.browserTag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/usr/bin/chromium"]
+          args:
+            {{- toYaml $root.Values.browserContainer.args | nindent 12 }}
+            - --remote-debugging-address=127.0.0.1
+            - --remote-debugging-port={{ $root.Values.browserContainer.port }}
+            # The crawler's DevTools client sends this Origin.
+            - --remote-allow-origins=http://127.0.0.1
+            - --user-data-dir=/tmp/chromium
+            - about:blank
+          readinessProbe:
+            tcpSocket: {port: {{ $root.Values.browserContainer.port }}}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: {{ $root.Values.browserContainer.port }}}
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml $root.Values.browserContainer.resources | nindent 12 }}
+          securityContext: {{- toYaml $root.Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: chromium-tmp
+              mountPath: /tmp
+        {{- end }}
       volumes: {{- include "igs.volumes" $pod | nindent 8 }}
+        {{- if $sidecar }}
+        - name: chromium-tmp
+          emptyDir: {}
+        {{- end }}
 {{- if $c.pdb }}
 ---
 apiVersion: policy/v1

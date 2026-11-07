@@ -21,3 +21,79 @@ spec:
         - podSelector: {}
         - namespaceSelector: {}
 {{- end }}
+{{- $eg := .Values.networkPolicy.egress }}
+{{- if $eg.enabled }}
+---
+# What every igs pod may reach (REQ-008 fix 21): DNS, the stores, other
+# namespaces and HTTPS. values.yaml, networkPolicy.egress, explains each.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "igs.fullname" . }}-egress
+  labels: {{- include "igs.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: igs
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "networkPolicy.egress.dnsNamespace" $eg.dnsNamespace }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    {{- range $eg.services }}
+    - to:
+        - ipBlock: {cidr: {{ required "networkPolicy.egress.services[].cidr" .cidr | quote }}}
+      {{- with .ports }}
+      ports: {{- include "igs.egressPorts" . | trim | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- range $eg.namespaces }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "networkPolicy.egress.namespaces[].namespace" .namespace }}
+      {{- with .ports }}
+      ports: {{- include "igs.egressPorts" . | trim | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- with $eg.https }}
+    - to:
+        {{- range . }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
+{{- if and $eg.proxies $eg.proxyComponents }}
+---
+# The proxy gateway, for the components that crawl through it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "igs.fullname" . }}-egress-proxies
+  labels: {{- include "igs.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: igs
+      app.kubernetes.io/instance: {{ .Release.Name }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: {{- toYaml $eg.proxyComponents | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    {{- range $eg.proxies }}
+    - to:
+        - ipBlock: {cidr: {{ required "networkPolicy.egress.proxies[].cidr" .cidr | quote }}}
+      {{- with .ports }}
+      ports: {{- include "igs.egressPorts" . | trim | nindent 8 }}
+      {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

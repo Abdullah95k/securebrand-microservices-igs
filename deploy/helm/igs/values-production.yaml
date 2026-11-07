@@ -113,6 +113,27 @@ serviceMonitor:
 
 networkPolicy:
   enabled: true
+  # What igs's pods may reach (REQ-008 fix 21), as fbs's production sets it
+  # (the master, 7 Nov 2026).
+  egress:
+    enabled: true
+    dnsNamespace: kube-system
+    services:
+      # The VPC's private network: PgBouncer, Kafka and Valkey. Every port:
+      # the managed services' private addresses and ports aren't fixed.
+      - cidr: 10.30.0.0/16
+      # The managed services' public endpoints, to be safe.
+      - cidr: 0.0.0.0/0
+        ports: [{port: 25060, endPort: 25080}]
+    # Spaces (no private endpoint), the media CDN and the JavaScript
+    # bundles registry-sync reads directly.
+    https: [0.0.0.0/0]
+    # The proxy gateway's per-IP ports, as fbs's provider has them. Check
+    # them against PROXIES_IGS when it exists: a crawler that can't reach
+    # its exits sees every request time out.
+    proxies:
+      - cidr: 0.0.0.0/0
+        ports: [{port: 10000, endPort: 10999}]
 
 # KEDA's maxima equal the partitions of the topics each consumes (the
 # platform's sizes): more pods than partitions would only wait.

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -67,6 +68,12 @@ type Options struct {
 	// BlockMedia fails image, media and font requests: they cost proxy
 	// bandwidth and carry nothing a bootstrap or capture needs.
 	BlockMedia bool
+	// Remote is the DevTools address (http://host:port) of a Chromium that
+	// is already running, such as the chart's browser container: the
+	// render opens a browser context of its own there, with its own
+	// cookies and the identity's exit, and closes it after, instead of
+	// starting a Chromium of its own (REQ-008 fix 21, B3).
+	Remote string
 }
 
 // ClientHints is the user-agent metadata of a fingerprint.
@@ -158,7 +165,29 @@ func IsInstagramGraphQL(rawURL string) bool {
 	return err == nil && (strings.HasPrefix(u.Path, "/api/graphql") || strings.HasPrefix(u.Path, "/graphql/query"))
 }
 
-// Render loads opts.URL in a fresh headless Chromium.
+// remoteWS asks a running Chromium's DevTools address for its browser
+// websocket.
+func remoteWS(ctx context.Context, addr string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(addr, "/")+"/json/version", nil)
+	if err != nil {
+		return "", fmt.Errorf("browser: remote %s: %w", addr, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("browser: remote %s: %w", addr, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var v struct {
+		WS string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil || v.WS == "" {
+		return "", fmt.Errorf("browser: remote %s gave no browser websocket (%v)", addr, err)
+	}
+	return v.WS, nil
+}
+
+// Render loads opts.URL in a fresh headless Chromium, or in a browser
+// context of its own in the running Chromium opts.Remote names.
 func Render(ctx context.Context, binary string, opts Options) (*Result, error) {
 	start := time.Now()
 	if opts.Capture == nil {
@@ -177,7 +206,7 @@ func Render(ctx context.Context, binary string, opts Options) (*Result, error) {
 	if opts.AcceptLanguage != "" {
 		args = append(args, "--lang="+strings.SplitN(opts.AcceptLanguage, ",", 2)[0])
 	}
-	var proxyUser, proxyPass string
+	var proxyUser, proxyPass, proxyServer string
 	if opts.Proxy != nil {
 		p := *opts.Proxy
 		if strings.HasPrefix(p.Scheme, "socks") && p.User != nil {
@@ -191,26 +220,58 @@ func Render(ctx context.Context, binary string, opts Options) (*Result, error) {
 		}
 		// Chromium takes the proxy without credentials; they are answered
 		// on the authentication challenge.
-		args = append(args, "--proxy-server="+p.Scheme+"://"+p.Host, "--proxy-bypass-list=<-loopback>")
+		proxyServer = p.Scheme + "://" + p.Host
+		args = append(args, "--proxy-server="+proxyServer, "--proxy-bypass-list=<-loopback>")
 	} else {
 		// Direct means direct: not a proxy from the environment.
 		args = append(args, "--no-proxy-server")
 	}
-	proc, err := launch(ctx, binary, opts.NoSandbox, args)
-	if err != nil {
-		return nil, err
+	var c *conn
+	newTarget := map[string]any{"url": "about:blank"}
+	if opts.Remote != "" {
+		ws, err := remoteWS(ctx, opts.Remote)
+		if err != nil {
+			return nil, err
+		}
+		if c, err = dial(ctx, ws); err != nil {
+			return nil, err
+		}
+		defer c.close()
+		// A browser context is the render's own: cookies, cache and the
+		// identity's exit (a direct render names none; the browser
+		// container starts with --no-proxy-server).
+		bc := map[string]any{"disposeOnDetach": true}
+		if proxyServer != "" {
+			bc["proxyServer"], bc["proxyBypassList"] = proxyServer, "<-loopback>"
+		}
+		var created struct {
+			BrowserContextID string `json:"browserContextId"`
+		}
+		if err := c.call(ctx, "", "Target.createBrowserContext", bc, &created); err != nil {
+			return nil, err
+		}
+		defer func() {
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = c.call(dctx, "", "Target.disposeBrowserContext", map[string]any{"browserContextId": created.BrowserContextID}, nil)
+		}()
+		newTarget["browserContextId"] = created.BrowserContextID
+	} else {
+		proc, err := launch(ctx, binary, opts.NoSandbox, args)
+		if err != nil {
+			return nil, err
+		}
+		defer proc.stop()
+		if c, err = dial(ctx, proc.wsURL); err != nil {
+			return nil, err
+		}
+		defer c.close()
 	}
-	defer proc.stop()
-	c, err := dial(ctx, proc.wsURL)
-	if err != nil {
-		return nil, err
-	}
-	defer c.close()
 
 	var target struct {
 		TargetID string `json:"targetId"`
 	}
-	if err := c.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &target); err != nil {
+	if err := c.call(ctx, "", "Target.createTarget", newTarget, &target); err != nil {
 		return nil, err
 	}
 	var attached struct {
@@ -230,13 +291,24 @@ func Render(ctx context.Context, binary string, opts Options) (*Result, error) {
 			return nil, err
 		}
 	}
-	if opts.UserAgent != "" && opts.Hints != nil {
+	switch {
+	case opts.UserAgent != "" && opts.Hints != nil:
 		meta := map[string]any{"brands": opts.Hints.Brands, "platform": opts.Hints.Platform,
 			"platformVersion": "", "architecture": "x86", "model": "", "mobile": opts.Hints.Mobile}
 		if err := c.call(ctx, s, "Network.setUserAgentOverride", map[string]any{"userAgent": opts.UserAgent,
 			"acceptLanguage": opts.AcceptLanguage, "platform": navigatorPlatform(opts.Hints.Platform), "userAgentMetadata": meta}, nil); err != nil {
 			return nil, err
 		}
+	case opts.UserAgent != "" && opts.Remote != "":
+		// A shared Chromium took no --user-agent: set it on the page.
+		if err := c.call(ctx, s, "Network.setUserAgentOverride", map[string]any{"userAgent": opts.UserAgent,
+			"acceptLanguage": opts.AcceptLanguage}, nil); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Remote != "" && opts.AcceptLanguage != "" {
+		// Nor --lang: navigator.language follows the locale override.
+		_ = c.call(ctx, s, "Emulation.setLocaleOverride", map[string]any{"locale": strings.SplitN(opts.AcceptLanguage, ",", 2)[0]}, nil)
 	}
 	for _, m := range []string{"Network.enable", "Page.enable", "Runtime.enable"} {
 		if err := c.call(ctx, s, m, nil, nil); err != nil {
@@ -311,7 +383,11 @@ func Render(ctx context.Context, binary string, opts Options) (*Result, error) {
 		}
 		res.Captured = append(res.Captured, *x)
 	}
-	_ = c.call(context.WithoutCancel(ctx), "", "Browser.close", nil, nil)
+	if opts.Remote == "" {
+		// A Chromium of the render's own; a shared one stays up (its
+		// browser context is disposed above).
+		_ = c.call(context.WithoutCancel(ctx), "", "Browser.close", nil, nil)
+	}
 	res.Elapsed = time.Since(start)
 	return res, nil
 }

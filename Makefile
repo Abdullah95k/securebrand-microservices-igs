@@ -84,6 +84,12 @@ igs-chart-check:
 	set -o pipefail; $(HELM) template igs deploy/helm/igs --set keda.authSecret=igs-keda-kafka,tlsFiles.existingSecret=igs-tls,alerts.enabled=true,dashboards.enabled=true,serviceMonitor.enabled=true,api.ingress.enabled=true,networkPolicy.enabled=true,hooks.schemas=true \
 	  | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/fakeig.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	set -o pipefail; $(HELM) template igs deploy/helm/igs --set image.browserTag=check-browser,config.ig.browser.enabled=true | $(KUBECONFORM) $(KUBECONFORM_ARGS)
+	set -o pipefail; $(HELM) template igs deploy/helm/igs --set networkPolicy.egress.enabled=true \
+	  --set-json 'networkPolicy.egress.services=[{"cidr":"10.0.0.0/8"},{"cidr":"0.0.0.0/0","ports":[{"port":25060,"endPort":25080}]}]' \
+	  --set-json 'networkPolicy.egress.namespaces=[{"namespace":"platform","ports":[{"port":8081}]},{"namespace":"other"}]' \
+	  --set-json 'networkPolicy.egress.https=["0.0.0.0/0"]' --set-json 'networkPolicy.egress.proxies=[{"cidr":"192.0.2.0/24","ports":[{"port":8000}]}]' \
+	  | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 	$(HELM) lint deploy/helm/igs -f deploy/helm/igs/examples/production.yaml
 	set -o pipefail; $(HELM) template igs deploy/helm/igs -f deploy/helm/igs/examples/production.yaml | $(KUBECONFORM) $(KUBECONFORM_ARGS)
 	$(HELM) lint deploy/helm/igs -f deploy/helm/igs/values-production.yaml
@@ -93,6 +99,7 @@ igs-chart-check:
 	$(KUBECONFORM) $(KUBECONFORM_ARGS) deploy/soak/stores.yaml deploy/soak/fakeig.yaml deploy/soak/driver.yaml
 	python3 scripts/soak-resources.py --helm $(HELM)
 	python3 scripts/chart-secrets.py --helm $(HELM)
+	python3 scripts/chart-egress.py --helm $(HELM)
 
 ## Run the chart's hooks and Deployments in Docker exactly as rendered
 ## (igsctl hooks, every Deployment), then three registered profiles'

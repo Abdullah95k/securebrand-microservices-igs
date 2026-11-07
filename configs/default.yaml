@@ -116,6 +116,10 @@ fb:
     max_share: 0.02
     timeout: 45s
     no_sandbox: false
+    # A running Chromium's DevTools address (the chart's browser container,
+    # http://127.0.0.1:9222): renders open a browser context there instead
+    # of starting a Chromium in this process. "" starts one per render.
+    remote: ""
   aimd:
     enabled: true
     interval: 10s
@@ -444,6 +448,10 @@ ig:
     max_share: 0.02
     timeout: 45s
     no_sandbox: false
+    # A running Chromium's DevTools address (the chart's browser container,
+    # http://127.0.0.1:9222): renders open a browser context there instead
+    # of starting a Chromium in this process. "" starts one per render.
+    remote: ""
   detect:
     replace: false
   limits:

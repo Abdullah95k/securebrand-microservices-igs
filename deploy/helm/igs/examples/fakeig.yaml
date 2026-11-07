@@ -65,3 +65,7 @@ components:
   media-downloader: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 1Gi}}}
   media-janitor: {replicas: 1}
   registry-sync: {replicas: 1}
+
+# A rehearsal cluster has no Prometheus Operator CRDs.
+alerts:
+  enabled: false
