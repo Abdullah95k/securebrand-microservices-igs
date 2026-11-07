@@ -50,8 +50,9 @@ func Retry(d time.Duration) Option {
 // Retryable reports whether err says the server is busy or starting rather
 // than that the request is wrong: out of connection slots (SQLSTATE 53300,
 // also a role's connection limit), starting up (57P03), out of resources
-// (53000), or PgBouncer's "no more connections allowed" and "server login
-// has been failing". A wrong password, a missing database or a refused TLS
+// (53000), or PgBouncer's "no more connections allowed", "server login has
+// been failing" and "query_wait_timeout" (it gave up queueing for a server
+// connection). A wrong password, a missing database or a refused TLS
 // handshake are not.
 func Retryable(err error) bool {
 	var pe *pgconn.PgError
@@ -61,7 +62,8 @@ func Retryable(err error) bool {
 			return true
 		}
 		m := strings.ToLower(pe.Message)
-		return strings.Contains(m, "no more connections allowed") || strings.Contains(m, "server login has been failing")
+		return strings.Contains(m, "no more connections allowed") || strings.Contains(m, "server login has been failing") ||
+			strings.Contains(m, "query_wait_timeout")
 	}
 	return false
 }

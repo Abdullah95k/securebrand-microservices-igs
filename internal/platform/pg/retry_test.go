@@ -96,6 +96,8 @@ func TestRetryable(t *testing.T) {
 		{&pgconn.PgError{Code: "53000", Message: "insufficient resources"}, true},
 		{&pgconn.PgError{Code: "08P01", Message: "no more connections allowed (max_client_conn)"}, true},
 		{&pgconn.PgError{Code: "08P01", Message: "server login has been failing, try again later (server_login_retry)"}, true},
+		{&pgconn.PgError{Severity: "FATAL", Code: "08P01", Message: "query_wait_timeout"}, true},
+		{&pgconn.PgError{Code: "08P01", Message: "unsupported startup parameter: search_path"}, false},
 		{fmt.Errorf("pg: ping: %w", &pgconn.PgError{Code: "53300"}), true},
 		{&pgconn.PgError{Code: "28P01", Message: "password authentication failed"}, false},
 		{&pgconn.PgError{Code: "3D000", Message: `database "x" does not exist`}, false},

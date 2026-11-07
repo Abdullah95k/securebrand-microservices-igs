@@ -69,7 +69,7 @@ From the platform's answers (7 November 2026):
 
   igs checks this at start and stops, naming the setting, when it's missing. The role also creates schema `ig` and its tables (the migrate hook).
 
-  **When the database is busy at start** (REQ-023 item 5): every igs binary and `igsctl` (the migrate hook) tries again for about 3 minutes, backing off from 1 s to 15 s, while Postgres or PgBouncer says it is out of connections or starting. These are SQLSTATE 53300, 57P03 and 53000, and PgBouncer's "no more connections allowed" and "server login has been failing". Each try is logged (`pg: the database is busy; trying again`). A wrong password, a missing database or a missing schema fail at once.
+  **When the database is busy at start** (REQ-023 item 5): every igs binary and `igsctl` (the migrate hook) tries again for about 3 minutes, backing off from 1 s to 15 s, while Postgres or PgBouncer says it is out of connections or starting. These are SQLSTATE 53300, 57P03 and 53000, and PgBouncer's "no more connections allowed", "server login has been failing" and "query_wait_timeout". Each try is logged (`pg: the database is busy; trying again`). A wrong password, a missing database or a missing schema fail at once.
 
 Outside the platform (a direct connection), igs sets its search path itself, after connecting.
 
