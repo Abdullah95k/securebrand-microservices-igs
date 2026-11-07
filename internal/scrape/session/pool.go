@@ -352,8 +352,12 @@ func (p *Pool) build(ep proxy.Endpoint, fp Fingerprint, maxReq int) (*Identity, 
 			}
 			began := time.Now()
 			err := p.cfg.ExitPacer.WaitRate(ctx, key+":"+class, rps*share)
-			metrics.ExitShareRequests.WithLabelValues(class).Inc()
 			metrics.ExitShareWait.WithLabelValues(class).Add(time.Since(began).Seconds())
+			if err == nil {
+				// Counted once let through: a cancelled or failed wait
+				// sends nothing.
+				metrics.ExitShareRequests.WithLabelValues(class).Inc()
+			}
 			return err
 		}
 	}

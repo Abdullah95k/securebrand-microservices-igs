@@ -68,7 +68,10 @@ config:
     discovery:
       enabled: true
       threshold: 4
-      vet_in_flight: 50
+      # About 2 per exit (10 exits): vets wait for discovery's share of
+      # each exit (exit_share), so more in flight only hold crawler slots
+      # and identities without vetting faster.
+      vet_in_flight: 20
       max_new_per_day: 0         # no cap in production (owner, 6 Nov 2026)
     # A byte budget suits a proxy plan billed per GB (0: none).
     budget:
