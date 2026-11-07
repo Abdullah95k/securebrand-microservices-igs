@@ -51,6 +51,12 @@ func (c *Config) applyPlatform(getenv func(string) string) error {
 		}
 		c.Postgres.DSN = u.String()
 	}
+	// The servers' certificates may be signed by the platform's own CA
+	// (POSTGRES_CA_CERT, KAFKA_CA_CERT, VALKEY_CA_CERT); an empty value
+	// means none was given.
+	if v := get("POSTGRES_CA_CERT"); v != "" {
+		c.Postgres.CAPEM = v
+	}
 
 	// Kafka.
 	need("KAFKA_BROKERS")
@@ -72,6 +78,9 @@ func (c *Config) applyPlatform(getenv func(string) string) error {
 			return fmt.Errorf("platform: KAFKA_TLS: %w", err)
 		}
 		c.Kafka.TLS.Enabled = on
+	}
+	if v := get("KAFKA_CA_CERT"); v != "" {
+		c.Kafka.TLS.CAPEM = v
 	}
 	if v := get("SCHEMA_REGISTRY_URL"); v != "" {
 		c.Kafka.SchemaRegistry.URL = v
@@ -120,6 +129,9 @@ func (c *Config) applyPlatform(getenv func(string) string) error {
 			return fmt.Errorf("platform: VALKEY_TLS: %w", err)
 		}
 		c.Redis.TLS.Enabled = on
+	}
+	if v := get("VALKEY_CA_CERT"); v != "" {
+		c.Redis.TLS.CAPEM = v
 	}
 	if v := get("VALKEY_DB"); v != "" {
 		n, err := strconv.Atoi(v)

@@ -35,7 +35,7 @@ func main() {
 }
 
 func runMedia(ctx context.Context, cfg *config.Config, roles []string) error {
-	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema)
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
 	if err != nil {
 		return err
 	}
