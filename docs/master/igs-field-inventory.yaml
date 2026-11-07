@@ -229,8 +229,20 @@ entities:
     history: latest
     personal_data: false
     notes: 'Absent from every logged-out answer captured, so always false; false here means unknown (a proto3 bool can''t say so). Fix planned: make it optional.'
+  - name: external_url
+    meaning: The profile's website
+    type: text
+    example: https://example.com/fake
+    present: unknown
+    present_pct: null
+    source: profile query (user by username) (external_url, external_lynx_url, if served)
+    stored_at: profiles.external_url
+    published_at: Profile.external_url; Account.website (else the first bio link)
+    history: latest
+    personal_data: false
+    notes: 'Read when served (REQ-008 fix 18). Absent from every logged-out answer captured: the website has come as the first bio link.'
   - name: business contact fields
-    meaning: Public e-mail, phone, address, city, external_url
+    meaning: Public e-mail, phone, address, city
     type: text
     example: '-'
     present: unknown
@@ -240,7 +252,7 @@ entities:
     published_at: not published
     history: '-'
     personal_data: true
-    notes: Not in the logged-out answer igs reads. The website appears as a bio link instead of external_url. Whether another logged-out page serves them is unknown.
+    notes: Not in the logged-out answer igs reads. Whether another logged-out page serves them is unknown.
   - name: pronouns
     meaning: Pronouns, joined with "/"
     type: text
@@ -2024,7 +2036,7 @@ answers:
   - 'Post level: location (10% of posts), caption language and keywords, tagged and co-author accounts.'
   - 'Reliability: location is precise but rare; phone and .iq are strong but rare; keywords and dialect are common but noisy (fixed false positives such as words that only contain a city name). The Iraqi-audience count is the strongest signal for foreign accounts aimed at Iraq. Not measured as precision or recall.'
   Profile links:
-  - 'Bio: yes. Every bio link (URL and title): yes. Website: as the first bio link (no separate external_url is served). Linked Facebook page: the name only; the ID is dropped today, fix planned.'
+  - 'Bio: yes. Every bio link (URL and title): yes. Website: external_url when served, else the first bio link (no logged-out answer captured has served external_url). Linked Facebook page: its name and its ID (REQ-008 fix 9).'
   - No history in Postgres beyond the latest; each change is a new event version.
   Raw responses:
   - 'Every answer, not just failures (capture_raw: all): zstd-compressed JSON lines in the raw S3 bucket. Each event''s raw_ref points at its line (s3://bucket/key#line).'

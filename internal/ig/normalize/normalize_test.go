@@ -2,6 +2,7 @@ package normalize
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -75,6 +76,36 @@ func TestProfileToAccount(t *testing.T) {
 		topics.ContentAccount)
 	if !private.IsPrivate {
 		t.Fatal("a private profile is not private")
+	}
+}
+
+// The website is external_url when the answer serves it, else the first
+// bio link (REQ-008 fix 18). country_signals are the signs of Iraq in the
+// profile's own words, as discovery reads them; an account with none has
+// none, and Arabic script alone is not one.
+func TestAccountWebsiteAndCountrySignals(t *testing.T) {
+	account := func(p *igv1.Profile) *contentv1.Account {
+		t.Helper()
+		p.Obs, p.UserPk, p.Status = obs("w"), 50, igv1.ProfileStatus_PROFILE_STATUS_ACTIVE
+		return one[*contentv1.Account](t, Map(p), topics.ContentAccount)
+	}
+	a := account(&igv1.Profile{FullName: "مطعم بغداد", Biography: "أطيب أكل بالعراق 🇮🇶 للحجز +964 770 123 4567",
+		ExternalUrl: "https://restaurant.iq/", BioLinks: []*igv1.BioLink{{Url: "https://linktr.ee/restaurant"}}})
+	if a.Website != "https://restaurant.iq/" || len(a.Links) != 1 {
+		t.Fatalf("website %q links %v", a.Website, a.Links)
+	}
+	if want := []string{"IQ:iq_link", "IQ:iraq_city", "IQ:iraq_named", "IQ:iraq_phone"}; !slices.Equal(a.CountrySignals, want) {
+		t.Fatalf("country signals %v, want %v", a.CountrySignals, want)
+	}
+	if a := account(&igv1.Profile{FullName: "Coffee Lab", Biography: "Specialty coffee in London",
+		BioLinks: []*igv1.BioLink{{Url: "https://coffee.example/"}}}); a.Website != "https://coffee.example/" || len(a.CountrySignals) != 0 {
+		t.Fatalf("website %q, country signals %v", a.Website, a.CountrySignals)
+	}
+	if a := account(&igv1.Profile{FullName: "متجر", Biography: "أفضل العطور والهدايا بأسعار مناسبة للجميع"}); len(a.CountrySignals) != 0 {
+		t.Fatalf("Arabic script alone gave country signals %v", a.CountrySignals)
+	}
+	if a := account(&igv1.Profile{Biography: "وێنەگر لە هەولێر"}); !slices.Contains(a.CountrySignals, "IQ:sorani_kurdish") {
+		t.Fatalf("a Sorani bio: %v", a.CountrySignals)
 	}
 }
 

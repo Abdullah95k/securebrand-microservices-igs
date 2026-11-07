@@ -21,25 +21,28 @@ import (
 
 // Profile is the API view of a stored profile.
 type Profile struct {
-	UserPK            int64           `json:"user_pk"`
-	Username          *string         `json:"username,omitempty"`
-	FullName          *string         `json:"full_name,omitempty"`
-	Biography         *string         `json:"biography,omitempty"`
-	BioLinks          json.RawMessage `json:"bio_links,omitempty"`
-	Verified          *bool           `json:"verified,omitempty"`
-	Private           *bool           `json:"private,omitempty"`
-	FollowerCount     *int64          `json:"follower_count,omitempty"`
-	FollowingCount    *int64          `json:"following_count,omitempty"`
-	MediaCount        *int64          `json:"media_count,omitempty"`
-	ProfilePicURL     *string         `json:"profile_pic_url,omitempty"`
-	Category          *string         `json:"category,omitempty"`
-	IsBusiness        *bool           `json:"is_business,omitempty"`
-	HighlightCount    *int32          `json:"highlight_count,omitempty"`
-	Status            string          `json:"status"`
-	FirstSeenAt       time.Time       `json:"first_seen_at"`
-	LastScrapedAt     *time.Time      `json:"last_scraped_at,omitempty"`
-	LastProfileReadAt *time.Time      `json:"last_profile_read_at,omitempty"`
-	Schedule          *Schedule       `json:"schedule,omitempty"`
+	UserPK    int64           `json:"user_pk"`
+	Username  *string         `json:"username,omitempty"`
+	FullName  *string         `json:"full_name,omitempty"`
+	Biography *string         `json:"biography,omitempty"`
+	BioLinks  json.RawMessage `json:"bio_links,omitempty"`
+	// ExternalURL is the website when Instagram serves it as such (REQ-008
+	// fix 18); otherwise it is the first bio link.
+	ExternalURL       *string    `json:"external_url,omitempty"`
+	Verified          *bool      `json:"verified,omitempty"`
+	Private           *bool      `json:"private,omitempty"`
+	FollowerCount     *int64     `json:"follower_count,omitempty"`
+	FollowingCount    *int64     `json:"following_count,omitempty"`
+	MediaCount        *int64     `json:"media_count,omitempty"`
+	ProfilePicURL     *string    `json:"profile_pic_url,omitempty"`
+	Category          *string    `json:"category,omitempty"`
+	IsBusiness        *bool      `json:"is_business,omitempty"`
+	HighlightCount    *int32     `json:"highlight_count,omitempty"`
+	Status            string     `json:"status"`
+	FirstSeenAt       time.Time  `json:"first_seen_at"`
+	LastScrapedAt     *time.Time `json:"last_scraped_at,omitempty"`
+	LastProfileReadAt *time.Time `json:"last_profile_read_at,omitempty"`
+	Schedule          *Schedule  `json:"schedule,omitempty"`
 }
 
 // Schedule is a registered profile's scheduled crawl.
@@ -61,10 +64,10 @@ type Schedule struct {
 
 func (s *Server) profileByPK(ctx context.Context, pk int64) (*Profile, error) {
 	var p Profile
-	err := s.ReadDB.QueryRow(ctx, `SELECT user_pk, username, full_name, biography, bio_links, verified, private, follower_count,
-		following_count, media_count, profile_pic_url, category, is_business, highlight_count, status, first_seen_at,
+	err := s.ReadDB.QueryRow(ctx, `SELECT user_pk, username, full_name, biography, bio_links, external_url, verified, private,
+		follower_count, following_count, media_count, profile_pic_url, category, is_business, highlight_count, status, first_seen_at,
 		last_scraped_at, last_profile_read_at FROM profiles WHERE user_pk = $1 AND status <> 'suppressed'`, pk).
-		Scan(&p.UserPK, &p.Username, &p.FullName, &p.Biography, &p.BioLinks, &p.Verified, &p.Private, &p.FollowerCount,
+		Scan(&p.UserPK, &p.Username, &p.FullName, &p.Biography, &p.BioLinks, &p.ExternalURL, &p.Verified, &p.Private, &p.FollowerCount,
 			&p.FollowingCount, &p.MediaCount, &p.ProfilePicURL, &p.Category, &p.IsBusiness, &p.HighlightCount, &p.Status,
 			&p.FirstSeenAt, &p.LastScrapedAt, &p.LastProfileReadAt)
 	if err != nil {

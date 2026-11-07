@@ -103,6 +103,9 @@ func Profile(parts []gjson.Result) (ProfileResult, walk.Report) {
 			p.BioLinks = append(p.BioLinks, &igv1.BioLink{Url: url, Title: l.Get("title").String()})
 		}
 	}
+	// The website, when the answer serves it (REQ-008 fix 18); the
+	// logged-out profile query has carried it only as the first bio link.
+	p.ExternalUrl = walk.First(u, "external_url", "external_lynx_url").String()
 	if fb := u.Get("linked_fb_info"); fb.IsObject() {
 		p.LinkedFacebookPage = walk.First(fb, "linked_fb_page.name", "linked_fb_user.name", "name").String()
 		// A page's ID only: a linked personal account is not a page.

@@ -48,7 +48,8 @@ Account = Instagram profile. The profile query returns about 5 KB.
 | `linked_fb_info.linked_fb_user` | A linked Facebook user | object | - | unknown | profile query (user by username) | not stored | not published | - | yes | Empty in every captured answer. Dropped. |
 | `category` | Account category | text | Example category | unknown | profile query (user by username) (`category_name` or `category`, if served) | `profiles.category` | `Profile.category`; `Account.category` | latest | no | Absent from every logged-out answer captured; may be logged-in only. Always empty in practice. |
 | `is_business` | Business or creator account | bool | false | unknown | profile query (user by username) (`is_business_account`, if served) | `profiles.is_business` | `Profile.is_business`; `Account.is_business` | latest | no | Absent from every logged-out answer captured, so always `false`; `false` here means unknown (a proto3 bool can't say so). Fix planned: make it optional. |
-| `business contact fields` | Public e-mail, phone, address, city, `external_url` | text | - | unknown | profile query (user by username) | not stored | not published | - | yes | Not in the logged-out answer igs reads. The website appears as a bio link instead of `external_url`. Whether another logged-out page serves them is unknown. |
+| `external_url` | The profile's website | text | https://example.com/fake | unknown | profile query (user by username) (`external_url`, `external_lynx_url`, if served) | `profiles.external_url` | `Profile.external_url`; `Account.website` (else the first bio link) | latest | no | Read when served (REQ-008 fix 18). Absent from every logged-out answer captured: the website has come as the first bio link. |
+| `business contact fields` | Public e-mail, phone, address, city | text | - | unknown | profile query (user by username) | not stored | not published | - | yes | Not in the logged-out answer igs reads. Whether another logged-out page serves them is unknown. |
 | `pronouns` | Pronouns, joined with "/" | text | they/them | rare | profile query (user by username) | not stored | `Profile.pronouns`; `Account.extras_json.pronouns` | latest | yes | Published but not stored in Postgres (no column). |
 | `highlight_count` | Number of highlights | int32 | 3 | always | highlights list inside the profile query (counted) | `profiles.highlight_count` | `Profile.highlight_count`; `Account.extras_json.highlight_count` | latest | no |  |
 | `highlights_hash` | Hash of the highlights list | bytes | - | always | derived by igs | `profiles.highlights_hash` | `Profile.highlights_hash` | latest | no | Internal: unchanged highlights aren't re-read. |
@@ -369,12 +370,13 @@ Nothing about discovery is published to Kafka today. `discovery.candidate.v1` do
 ### 9. Iraq signals
 
 - Account level (discovery's score): bio and name text in Arabic, Kurdish (Sorani letters), Iraqi dialect; Iraqi cities and governorates in three scripts; +964 or 07xx phone numbers; `.iq` links; post locations in Iraq; how many registered Iraqi accounts link to it. Another country without Iraq counts against.
+- Published on every account (`Account.country_signals`, REQ-008 fix 18): the signs of Iraq in the profile's own words, as `IQ:<signal>` (`IQ:iraq_named`, `IQ:iraq_phone`, `IQ:iq_link`, `IQ:iraq_city`, `IQ:kurdistan`, `IQ:sorani_kurdish`, `IQ:iraqi_dialect`). Arabic script alone and a bare 07 number are left out; nothing from the network or captions.
 - Post level: location (10% of posts), caption language and keywords, tagged and co-author accounts.
 - Reliability: location is precise but rare; phone and `.iq` are strong but rare; keywords and dialect are common but noisy (fixed false positives such as words that only contain a city name). The Iraqi-audience count is the strongest signal for foreign accounts aimed at Iraq. Not measured as precision or recall.
 
 ### 10. Profile links
 
-- Bio: yes. Every bio link (URL and title): yes. Website: as the first bio link (no separate `external_url` is served). Linked Facebook page: the name only; the ID is dropped today, fix planned.
+- Bio: yes. Every bio link (URL and title): yes. Website: `external_url` when served, else the first bio link (no logged-out answer captured has served `external_url`). Linked Facebook page: its name and its ID (REQ-008 fix 9).
 - No history in Postgres beyond the latest; each change is a new event version.
 
 ### 11. Raw responses

@@ -57,4 +57,7 @@ message Profile {
   bytes highlights_hash = 21;
   // The linked Facebook page's ID (linked_facebook_page is its name).
   string linked_facebook_page_id = 22;
+  // The profile's website, when the answer serves it as external_url
+  // (REQ-008 fix 18); logged out, it has come as the first bio link.
+  string external_url = 23;
 }
