@@ -38,6 +38,16 @@ func main() {
 }
 
 func runSync(ctx context.Context, cfg *config.Config, once bool) (int, error) {
+	// The ops server first, as a Deployment (not --once): opening the
+	// stores can take minutes.
+	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
+	if !once {
+		stopOps, err := ops.Start()
+		if err != nil {
+			return 0, err
+		}
+		defer stopOps()
+	}
 	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return 0, err
@@ -77,7 +87,6 @@ func runSync(ctx context.Context, cfg *config.Config, once bool) (int, error) {
 		}
 		return 0, nil
 	}
-	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("postgres", db.Ping)
 	ops.AddCheck("redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })
 	return 0, run.Group(ctx, ops.Run, rests, func(ctx context.Context) error {

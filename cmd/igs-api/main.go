@@ -63,6 +63,13 @@ func createClient(ctx context.Context, cfg *config.Config, name string, scopes [
 }
 
 func serve(ctx context.Context, cfg *config.Config) error {
+	// The ops server first: opening the stores can take minutes.
+	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
+	stopOps, err := ops.Start()
+	if err != nil {
+		return err
+	}
+	defer stopOps()
 	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return err
@@ -91,7 +98,6 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	defer producer.Close()
 	srv := &igapi.Server{Cfg: cfg, DB: db, ReadDB: read, Redis: rdb,
 		Dispatch: &dispatch.Dispatcher{DB: db, Jobs: jobs.New(rdb), Producer: producer}}
-	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("postgres", db.Ping)
 	ops.AddCheck("redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })
 	ops.AddCheck("kafka", producer.Ping)

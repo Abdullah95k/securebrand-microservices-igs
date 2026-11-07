@@ -41,6 +41,13 @@ func main() {
 }
 
 func runCrawler(ctx context.Context, cfg *config.Config, stages []string) error {
+	// The ops server first: opening the stores can take minutes.
+	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
+	stopOps, err := ops.Start()
+	if err != nil {
+		return err
+	}
+	defer stopOps()
 	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return err
@@ -70,7 +77,6 @@ func runCrawler(ctx context.Context, cfg *config.Config, stages []string) error 
 	if err != nil {
 		return err
 	}
-	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("kafka", producer.Ping)
 	ops.AddCheck("redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })
 	ops.AddCheck("postgres", db.Ping)

@@ -29,6 +29,13 @@ func main() {
 }
 
 func runNormalizer(ctx context.Context, cfg *config.Config) error {
+	// The ops server first: opening the stores can take minutes.
+	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
+	stopOps, err := ops.Start()
+	if err != nil {
+		return err
+	}
+	defer stopOps()
 	kcfg, err := clients.Kafka(cfg, "-igs-normalizer")
 	if err != nil {
 		return err
@@ -42,7 +49,6 @@ func runNormalizer(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("kafka", producer.Ping)
 	return run.Group(ctx, ops.Run, c.Run)
 }

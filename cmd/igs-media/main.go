@@ -35,6 +35,13 @@ func main() {
 }
 
 func runMedia(ctx context.Context, cfg *config.Config, roles []string) error {
+	// The ops server first: opening the stores can take minutes.
+	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
+	stopOps, err := ops.Start()
+	if err != nil {
+		return err
+	}
+	defer stopOps()
 	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return err
@@ -57,7 +64,6 @@ func runMedia(ctx context.Context, cfg *config.Config, roles []string) error {
 	if err != nil {
 		return err
 	}
-	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("postgres", db.Ping)
 	ops.AddCheck("kafka", producer.Ping)
 	return run.Group(ctx, append([]run.Func{ops.Run}, comps...)...)

@@ -29,6 +29,13 @@ func main() {
 }
 
 func runWriter(ctx context.Context, cfg *config.Config) error {
+	// The ops server first: opening the stores can take minutes.
+	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
+	stopOps, err := ops.Start()
+	if err != nil {
+		return err
+	}
+	defer stopOps()
 	if len(cfg.ClickHouse.Addr) == 0 {
 		return errors.New("clickhouse.addr is not set")
 	}
@@ -45,7 +52,6 @@ func runWriter(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	ops := httpserver.NewOps(cfg.HTTP.OpsAddr)
 	ops.AddCheck("clickhouse", conn.Ping)
 	return run.Group(ctx, ops.Run, c.Run)
 }

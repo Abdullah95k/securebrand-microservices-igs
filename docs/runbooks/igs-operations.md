@@ -431,6 +431,15 @@ igsctl kafka apply
 
 `igsctl schemas apply` registers the `ig.*` subjects (`<topic>-value`, `BACKWARD_TRANSITIVE`); `schemas check` only checks them. Both leave out the `content.*` subjects unless `--include-content` (a registry of igs's own).
 
+## Start-up
+
+Every binary starts its ops server (:9090) first, then opens its stores.
+- `/healthz` answers 200 from the start, so the liveness probe doesn't kill a pod that is still waiting for a busy database.
+- `/readyz` answers 503 `starting: opening the stores` until they are open.
+- Opening PostgreSQL retries for up to 3 minutes while the server is out of connection slots. The log says so: `pg: the database is busy; trying again` before each wait, and `pg: still waiting for the database` every 10 seconds while one attempt hangs, for example in a pooler's queue.
+
+So a pod that is Running but not Ready, logging these lines, waits for the database. Look at the database's connections, not at igs. After 3 minutes it exits with the database's error and Kubernetes starts it again.
+
 ## Security checks
 
 The `security` workflow (REQ-008 fix 22) runs on every change, on main and on Sundays at 05:17 Iraq time. `make security` runs the first two locally.
