@@ -25,6 +25,10 @@ type Collector struct {
 	// Suppressed reports an erased account (by user pk): it is never a
 	// candidate.
 	Suppressed func(pk int64) bool
+	// Also, when set, is handed every post and page of comments the
+	// collector is, before the collector's own source filters: Instagram
+	// keyword discovery's recorder (igdisc, Track 1).
+	Also Observer
 
 	sources map[string]bool
 	every   time.Duration
@@ -44,6 +48,13 @@ type sighting struct {
 
 // maxPending flushes early when this many accounts wait.
 const maxPending = 20000
+
+// Observer sees the posts and comments crawlers emit, as the collector
+// does (Collector.Also).
+type Observer interface {
+	Post(p *igv1.Post)
+	Comments(ownerPK int64, cs []*igv1.Comment)
+}
 
 // NewCollector returns a collector for cfg's sources. Commenters are
 // collected only when piiFull: with pseudonymized authors, igs keeps no
@@ -93,6 +104,9 @@ func (c *Collector) Post(p *igv1.Post) {
 	if c == nil || p == nil {
 		return
 	}
+	if c.Also != nil {
+		c.Also.Post(p)
+	}
 	iraq := false
 	if l := p.GetLocation(); l != nil {
 		iraq = InIraq(l.GetName(), l.Lat, l.Lng)
@@ -137,7 +151,13 @@ func (c *Collector) Post(p *igv1.Post) {
 
 // Comments counts the comments' authors (not the post's owner).
 func (c *Collector) Comments(ownerPK int64, cs []*igv1.Comment) {
-	if c == nil || !c.sources["commenters"] || len(cs) == 0 {
+	if c == nil || len(cs) == 0 {
+		return
+	}
+	if c.Also != nil {
+		c.Also.Comments(ownerPK, cs)
+	}
+	if !c.sources["commenters"] {
 		return
 	}
 	c.mu.Lock()
