@@ -1,6 +1,6 @@
 module github.com/abdullah95k/securebrand-microservices-igs
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
@@ -37,7 +37,7 @@ require (
 require (
 	github.com/ClickHouse/ch-go v0.74.0 // indirect
 	github.com/ClickHouse/clickhouse-go/v2 v2.49.0 // indirect
-	github.com/andybalholm/brotli v1.2.6 // indirect
+	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/bdandy/go-errors v1.2.2 // indirect
 	github.com/bdandy/go-socks4 v1.2.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect

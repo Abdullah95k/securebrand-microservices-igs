@@ -1,0 +1,70 @@
+name: security
+
+# REQ-008 fix 22 (gaps G4, I3). On every change, and weekly so a newly
+# published vulnerability in unchanged code is found too:
+#   - secrets: gitleaks over the whole history (.gitleaksignore lists the
+#     findings checked by hand and not secrets);
+#   - go-vulns: govulncheck, the known vulnerabilities on the code's call
+#     paths (the standard library and every module);
+#   - images: Trivy over both images, failing on a HIGH or CRITICAL
+#     vulnerability that has a fix (.trivyignore lists the accepted ones,
+#     each with its reason).
+# docs/runbooks/igs-operations.md, "Security checks", says what to do when
+# one fails.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 2 * * 0" # Sundays 05:17 Iraq time
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gitleaks (every commit)
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          gitleaks git --no-banner --redact --exit-code 1 .
+
+  go-vulns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  images:
+    runs-on: ubuntu-latest
+    env:
+      # aquasec/trivy:0.76.0
+      TRIVY: aquasec/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build both images
+        run: |
+          docker build -f deploy/docker/Dockerfile -t igs:scan .
+          docker build -f deploy/docker/Dockerfile --target browser -t igs:scan-browser .
+      - name: Trivy
+        run: |
+          status=0
+          for img in igs:scan igs:scan-browser; do
+            echo "::group::$img"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src:ro" "$TRIVY" image \
+              --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /src/.trivyignore \
+              --exit-code 1 --no-progress "$img" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
