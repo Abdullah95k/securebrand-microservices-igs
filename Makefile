@@ -106,6 +106,7 @@ igs-chart-check:
 	python3 scripts/soak-resources.py --helm $(HELM)
 	python3 scripts/chart-secrets.py --helm $(HELM)
 	python3 scripts/chart-egress.py --helm $(HELM)
+	python3 scripts/chart-alerts.py --helm $(HELM)
 
 ## Run the chart's hooks and Deployments in Docker exactly as rendered
 ## (igsctl hooks, every Deployment), then three registered profiles'
