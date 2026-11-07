@@ -133,6 +133,24 @@ func TestComment(t *testing.T) {
 	}
 }
 
+// A deleted comment's event (REQ-008 fix 14) carries no text: it maps to a
+// content.comment marked deleted, dated by the comment's creation (so a
+// store partitioned by it puts the deletion beside the comment), and no
+// metrics sample.
+func TestCommentDeleted(t *testing.T) {
+	outs := Map(&igv1.Comment{Obs: obs("c2"), CommentPk: 9, MediaPk: 7, OwnerPk: 42, CreatedAt: timestamppb.New(at),
+		Status: igv1.CommentStatus_COMMENT_STATUS_DELETED})
+	c := one[*contentv1.Comment](t, outs, topics.ContentComment)
+	if !c.IsDeleted || c.Text != "" || !c.Envelope.GetPublishedAt().AsTime().Equal(at) {
+		t.Fatalf("deleted comment %+v", c)
+	}
+	for _, o := range outs {
+		if o.Topic == topics.ContentMetrics {
+			t.Fatalf("a deletion published metrics: %+v", o.Msg)
+		}
+	}
+}
+
 // Highlight items are posts of kind highlight.
 func TestHighlightItemsArePosts(t *testing.T) {
 	outs := Map(&igv1.Highlight{Obs: obs("h1"), HighlightId: 17, UserPk: 42, Title: "Trips",

@@ -177,6 +177,25 @@ func TestWriter(t *testing.T) {
 		t.Fatalf("comment metrics %d, want 2 after the likes changed", n)
 	}
 
+	// A deletion (REQ-008 fix 14) marks the comment and keeps its text; a
+	// later sighting brings it back.
+	t4d := t4b.Add(time.Second)
+	must(w.Write(ctx, Batch{Comments: []*igv1.Comment{{Obs: obs(t4d, "del"), CommentPk: 1, MediaPk: reel, OwnerPk: owner,
+		PostTakenAt: timestamppb.New(taken), Status: igv1.CommentStatus_COMMENT_STATUS_DELETED}}}))
+	var cst, ctext string
+	must(db.QueryRow(ctx, `SELECT status, text FROM comments WHERE comment_pk = 1`).Scan(&cst, &ctext))
+	if cst != "deleted" || ctext != "hello!" {
+		t.Fatalf("deleted comment: %s %q, want deleted with its text", cst, ctext)
+	}
+	t4e := t4d.Add(time.Second)
+	must(w.Write(ctx, Batch{Comments: []*igv1.Comment{{Obs: obs(t4e, "back"), CommentPk: 1, MediaPk: reel, OwnerPk: owner,
+		PostTakenAt: timestamppb.New(taken), Text: "hello!", CreatedAt: timestamppb.New(t1), LikeCount: i64(5), ChildCommentCount: i64(2),
+		Author: &igv1.Author{UserPk: 6001, AuthorKey: []byte("a1")}}}}))
+	must(db.QueryRow(ctx, `SELECT status FROM comments WHERE comment_pk = 1`).Scan(&cst))
+	if cst != "visible" {
+		t.Fatalf("comment seen after its deletion: %s, want visible", cst)
+	}
+
 	// Kinds, and the caption a post's edit replaced.
 	var kind string
 	must(db.QueryRow(ctx, `SELECT kind FROM posts WHERE media_pk = $1`, reel).Scan(&kind))

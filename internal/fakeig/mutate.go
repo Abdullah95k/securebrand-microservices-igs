@@ -54,6 +54,33 @@ func (w *World) AddComments(pk int64, n int) error {
 	return nil
 }
 
+// DeleteComments removes the post's comments with these pks, as their
+// authors deleting them would: they leave the post's comments and its
+// comment count. It returns how many it removed.
+func (w *World) DeleteComments(pk int64, comments ...int64) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	post := w.posts[pk]
+	if post == nil {
+		return 0, errors.New("fakeig: no post")
+	}
+	drop := map[int64]bool{}
+	for _, c := range comments {
+		drop[c] = true
+	}
+	kept := post.Comments[:0]
+	n := 0
+	for _, c := range post.Comments {
+		if drop[c.PK] {
+			n++
+			continue
+		}
+		kept = append(kept, c)
+	}
+	post.Comments = kept
+	return n, nil
+}
+
 // SetLikes changes a post's like count.
 func (w *World) SetLikes(pk, likes int64) error {
 	w.mu.Lock()

@@ -473,6 +473,13 @@ A job ends `partial` when posts failed, or when a grid ended before the job's ag
 
 The planner runs each scheduled profile at its tier's interval, and its profile query every `ig.schedule.profile_refresh` (24 h). The post refresh re-reads the comments and counts of posts from the last `ig.schedule.post_refresh_window` (7 days), `post_refresh_per_run` posts at a time; each post's refreshes start at its profile's interval and double.
 
+**Deletions** (REQ-008 fix 14). igs marks what disappears and never removes what it stored:
+- A **comment** is marked `deleted` (with `deleted_at`; its text and history stay) when a complete read of its post no longer returns it. A read counts only if it went from the first page to the last and the comments it returned, each with its reply count, add up to the post's comment count from the same read (`scheduler.post_refresh.deletion_count_slack`, 0: exactly). Otherwise Instagram may have answered partly and nothing is inferred (`igs_deletion_checks_total{outcome="skipped_partial"}`).
+- Such reads happen when a scheduled refresh finds **fewer comments than last time** (it then reads them all), on full runs of known posts, and on each post's **one full re-read at 30 days** (`ig.schedule.post_recheck_after`, at most `post_recheck_per_run` (10) a run, for a week after that age; `posts.rechecked_at`).
+- The re-read also marks a **post** whose page is gone `unavailable`.
+- The job's end publishes each deleted comment on `ig.comment.v1` (status deleted, no text) and counts them (`comments_deleted`). A comment seen again later becomes visible again.
+- `scheduler.post_refresh.detect_deletions: false` turns the check off.
+
 **The reels tab** gives each reel's views (and its likes and comment count). A scheduled run reads it back `ig.schedule.reels_window` (7 days). Once a profile's last full pass is `ig.schedule.reels_full_every` (7 days) old, its next scheduled run reads the tab back to `limits.max_age_days` (a year) instead, so older reels' views are refreshed weekly. A profile's first read (its backfill) and any full run always read it all.
 - Each profile's last full pass is `last_full_at` in `crawl_cursors` (scope `profile_reels`); the last windowed pass is `last_incremental_at`. A job's `reels_full_passes` counter counts its full passes.
 - To read every profile's tab in full on its next run (for example after an outage longer than a week), clear the full-pass times in the igs database:

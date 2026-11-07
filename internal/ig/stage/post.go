@@ -162,14 +162,44 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		if sc.CommentsWatermark != nil {
 			newest = sc.CommentsWatermark.AsTime()
 		}
-		if first && ok && stored == sc.ReportedCommentCount {
+		switch {
+		case first && ok && stored == sc.ReportedCommentCount:
 			// No new comments since the last read.
 			c["posts_unchanged"]++
 			_, _ = d.Jobs.SetPost(ctx, t.JobId, sc.MediaPk, createdUnix, sc.ReportedCommentCount, jobs.PostSkipped)
 			return done(c)
-		}
-		if !newest.IsZero() {
+		case first && ok && sc.ReportedCommentCount < stored && d.Cfg.Scheduler.PostRefresh.DetectDeletions:
+			// Fewer comments than at the last read: some were deleted. Read
+			// them all, so the job's end can tell which (REQ-008 fix 14).
+			c["posts_comments_dropped"]++
+		case !newest.IsZero():
 			watermark = newest.Add(-time.Minute)
+		}
+	}
+	// A known post's comments read from the first page to the last are
+	// compared with the stored ones when the job ends: those the read no
+	// longer returned were deleted (jobs.Tracker passes; the finalizer).
+	pass := false
+	if d.Cfg.Scheduler.PostRefresh.DetectDeletions {
+		if first && watermark.IsZero() {
+			if _, _, known := d.storedPost(ctx, sc.MediaPk); known {
+				pass = d.Jobs.BeginPass(ctx, t.JobId, t.LineageId, sc.MediaPk, time.Now()) == nil
+			}
+		} else if !first {
+			pass, _ = d.Jobs.InPass(ctx, t.JobId, t.LineageId)
+		}
+	}
+	seen := func(res parse.CommentsResult) {
+		if !pass || len(res.Comments) == 0 {
+			return
+		}
+		cs := make([]jobs.SeenComment, 0, len(res.Comments))
+		for _, cm := range res.Comments {
+			cs = append(cs, jobs.SeenComment{ID: cm.CommentPk, Replies: cm.GetChildCommentCount()})
+		}
+		if err := d.Jobs.AddSeen(ctx, t.JobId, sc.MediaPk, cs); err != nil {
+			// A lost page makes the read look partial: no deletion is inferred.
+			slog.Warn("post: seen comments not recorded", "err", err)
 		}
 	}
 	if collected, _ := d.Jobs.SetPost(ctx, t.JobId, sc.MediaPk, createdUnix, sc.ReportedCommentCount, jobs.PostPending); collected && first {
@@ -184,7 +214,9 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	cc := parse.CommentContext{MediaPK: sc.MediaPk, OwnerPK: sc.OwnerPk, PostTakenAt: sc.TakenAt}
 	maxC := t.Limits.GetMaxCommentsPerPost()
 	olderRun := 0
-	finished, truncated := false, false
+	// complete: the read reached the last page (not a cap or the
+	// incremental stop).
+	finished, truncated, complete := false, false, false
 	next := func(res parse.CommentsResult, n, older int) {
 		if !watermark.IsZero() {
 			if n > 0 && older == n {
@@ -195,7 +227,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		}
 		switch {
 		case !res.PageInfo.HasNext || res.PageInfo.EndCursor == "":
-			finished = true
+			finished, complete = true, true
 		case maxC > 0 && t.ItemsSeen+st.ItemsSeen >= maxC:
 			finished = true
 			c["posts_capped"]++
@@ -217,6 +249,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		if err != nil {
 			return retry(t, "", "30s", err.Error(), c)
 		}
+		seen(embedded)
 		if st.Extra == nil {
 			st.Extra = map[string]string{}
 		}
@@ -226,7 +259,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		} else if len(embedded.Comments) == 0 && sc.ReportedCommentCount > 0 {
 			// The page embedded no comments: read the first page by query.
 		} else {
-			finished = true
+			finished, complete = true, true
 		}
 		_ = d.saveCkpt(ctx, t, st, c)
 	}
@@ -294,6 +327,7 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		if err != nil {
 			return retry(t, st.Cursor, "30s", err.Error(), c)
 		}
+		seen(res)
 		st.Pages++
 		st.Walls, st.WallCursor = 0, ""
 		next(res, n, older)
@@ -302,6 +336,11 @@ func (s *PostStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 		}
 	}
 	c["comment_pages"] += int64(st.Pages)
+	if pass && finished && complete && !truncated {
+		if err := d.Jobs.EndPass(ctx, t.JobId, t.LineageId, sc.MediaPk, sc.TakenAt.AsTime(), sc.ReportedCommentCount); err != nil {
+			slog.Warn("post: full read not recorded", "err", err)
+		}
+	}
 	if finished || truncated {
 		state := jobs.PostComplete
 		if truncated {

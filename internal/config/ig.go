@@ -127,6 +127,12 @@ type IGSchedule struct {
 	PostRefreshWindow time.Duration `koanf:"post_refresh_window"`
 	// PostRefreshPerRun caps the refreshes riding on one scheduled run.
 	PostRefreshPerRun int `koanf:"post_refresh_per_run"`
+	// PostRecheckAfter: each post is read once more in full (its page and
+	// every comment) when it is this old, to catch a deleted post and
+	// deleted comments (REQ-008 fix 14). A post is due for a week after
+	// that age; PostRecheckPerRun caps them per scheduled run. 0: never.
+	PostRecheckAfter  time.Duration `koanf:"post_recheck_after"`
+	PostRecheckPerRun int           `koanf:"post_recheck_per_run"`
 	// ReelsWindow is how far back a scheduled run reads the reels tab for
 	// the views of recent reels (owner, 6 Nov 2026: 7 days). Once every
 	// ReelsFullEvery per profile, a run reads it back to limits.max_age_days
@@ -279,6 +285,9 @@ func (c *Config) validateIG() []error {
 		(t.LongTail != 0 && t.LongTail < t.Warm) || t.WarmPostsPerDay < 0 || (t.Auto && (t.AutoWindow < 24*time.Hour || t.AutoEvery <= 0)) {
 		errs = append(errs, errors.New("ig.schedule: min_interval must be > 0, tiers hot >= min_interval, warm >= hot, long_tail >= warm; "+
 			"with auto, auto_window >= 24h and auto_every > 0"))
+	}
+	if g.Schedule.PostRecheckAfter < 0 || g.Schedule.PostRecheckPerRun < 0 {
+		errs = append(errs, errors.New("ig.schedule.post_recheck_after and post_recheck_per_run must not be negative"))
 	}
 	if g.Schedule.PostRefreshWindow < 0 || g.Schedule.PostRefreshPerRun < 0 {
 		errs = append(errs, errors.New("ig.schedule.post_refresh_window and post_refresh_per_run must not be negative"))
