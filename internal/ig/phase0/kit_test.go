@@ -57,6 +57,10 @@ func TestKitGoAgainstFakeig(t *testing.T) {
 	if !res.Go || res.Recommended != "direct" {
 		t.Fatalf("not GO: %+v\n%s", res, Format(res, k.Cfg.Thresholds))
 	}
+	// The report says when each tier ran, in Iraq time (REQ-008 fix 23).
+	if txt := Format(res, k.Cfg.Thresholds); !strings.Contains(txt, "  ran ") || !strings.Contains(txt, " Iraq time\n") {
+		t.Errorf("no Iraq-time run line:\n%s", txt)
+	}
 	var d DocIDs
 	if err := readJSON(k.path(FileDocIDs), &d); err != nil {
 		t.Fatal(err)

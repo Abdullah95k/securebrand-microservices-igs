@@ -38,6 +38,8 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/proxy"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/registry"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/session"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/iraqtime"
 )
 
 var version = "dev"
@@ -309,8 +311,8 @@ func runTagged(args []string) int {
 	}
 	s := rep.Summary
 	fmt.Fprintf(os.Stderr, "tagged: wrote %s/report.json and raw/ (they hold personal data: keep them off git)\n", *outDir)
-	fmt.Printf("SUMMARY (safe to send back)\n  %s\n  profiles %d; profile page ok %d; tagged page ok %d, login page %d, other %d; embedded posts on %d\n  operations seen %d: %v\n  worked: %v\n  answers: %v\n",
-		s.Verdict(), s.Profiles, s.ProfilePageOK, s.TaggedPageOK, s.TaggedLogin, s.TaggedOther, s.EmbeddedPosts,
+	fmt.Printf("SUMMARY (safe to send back)\n  %s, started %s\n  profiles %d; profile page ok %d; tagged page ok %d, login page %d, other %d; embedded posts on %d\n  operations seen %d: %v\n  worked: %v\n  answers: %v\n",
+		s.Verdict(), iraqtime.Format(rep.StartedAt), s.Profiles, s.ProfilePageOK, s.TaggedPageOK, s.TaggedLogin, s.TaggedOther, s.EmbeddedPosts,
 		s.OperationsSeen, rep.Operations, s.Worked, s.Answers)
 	return 0
 }

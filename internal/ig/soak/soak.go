@@ -24,6 +24,8 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/iraqtime"
 )
 
 // Options configure a soak.
@@ -67,6 +69,7 @@ type Report struct {
 	Posts         int64
 	Comments      int64
 	Took          time.Duration
+	Ended         time.Time
 }
 
 // Pass reports whether the store ended equal to the truth and no job
@@ -83,7 +86,7 @@ func (r Report) Lines() []string {
 		verdict = "FAIL"
 	}
 	out := []string{
-		fmt.Sprintf("igs soak: %s after %s, %d profiles", verdict, r.Took.Round(time.Second), r.Profiles),
+		fmt.Sprintf("igs soak: %s after %s, %d profiles; ended %s", verdict, r.Took.Round(time.Second), r.Profiles, iraqtime.Format(r.Ended)),
 		fmt.Sprintf("  world changes: %s", counts(r.Mutations)),
 		fmt.Sprintf("  chaos: %s", counts(r.Chaos)),
 		fmt.Sprintf("  jobs: %s; longest running %s", counts(r.Jobs), r.OldestRunning.Round(time.Second)),
@@ -176,7 +179,7 @@ func (d *driver) call(ctx context.Context, method, url, key string, body, out an
 func Run(ctx context.Context, o Options) (Report, error) {
 	start := time.Now()
 	r, err := run(ctx, o)
-	r.Took = time.Since(start)
+	r.Took, r.Ended = time.Since(start), time.Now()
 	return r, err
 }
 

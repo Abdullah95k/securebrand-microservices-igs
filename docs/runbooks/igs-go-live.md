@@ -1,6 +1,6 @@
 # igs go-live runbook
 
-This takes igs from a release to production traffic: release, infrastructure, secrets, install, a canary on real profiles, and the ramp. Day-2 operations are in [`igs-operations.md`](igs-operations.md).
+This takes igs from a release to production traffic: release, infrastructure, secrets, install, a 3-day canary on real profiles, and the ramp. Day-2 operations are in [`igs-operations.md`](igs-operations.md).
 
 Legal signed off on 2026-11-03 (C4). igs reads only what Instagram shows logged out.
 
@@ -143,9 +143,9 @@ Each prints how many were registered, already registered, backfills started, and
 kubectl -n igs exec -i deploy/igs-api -- igsctl profiles pause --file - < accounts.txt
 ```
 
-## 8. Canary: 50 to 100 profiles for a day
+## 8. Canary: 50 to 100 profiles for 3 days
 
-Register 50 to 100 profiles, then watch the **igs / Instagram overview** dashboard and these signals:
+Register 50 to 100 profiles and keep to them for **3 days** before the ramp (REQ-008 fix 23, gap H3). One day shows whether igs works; three show whether the exits hold up day after day, and cover a full re-read cycle of every schedule tier and the 24-hour profile refresh more than once. Watch the **igs / Instagram overview** dashboard and these signals, and run `igsctl health` each morning (Iraq time):
 
 | Signal | Healthy |
 |---|---|
@@ -161,7 +161,8 @@ Then:
 1. Compare a few profiles by hand with Instagram in a logged-out browser.
 2. Tune:
    - Rate-limit rests every few minutes per exit mean `ig.exit_rps` is above what Instagram tolerates: lower it to 0.2.
-   - No rests at all for a day: try 0.3.
+   - No rests at all for a day: try 0.3, and count the 3 days again from the change.
+3. Start the ramp only after 3 days in a row with every signal healthy. A bad day (block rate over 5%, most exits resting, parked tasks or DLQ entries) starts the count again once fixed.
 
 ## 9. Ramp
 
