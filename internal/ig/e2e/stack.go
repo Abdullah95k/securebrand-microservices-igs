@@ -287,6 +287,7 @@ func (s *Stack) StartScheduler() {
 		vetter := &discovery.Vetter{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
 		if s.Cfg.IG.IGDisc.Enabled {
 			vetter.KeywordContext = igdisc.KeywordContextFunc(s.DB)
+			vetter.KeywordsGrown = igdisc.KeywordsGrownFunc(s.DB, discovery.KeywordWeight, discovery.KeywordCap)
 		}
 		if s.Cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(s.Redis, s.Cfg.Kafka.TopicPrefix)

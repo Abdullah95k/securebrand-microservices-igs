@@ -22,7 +22,8 @@ import (
 // account met on an older post naming Baghdad, outside the window, gets
 // none, and neither does the profile itself. The vets score the evidence
 // as keyword_context (0.5 for one place), which alone registers no one.
-// Erasing the profile deletes the evidence found on its posts. Every
+// Evidence that arrives after a decision is scored again from the stored
+// read. Erasing the profile deletes the evidence found on its posts. Every
 // example is synthetic.
 func TestIgdiscKeywordEvidence(t *testing.T) {
 	s := Start(t, Options{Spec: spec(), Config: func(c *config.Config) {
@@ -49,11 +50,13 @@ func TestIgdiscKeywordEvidence(t *testing.T) {
 	}
 	newest.Caption = "جلسة تصوير في البصرة"
 	older.Caption = "رحلة الى بغداد"
+	// Synthetic usernames stay clear of place names: igs's score reads an
+	// account's own links, which carry its username.
 	newest.Comments = append([]fakeig.Comment{{PK: 7_100_000_000_000_000_001, Text: "تحياتي من اربيل",
-		CreatedAt: newest.TakenAt.Add(30 * time.Minute), UserPK: 61_999_000_001, Username: "erbil_fan_01"}}, newest.Comments...)
+		CreatedAt: newest.TakenAt.Add(30 * time.Minute), UserPK: 61_999_000_001, Username: "food_fan_01"}}, newest.Comments...)
 	s.World.AddProfile(fakeig.ProfileSpec{Username: "tagged_01_0", FullName: "Coffee Lab", Bio: "Specialty coffee", Followers: 800,
 		Captions: []string{"new beans"}})
-	s.World.AddProfile(fakeig.ProfileSpec{Username: "erbil_fan_01", FullName: "Food Lover", Bio: "food and travel", Followers: 1200,
+	s.World.AddProfile(fakeig.ProfileSpec{Username: "food_fan_01", FullName: "Food Lover", Bio: "food and travel", Followers: 1200,
 		Captions: []string{"lunch"}})
 	s.StartScheduler()
 	s.StartEraser()
@@ -62,7 +65,7 @@ func TestIgdiscKeywordEvidence(t *testing.T) {
 	if code := s.Do(t, key, "POST", "/v1/profiles", map[string]any{"profile": p.Username}, nil); code != http.StatusCreated {
 		t.Fatalf("register %s: %d", p.Username, code)
 	}
-	want := map[string]string{"tagged_01_0": "below", "erbil_fan_01": "below", "collab_01": "gone"}
+	want := map[string]string{"tagged_01_0": "below", "food_fan_01": "below", "collab_01": "gone"}
 	status := func(u string) string {
 		var st string
 		_ = s.DB.QueryRow(ctx, `SELECT status FROM discovery_candidates WHERE username = $1`, u).Scan(&st)
@@ -100,7 +103,7 @@ func TestIgdiscKeywordEvidence(t *testing.T) {
 	// The list holds Basra with and without the article: both match.
 	wantEvidence := []string{
 		"collab_01 basra:ar:البصره caption", "collab_01 basra:ar:بصره caption",
-		"erbil_fan_01 erbil:ar:اربیل comment",
+		"food_fan_01 erbil:ar:اربیل comment",
 		"tagged_01_0 basra:ar:البصره caption", "tagged_01_0 basra:ar:بصره caption",
 	}
 	if !slices.Equal(got, wantEvidence) {
@@ -109,7 +112,7 @@ func TestIgdiscKeywordEvidence(t *testing.T) {
 	if n := count(t, s, `SELECT count(*) FROM igdisc_evidence WHERE source_pk = $1 AND content_time > now() - interval '48 hours'`, p.PK); n != 5 {
 		t.Errorf("%d pieces of evidence on %s's recent posts, want 5", n, p.Username)
 	}
-	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE username IN ('tagged_01_0', 'erbil_fan_01', 'collab_01')
+	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE username IN ('tagged_01_0', 'food_fan_01', 'collab_01')
 		AND 'keyword' = ANY(origins) AND 'network' = ANY(origins)`); n != 3 {
 		t.Errorf("%d of 3 candidates carry both origins", n)
 	}
@@ -118,7 +121,7 @@ func TestIgdiscKeywordEvidence(t *testing.T) {
 	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE username = 'tagged_01_3' AND NOT ('keyword' = ANY(origins))`); n != 1 {
 		t.Errorf("tagged_01_3: %d network-only candidates, want 1", n)
 	}
-	for _, u := range []string{"tagged_01_0", "erbil_fan_01"} {
+	for _, u := range []string{"tagged_01_0", "food_fan_01"} {
 		var kc, kw string
 		if err := s.DB.QueryRow(ctx, `SELECT coalesce(signals->>'keyword_context', ''), coalesce(sightings->>'keywords', '')
 			FROM discovery_vets WHERE username = $1`, u).Scan(&kc, &kw); err != nil {
@@ -127,6 +130,36 @@ func TestIgdiscKeywordEvidence(t *testing.T) {
 		if kc != "0.5" || kw != "1" {
 			t.Errorf("%s: keyword_context %q, keywords %q; want 0.5 and 1", u, kc, kw)
 		}
+	}
+
+	// Evidence that arrives after a decision: food_fan_01 is met near a
+	// second place. It is scored again from its stored read, with no new
+	// vet: keyword_context rises to 1, still below the threshold.
+	vets := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'discovery' AND profile_ref = 'u:food_fan_01'`)
+	if _, err := s.DB.Exec(ctx, `INSERT INTO igdisc_evidence (username, keyword_id, keyword, normalized, language, grp, content_id,
+		content_time, via, source_pk) VALUES ('food_fan_01', 'basra:en:basra', 'Basra', 'basra', 'en', 'basra',
+		'ig:comment:7100000000000000002', now(), 'comment', $1)`, p.PK); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(time.Minute)
+	for {
+		var kc string
+		_ = s.DB.QueryRow(ctx, `SELECT coalesce(signals->>'keyword_context', '') FROM discovery_candidates WHERE username = 'food_fan_01'`).Scan(&kc)
+		if kc == "1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("food_fan_01 not rescored on new keyword evidence: keyword_context %q", kc)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if n := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'discovery' AND profile_ref = 'u:food_fan_01'`); n != vets {
+		t.Errorf("rescoring started %d new vets", n-vets)
+	}
+	if st := status("food_fan_01"); st != "below" {
+		var sig string
+		_ = s.DB.QueryRow(ctx, `SELECT signals::text FROM discovery_candidates WHERE username = 'food_fan_01'`).Scan(&sig)
+		t.Errorf("food_fan_01 %s after the rescore, want below (signals %s)", st, sig)
 	}
 
 	admin := s.Key(t, httpapi.ScopeAdmin)

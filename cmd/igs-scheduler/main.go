@@ -104,6 +104,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg}
 		if cfg.IG.IGDisc.Enabled {
 			vetter.KeywordContext = igdisc.KeywordContextFunc(db)
+			vetter.KeywordsGrown = igdisc.KeywordsGrownFunc(db, discovery.KeywordWeight, discovery.KeywordCap)
 		}
 		if cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix)
