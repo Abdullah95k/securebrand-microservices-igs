@@ -28,9 +28,13 @@ type options struct {
 }
 
 // RetryFor is how long Open and OpenSchema keep trying, by default, while
-// the server is out of connections or starting (Retryable): about three
-// minutes, backing off from 1 s to 15 s.
-const RetryFor = 3 * time.Minute
+// the server is out of connections or starting (Retryable), backing off from
+// 1 s to 15 s and logging as they wait. 15 minutes: on the platform's shared
+// database a full server can last that long (production, 7 Nov 2026), and a
+// pod that gives up after a few minutes only restarts and logs in again,
+// adding to the load. Waiting, it stays NotReady with its ops server up; a
+// wrong password or a missing database still fails at once.
+const RetryFor = 15 * time.Minute
 
 // Backoff bounds between tries.
 const (
