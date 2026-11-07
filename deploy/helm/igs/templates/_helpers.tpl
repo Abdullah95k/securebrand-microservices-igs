@@ -69,8 +69,10 @@ envFrom:
       name: {{ .Values.platformCredentials.existingSecret }}
   {{- end }}
   {{- with $.credentials }}
+  {{- range (kindIs "slice" . | ternary . (list .)) }}
   - secretRef:
       name: {{ . }}
+  {{- end }}
   {{- end }}
   {{- if .Values.secretEnv.existingSecret }}
   - secretRef:

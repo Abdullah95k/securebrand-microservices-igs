@@ -101,20 +101,28 @@ def check_soak(helm):
 def check_credentials(helm):
     """A component's credentialsSecret comes after platform-credentials (its
     keys win) and before secretEnv, on that component's pods only; hooks
-    never read it."""
+    never read it. A list of Secrets is read in its order."""
     errs = []
     values = os.path.join(CHART, "values-production.yaml")
     with open(values) as f:
         v = yaml.safe_load(f)
     platform, own = v["platformCredentials"]["existingSecret"], v["secretEnv"]["existingSecret"]
     out = subprocess.run([helm, "template", "igs", CHART, "-n", "igs", "-f", values,
-                          "--set", "components.persister.credentialsSecret=igs-persister-credentials"],
+                          "--set", "components.persister.credentialsSecret=igs-persister-credentials",
+                          "--set", "components.api.credentialsSecret={pg-api,igs-api-kafka}"],
                          check=True, capture_output=True, text=True).stdout
+    extra = {("Deployment", "persister"): ["igs-persister-credentials"],
+             ("Deployment", "api"): ["pg-api", "igs-api-kafka"]}
+    seen = set()
     for kind, name, spec in pods([d for d in yaml.safe_load_all(out) if d]):
         refs = [e["secretRef"]["name"] for e in spec["containers"][0].get("envFrom", []) if "secretRef" in e]
-        want = [platform, "igs-persister-credentials", own] if (kind, name) == ("Deployment", "persister") else [platform, own]
+        want = [platform] + extra.get((kind, name), []) + [own]
         if refs != want:
             errs.append(f"credentials {kind} {name}: envFrom {refs}, want {want}")
+        seen.add((kind, name))
+    for k in extra:
+        if k not in seen:
+            errs.append(f"credentials: no {k[0]} {k[1]} rendered")
     return errs
 
 

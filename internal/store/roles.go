@@ -15,13 +15,14 @@ import (
 // connections, D-037). The scheduler and the migrate hook keep the owner
 // (igs): the scheduler's maintenance creates and drops partitions, which
 // only the tables' owner may do. The normalizer and content-writer use no
-// PostgreSQL.
+// PostgreSQL. The names are the platform's (<service><role>): DigitalOcean
+// allows only lowercase letters, digits, "-" and "." in user names.
 var roles = map[string]string{
-	"api":           "igs_api",
-	"crawler":       "igs_crawler",
-	"persister":     "igs_persister",
-	"media":         "igs_media",
-	"registry-sync": "igs_registry_sync",
+	"api":           "igsapi",
+	"crawler":       "igscrawler",
+	"persister":     "igspersister",
+	"media":         "igsmedia",
+	"registry-sync": "igsregistrysync",
 }
 
 // RoleOf returns the role a component runs as, or "" for the owner.
@@ -104,7 +105,7 @@ func ApplyRoleGrants(ctx context.Context, db *pgxpool.Pool) ([]string, error) {
 // persister adds the partition an old post or comment needs, through
 // create_partition (migration 00014), which runs as the tables' owner.
 var functions = map[string][]string{
-	"igs_persister": {"create_partition(text, text, integer, text[])"},
+	"igspersister": {"create_partition(text, text, integer, text[])"},
 }
 
 // RoleFunctions returns the functions of schema ig a role may call.
@@ -115,7 +116,7 @@ func RoleFunctions(role string) []string { return functions[role] }
 // (IGS_E2E_SQL_LOG, scripts/role-grants.py), and the tests run each
 // component as its role, so a statement a role may not run fails CI.
 var grants = map[string]map[string][]string{
-	"igs_api": {
+	"igsapi": {
 		"api_clients":           {"SELECT", "INSERT"},
 		"comment_authors":       {"SELECT"},
 		"comments":              {"SELECT"},
@@ -135,7 +136,7 @@ var grants = map[string]map[string][]string{
 		"profiles":              {"SELECT"},
 		"registry_sync_runs":    {"SELECT"},
 	},
-	"igs_crawler": {
+	"igscrawler": {
 		"client_params":        {"SELECT"},
 		"comments":             {"SELECT"},
 		"crawl_cursors":        {"SELECT", "INSERT", "UPDATE"},
@@ -148,11 +149,11 @@ var grants = map[string]map[string][]string{
 		"queries":              {"SELECT"},
 		"suppression":          {"SELECT"},
 	},
-	"igs_media": {
+	"igsmedia": {
 		"media":      {"SELECT", "INSERT", "UPDATE"},
 		"media_acks": {"SELECT", "INSERT", "UPDATE"},
 	},
-	"igs_persister": {
+	"igspersister": {
 		"comment_authors":   {"SELECT", "INSERT", "UPDATE"},
 		"comment_edits":     {"SELECT", "INSERT"},
 		"comment_metrics":   {"SELECT", "INSERT"},
@@ -168,7 +169,7 @@ var grants = map[string]map[string][]string{
 		"profiles":          {"SELECT", "INSERT", "UPDATE"},
 		"suppression":       {"SELECT"},
 	},
-	"igs_registry_sync": {
+	"igsregistrysync": {
 		"client_params":      {"SELECT"},
 		"leases":             {"SELECT", "INSERT", "UPDATE", "DELETE"},
 		"posts":              {"SELECT"},

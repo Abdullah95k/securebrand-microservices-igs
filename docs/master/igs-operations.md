@@ -305,15 +305,25 @@ No igs component reads `ig.erasure.v1`: it is for the other services. igs applie
 
 **PostgreSQL, per component.** Five components get a user of their own; the scheduler and the migrate hook keep the owner (`igs`), because the scheduler's maintenance creates and drops partitions, which only the tables' owner may do. The normalizer and content-writer use no PostgreSQL.
 
-The persister also adds a partition when a row falls outside the scheduler's window (a post from 2012, say). It does that through `ig.create_partition` (migration 00014), a function that runs as the owner and creates only the partition its name describes. Only `igs_persister` may call it.
+The persister also adds a partition when a row falls outside the scheduler's window (a post from 2012, say). It does that through `ig.create_partition` (migration 00014), a function that runs as the owner and creates only the partition its name describes. Only `igspersister` may call it.
+
+The users follow the platform's naming (`<service><role>`), since DigitalOcean allows no underscores in user names:
+
+| User | Components (chart names) | The platform's Secret |
+|---|---|---|
+| `igsapi` | api | `pg-api` |
+| `igscrawler` | crawler-profile, crawler-post, crawler-retry | `pg-crawler` |
+| `igspersister` | persister | `pg-persister` |
+| `igsmedia` | media-downloader, media-janitor | `pg-media` |
+| `igsregistrysync` | registry-sync | `pg-registrysync` |
 
 | User | May do on schema `ig` (r select, i insert, u update, d delete) |
 |---|---|
-| `igs_api` | `api_clients` ri, `comment_authors` r, `comments` r, `crawl_cursors` r, `discovery_candidates` riu, `discovery_keywords` riud, `erasure_requests` ri, `highlights` r, `jobs` riu, `media` r, `post_index` r, `post_metrics` r, `posts` r, `profile_registrations` rid, `profile_schedule` riud, `profile_snapshots` r, `profiles` r, `registry_sync_runs` r |
-| `igs_crawler` | `client_params` r, `comments` r, `crawl_cursors` riu, `discovery_candidates` riu, `discovery_keywords` r, `discovery_sources` riu, `post_index` r, `posts` r, `profiles` r, `queries` r, `suppression` r |
-| `igs_media` | `media` riu, `media_acks` riu |
-| `igs_persister` | `comment_authors` riu, `comment_edits` ri, `comment_metrics` ri, `comments` riu, `highlights` riu, `media` riu, `post_edits` ri, `post_index` ri, `post_metrics` ri, `post_owners` ri, `posts` riu, `profile_snapshots` ri, `profiles` riu, `suppression` r |
-| `igs_registry_sync` | `client_params` r, `leases` riud, `posts` r, `profiles` r, `queries` riu, `registry_sync_runs` ri |
+| `igsapi` | `api_clients` ri, `comment_authors` r, `comments` r, `crawl_cursors` r, `discovery_candidates` riu, `discovery_keywords` riud, `erasure_requests` ri, `highlights` r, `jobs` riu, `media` r, `post_index` r, `post_metrics` r, `posts` r, `profile_registrations` rid, `profile_schedule` riud, `profile_snapshots` r, `profiles` r, `registry_sync_runs` r |
+| `igscrawler` | `client_params` r, `comments` r, `crawl_cursors` riu, `discovery_candidates` riu, `discovery_keywords` r, `discovery_sources` riu, `post_index` r, `posts` r, `profiles` r, `queries` r, `suppression` r |
+| `igsmedia` | `media` riu, `media_acks` riu |
+| `igspersister` | `comment_authors` riu, `comment_edits` ri, `comment_metrics` ri, `comments` riu, `highlights` riu, `media` riu, `post_edits` ri, `post_index` ri, `post_metrics` ri, `post_owners` ri, `posts` riu, `profile_snapshots` ri, `profiles` riu, `suppression` r |
+| `igsregistrysync` | `client_params` r, `leases` riud, `posts` r, `profiles` r, `queries` riu, `registry_sync_runs` ri |
 
 Where the list comes from:
 - every statement each component ran in the end-to-end, registry-sync and persister tests, recorded per component (`IGS_E2E_SQL_LOG`, `scripts/role-grants.py`);
@@ -324,12 +334,13 @@ The tests run each component as its own role, so a statement its grants don't co
 `igsctl migrate up` (the migrate hook) gives each of these users, where it exists, exactly its privileges: everything else on the schema's tables is revoked first. So a migration that adds a table also brings its grants, once the list names it.
 
 **The platform's steps** for a component's PostgreSQL user:
-1. Create the user in the managed database (Terraform), with the name above. It needs `CONNECT` on database `igs`, and the persister's user also `TEMPORARY` (it copies rows through temporary tables). PostgreSQL gives both to every user unless the platform revoked them. To check: `SELECT has_database_privilege('igs_persister', 'igs', 'CONNECT, TEMPORARY')`.
-2. Set its search path and idle timeout, as for igs's other users (the pg-owners job): `ALTER ROLE <user> SET search_path = ig`. Behind the transaction-mode PgBouncer, igs sets no session state.
+1. Create the user in the managed database (Terraform), with the name above. It needs `CONNECT` on database `igs`, and the persister's user also `TEMPORARY` (it copies rows through temporary tables). PostgreSQL gives both to every user unless they were revoked, and the platform revokes neither. To check: `SELECT has_database_privilege('igspersister', 'igs', 'CONNECT, TEMPORARY')`.
+2. The pg-owners job sets its idle timeout and its search path in database `igs` (`ig, public`; igs needs `ig` first). Behind the transaction-mode PgBouncer, igs sets no session state.
 3. Sync igs, so the migrate hook grants the user its privileges. The log line reads `roles: granted ...`.
-4. Put the user's `POSTGRES_USER` and `POSTGRES_PASSWORD` in the component's `credentialsSecret`. The database stays `igs`, and the host and port stay the same: `POSTGRES_HOST:5432` is the platform's transaction-mode PgBouncer, which keeps a pool for each database and user by itself. DigitalOcean's separate connection pools aren't used.
+4. The platform's setup writes the Secret `pg-<role>` in namespace `igs`, with only `POSTGRES_USER` and `POSTGRES_PASSWORD`.
+5. Set the component's `credentialsSecret` to that Secret, e.g. `components: {persister: {credentialsSecret: pg-persister}}`, one component at a time. The pods read it after `platform-credentials`, so those two keys replace the shared ones and everything else (host, port, database, CA) still comes from `platform-credentials`. The database stays `igs`, and the host and port stay the same: `POSTGRES_HOST:5432` is the platform's transaction-mode PgBouncer, which keeps a pool for each database and user by itself. DigitalOcean's separate connection pools aren't used. A component that later gets its own Kafka user or Spaces key too lists both Secrets: `credentialsSecret: [pg-api, <its Kafka Secret>]`.
 
-Steps 1 to 3 change nothing for the running pods; step 4 switches the component. To undo, unset its `credentialsSecret`.
+Steps 1 to 4 change nothing for the running pods; step 5 switches the component. To undo, unset its `credentialsSecret`.
 
 What it costs: each user holds a few server connections while busy, because PgBouncer runs several processes, each with its own pools. They close after 10 seconds idle. Five more users fit easily in the database's 200 connections (D-037).
 

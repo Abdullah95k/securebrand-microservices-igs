@@ -27,20 +27,20 @@ from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The components that have a role of their own; the others keep the owner.
-COMPONENTS = {"api": "igs_api", "crawler": "igs_crawler", "persister": "igs_persister",
-              "media": "igs_media", "registry-sync": "igs_registry_sync"}
+COMPONENTS = {"api": "igsapi", "crawler": "igscrawler", "persister": "igspersister",
+              "media": "igsmedia", "registry-sync": "igsregistrysync"}
 
 
 # Privileges the tests don't exercise but the component's own code needs,
 # each checked by hand against the code (role, table, privileges, where).
 EXTRA = [
-    ("igs_api", "api_clients", {"SELECT", "INSERT"}, "igs-api client create (cmd/igs-api), with the API's credentials"),
-    ("igs_api", "jobs", {"SELECT", "UPDATE"}, "dispatch marks a job failed when its tasks can't be produced"),
-    ("igs_api", "highlights", {"SELECT"}, "GET /v1/profiles/{profile}/highlights (internal/ig/api/data.go)"),
-    ("igs_api", "profile_snapshots", {"SELECT"}, "GET /v1/profiles/{profile}/snapshots (internal/ig/api/data.go)"),
-    ("igs_api", "registry_sync_runs", {"SELECT"}, "GET /v1/admin/registry-sync/runs (internal/ig/api/admin.go)"),
-    ("igs_crawler", "profiles", {"SELECT"}, "the profile stage looks up a task's username by user pk"),
-    ("igs_registry_sync", "posts", {"SELECT"}, "a canary page's stored posts, to check the comment queries (storedPosts)"),
+    ("igsapi", "api_clients", {"SELECT", "INSERT"}, "igs-api client create (cmd/igs-api), with the API's credentials"),
+    ("igsapi", "jobs", {"SELECT", "UPDATE"}, "dispatch marks a job failed when its tasks can't be produced"),
+    ("igsapi", "highlights", {"SELECT"}, "GET /v1/profiles/{profile}/highlights (internal/ig/api/data.go)"),
+    ("igsapi", "profile_snapshots", {"SELECT"}, "GET /v1/profiles/{profile}/snapshots (internal/ig/api/data.go)"),
+    ("igsapi", "registry_sync_runs", {"SELECT"}, "GET /v1/admin/registry-sync/runs (internal/ig/api/admin.go)"),
+    ("igscrawler", "profiles", {"SELECT"}, "the profile stage looks up a task's username by user pk"),
+    ("igsregistrysync", "posts", {"SELECT"}, "a canary page's stored posts, to check the comment queries (storedPosts)"),
 ]
 
 

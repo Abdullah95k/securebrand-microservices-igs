@@ -279,7 +279,7 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **The go-live canary** is now 3 days in a row with every signal healthy, instead of one day.
 
 - **2026-11-07 (per-component PostgreSQL roles):**
-  - **Five PostgreSQL users** (`igs_api`, `igs_crawler`, `igs_persister`, `igs_media`, `igs_registry_sync`), each allowed only the tables and actions its component uses. The list comes from recording every statement each component ran in the tests, plus a few paths checked by hand. `igsctl migrate up` applies it, and takes away anything else.
+  - **Five PostgreSQL users** (`igsapi`, `igscrawler`, `igspersister`, `igsmedia`, `igsregistrysync`), each allowed only the tables and actions its component uses. The list comes from recording every statement each component ran in the tests, plus a few paths checked by hand. `igsctl migrate up` applies it, and takes away anything else.
   - **The tests run each component as its own user**, so a missing privilege fails CI.
   - **The scheduler and the migrate hook keep the owner**, because only the owner may create and drop partitions. The persister adds a partition for an old post through a function that runs as the owner and can create nothing else (migration 00014).
-  - **The platform's steps:** create the users, set their search path, then switch each component through its `credentialsSecret`, after the pilot. No PgBouncer pools are needed.
+  - **The platform's steps:** create the users with the platform's names (`igsapi`, `igscrawler`, `igspersister`, `igsmedia`, `igsregistrysync`), set their search path, then switch each component, after the pilot, by setting its `credentialsSecret` to the platform's Secret `pg-<role>`. No PgBouncer pools are needed. `credentialsSecret` may now be a list, so a component can combine its PostgreSQL user with a Kafka user or Spaces key later.

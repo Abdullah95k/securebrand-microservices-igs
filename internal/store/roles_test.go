@@ -3,8 +3,8 @@ package store_test
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -34,22 +34,22 @@ func TestRoleGrants(t *testing.T) {
 		role, table, priv string
 		want              bool
 	}{
-		{"igs_crawler", "queries", "SELECT", true},
-		{"igs_crawler", "crawl_cursors", "UPDATE", true},
-		{"igs_crawler", "posts", "INSERT", false},
-		{"igs_crawler", "jobs", "SELECT", false},
-		{"igs_persister", "posts", "INSERT", true},
-		{"igs_persister", "comments", "UPDATE", true},
-		{"igs_persister", "posts", "DELETE", false},
-		{"igs_persister", "jobs", "INSERT", false},
-		{"igs_api", "posts", "SELECT", true},
-		{"igs_api", "posts", "INSERT", false},
-		{"igs_api", "jobs", "INSERT", true},
-		{"igs_media", "media", "UPDATE", true},
-		{"igs_media", "profiles", "SELECT", false},
-		{"igs_registry_sync", "queries", "UPDATE", true},
-		{"igs_registry_sync", "leases", "DELETE", true},
-		{"igs_registry_sync", "jobs", "SELECT", false},
+		{"igscrawler", "queries", "SELECT", true},
+		{"igscrawler", "crawl_cursors", "UPDATE", true},
+		{"igscrawler", "posts", "INSERT", false},
+		{"igscrawler", "jobs", "SELECT", false},
+		{"igspersister", "posts", "INSERT", true},
+		{"igspersister", "comments", "UPDATE", true},
+		{"igspersister", "posts", "DELETE", false},
+		{"igspersister", "jobs", "INSERT", false},
+		{"igsapi", "posts", "SELECT", true},
+		{"igsapi", "posts", "INSERT", false},
+		{"igsapi", "jobs", "INSERT", true},
+		{"igsmedia", "media", "UPDATE", true},
+		{"igsmedia", "profiles", "SELECT", false},
+		{"igsregistrysync", "queries", "UPDATE", true},
+		{"igsregistrysync", "leases", "DELETE", true},
+		{"igsregistrysync", "jobs", "SELECT", false},
 	} {
 		if got := can(c.role, c.table, c.priv); got != c.want {
 			t.Errorf("%s %s on %s: %v, want %v", c.role, c.priv, c.table, got, c.want)
@@ -57,17 +57,17 @@ func TestRoleGrants(t *testing.T) {
 	}
 
 	// A privilege not on the list goes away when the grants are applied.
-	if _, err := db.Exec(ctx, `GRANT DELETE ON TABLE posts TO igs_crawler`); err != nil {
+	if _, err := db.Exec(ctx, `GRANT DELETE ON TABLE posts TO igscrawler`); err != nil {
 		t.Fatal(err)
 	}
-	if !can("igs_crawler", "posts", "DELETE") {
+	if !can("igscrawler", "posts", "DELETE") {
 		t.Fatal("the hand-made grant didn't take")
 	}
 	granted, err := store.ApplyRoleGrants(ctx, db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if can("igs_crawler", "posts", "DELETE") {
+	if can("igscrawler", "posts", "DELETE") {
 		t.Error("a privilege off the list survived ApplyRoleGrants")
 	}
 	if len(granted) != len(store.RoleNames()) {
@@ -102,7 +102,7 @@ func TestPersisterCreatesPartitions(t *testing.T) {
 	if want := "FOR VALUES FROM ('2012-04-01 00:00:00+00') TO ('2012-05-01 00:00:00+00')"; bounds != want {
 		t.Errorf("bounds %q, want %q", bounds, want)
 	}
-	if strings.HasPrefix(owner, "igs_") {
+	if slices.Contains(store.RoleNames(), owner) {
 		t.Errorf("the partition belongs to %s, want the tables' owner", owner)
 	}
 	if !slices.Contains(fill, "fillfactor=85") {
@@ -129,5 +129,19 @@ func TestPersisterCreatesPartitions(t *testing.T) {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
 		t.Errorf("the crawler's role called create_partition: %v", err)
+	}
+}
+
+// Every role is a valid DigitalOcean user name (lowercase letters, digits,
+// "-" and "."), named by the platform's rule: igs, then the role.
+func TestRoleNames(t *testing.T) {
+	valid := regexp.MustCompile(`^igs[a-z0-9.-]+$`)
+	for _, r := range store.RoleNames() {
+		if !valid.MatchString(r) {
+			t.Errorf("role %q: not a DigitalOcean user name of igs's", r)
+		}
+	}
+	if store.RoleOf("persister") != "igspersister" {
+		t.Errorf("the persister's role is %q, want igspersister (the platform's user)", store.RoleOf("persister"))
 	}
 }
