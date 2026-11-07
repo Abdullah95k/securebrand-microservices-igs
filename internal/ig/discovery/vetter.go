@@ -51,8 +51,26 @@ type Vetter struct {
 	// Rests, when set, are the exit rests the crawlers share: vets wait
 	// while most exits of a tier rest (ig.discovery.hold_resting_share).
 	Rests RestLoader
+	// KeywordContext, when set, counts for each candidate the different
+	// places of the shared list it was met near in others' recent posts
+	// and comments (Instagram keyword discovery, igdisc): the score's
+	// keyword_context signal. Unset, the signal is never given.
+	KeywordContext func(ctx context.Context, usernames []string) (map[string]int, error)
 	// held is the last hold reason, for logging its changes.
 	held string
+}
+
+// keywords returns KeywordContext's counts for usernames, or none when it
+// is unset.
+func (v *Vetter) keywords(ctx context.Context, usernames []string) (map[string]int, error) {
+	if v.KeywordContext == nil || len(usernames) == 0 {
+		return nil, nil
+	}
+	m, err := v.KeywordContext(ctx, usernames)
+	if err != nil {
+		return nil, fmt.Errorf("keyword context: %w", err)
+	}
+	return m, nil
 }
 
 // Tick runs one round.
@@ -110,8 +128,17 @@ func (v *Vetter) rescore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	names := make([]string, 0, len(list))
+	for _, x := range list {
+		names = append(names, x.username)
+	}
+	kw, err := v.keywords(ctx, names)
+	if err != nil {
+		return err
+	}
 	d := v.Cfg.IG.Discovery
 	for _, x := range list {
+		x.s.Keywords = kw[x.username]
 		var vet Vet
 		if err := json.Unmarshal(x.vet, &vet); err != nil {
 			continue
@@ -181,8 +208,19 @@ func (v *Vetter) decide(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	names := make([]string, 0, len(list))
+	for _, x := range list {
+		if x.vet != nil {
+			names = append(names, x.username)
+		}
+	}
+	kw, err := v.keywords(ctx, names)
+	if err != nil {
+		return err
+	}
 	d := v.Cfg.IG.Discovery
 	for _, x := range list {
+		x.s.Keywords = kw[x.username]
 		if x.vet == nil {
 			status := StatusNew
 			if x.attempts >= maxVetAttempts {

@@ -53,6 +53,17 @@ func TestScoreSignals(t *testing.T) {
 			Signals{"iraqi_audience": 3, "seen_in_iraq": 1.5, "coauthor": 0.5, "network_capped": -1}},
 		{"a world star Iraqi fans tag", Vet{Biography: "Athlete", Followers: 50_000_000}, Sightings{Tags: 40, IraqContext: 5, Sources: 30},
 			Signals{"iraqi_audience": 3, "seen_in_iraq": 1.5, "network_capped": -2.5}},
+		// Instagram keyword discovery (igdisc): met near the shared list's
+		// places in others' recent posts and comments. 0.5 a place, at most
+		// 1, inside the network cap: never enough alone.
+		{"met near one place", Vet{}, Sightings{Comments: 1, Sources: 1, Keywords: 1},
+			Signals{"iraqi_audience": 1, "keyword_context": 0.5}},
+		{"met near two places", Vet{}, Sightings{Comments: 1, Sources: 1, Keywords: 2},
+			Signals{"iraqi_audience": 1, "keyword_context": 1}},
+		{"met near many places, capped at 1", Vet{}, Sightings{Comments: 1, Sources: 1, Keywords: 7},
+			Signals{"iraqi_audience": 1, "keyword_context": 1}},
+		{"keyword context inside the network cap", Vet{}, Sightings{Tags: 10, IraqContext: 2, Sources: 10, Keywords: 3},
+			Signals{"iraqi_audience": 3, "seen_in_iraq": 1.5, "keyword_context": 1, "network_capped": -1.5}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Score(tc.vet, tc.s)
