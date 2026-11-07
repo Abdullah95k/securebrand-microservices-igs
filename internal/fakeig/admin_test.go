@@ -75,3 +75,82 @@ func TestAdmin(t *testing.T) {
 		t.Error("a server without Admin answered the admin path")
 	}
 }
+
+// A world change must not hold the server's lock while it waits for the
+// world's: a GraphQL request holds the world's read lock and then needs
+// the server's (its identity), so the two would wait for each other and
+// every later request would queue behind them. The soak's fakeig froze
+// that way under the crawlers' load (7 Nov 2026), until it was OOM-killed.
+func TestMutateDoesNotDeadlockWithRequests(t *testing.T) {
+	w := NewWorld(Spec{Seed: 3, Profiles: 4, PostsPerProfile: 6, MaxComments: 5, PostSpacing: 12 * time.Hour})
+	s := NewServer(w, Options{Admin: true})
+	srv := httptest.NewServer(s)
+	defer srv.Close()
+
+	// A GraphQL request in flight: it holds the world's read lock.
+	w.mu.RLock()
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			w.mu.RUnlock()
+		}
+	}
+	defer release()
+	done := make(chan error, 1)
+	go func() {
+		resp, err := http.Post(srv.URL+AdminPrefix+"mutate?n=50", "", nil)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // the change now waits for the world's write lock
+
+	// The request now looks up its identity, under the server's lock.
+	got := make(chan struct{})
+	go func() {
+		_ = s.identByCSRF("csrffake000001")
+		close(got)
+	}()
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		release()
+		<-got
+		t.Fatal("deadlock: the world change holds the server's lock while it waits for the world's write lock")
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A server says when it started, so the soak driver can tell that fakeig
+// restarted and generated its world again.
+func TestAdminInstance(t *testing.T) {
+	w := NewWorld(Spec{Seed: 3, Profiles: 2, PostsPerProfile: 2, PostSpacing: time.Hour})
+	started := func(s *Server) string {
+		t.Helper()
+		srv := httptest.NewServer(s)
+		defer srv.Close()
+		resp, err := http.Get(srv.URL + AdminPrefix + "instance")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var v struct{ Started string }
+		if err := json.NewDecoder(resp.Body).Decode(&v); err != nil || v.Started == "" {
+			t.Fatalf("instance: %v %+v", err, v)
+		}
+		return v.Started
+	}
+	first := NewServer(w, Options{Admin: true})
+	if a, b := started(first), started(first); a != b {
+		t.Errorf("the same server answered %s, then %s", a, b)
+	}
+	time.Sleep(time.Millisecond)
+	if a, b := started(first), started(NewServer(w, Options{Admin: true})); a == b {
+		t.Errorf("a restarted server answered the same start %s", a)
+	}
+}

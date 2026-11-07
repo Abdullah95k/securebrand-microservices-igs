@@ -69,7 +69,10 @@ func (w *World) Usernames() []string {
 //   - GET profiles: the usernames, as a JSON list;
 //   - POST mutate?n=N: N random changes (World.Mutate), answering how many
 //     of each kind;
-//   - GET truth?since=RFC3339: every profile's ProfileTruth back to since.
+//   - GET truth?since=RFC3339: every profile's ProfileTruth back to since;
+//   - GET instance: {"started": RFC3339} when this server started. A
+//     restart generates the world again from its seed, so a driver that
+//     sees it change knows the truth is no longer the world igs read.
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	reply := func(v any) {
 		w.Header().Set("Content-Type", "application/json")
@@ -81,14 +84,14 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	case name == "mutate" && r.Method == http.MethodPost:
 		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
 		changes := map[string]int{}
-		s.mu.Lock()
+		s.mutateMu.Lock()
 		if s.rng == nil {
 			s.rng = rand.New(rand.NewPCG(s.World.spec.Seed, 0x50a4))
 		}
 		for range max(n, 1) {
 			what, err := s.World.Mutate(s.rng)
 			if err != nil {
-				s.mu.Unlock()
+				s.mutateMu.Unlock()
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -96,8 +99,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 				changes[what]++
 			}
 		}
-		s.mu.Unlock()
+		s.mutateMu.Unlock()
 		reply(changes)
+	case name == "instance" && r.Method == http.MethodGet:
+		reply(map[string]string{"started": s.started})
 	case name == "truth" && r.Method == http.MethodGet:
 		since, err := time.Parse(time.RFC3339, r.URL.Query().Get("since"))
 		if err != nil {

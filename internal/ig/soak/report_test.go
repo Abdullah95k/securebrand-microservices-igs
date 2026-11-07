@@ -19,3 +19,31 @@ func TestReportVerdictLine(t *testing.T) {
 		t.Errorf("a difference: %q", first)
 	}
 }
+
+// When the harness fails, the soak fails and says so: fakeig left more
+// than 1% of the world changes unanswered (its world stood still), or it
+// restarted and generated its world again, so the comparison says nothing
+// about igs.
+func TestReportHarness(t *testing.T) {
+	ok := Report{MutateTries: 1000, MutateFails: 10}
+	ok.harness("a", "a")
+	if !ok.Pass() || len(ok.HarnessFails) != 0 {
+		t.Fatalf("1%% unanswered and no restart: %v", ok.HarnessFails)
+	}
+	for name, c := range map[string]struct {
+		fails       int
+		first, last string
+		want        string
+	}{
+		"world stood still": {fails: 11, first: "a", last: "a", want: "11 of 1000 world changes unanswered"},
+		"fakeig restarted":  {fails: 0, first: "a", last: "b", want: "fakeig restarted (started a, now b)"},
+	} {
+		r := Report{MutateTries: 1000, MutateFails: c.fails}
+		r.harness(c.first, c.last)
+		lines := strings.Join(r.Lines(), "\n")
+		if r.Pass() || !strings.Contains(lines, "the harness failed, not necessarily igs") || !strings.Contains(lines, c.want) ||
+			!strings.HasSuffix(lines, "igs soak: FAIL") {
+			t.Errorf("%s: pass %v, report:\n%s", name, r.Pass(), lines)
+		}
+	}
+}

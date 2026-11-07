@@ -1,5 +1,7 @@
 # igs soak (24 hours against fakeig)
 
+**Not a gate since D-045** (7 Nov 2026): the owner decided to test on the real site, not on fake ones, so the pilot on Instagram is the test and this soak runs no more in production. The files stay, for running it locally or in CI against the code. The one production run (pinned to `60efca8`) ended void: fakeig deadlocked a few hours in (fixed in #107).
+
 REQ-008 fix 12. igs runs for 24 hours on the production cluster, in its own namespace `igs-soak`, against **fakeig** (a synthetic logged-out Instagram) and **throwaway stores**. Nothing reaches Instagram, the platform's stores or the internet. It shows whether igs holds up for a day: no memory creep, no out-of-memory kills, flat goroutines, jobs that end well, and a store that ends equal to the truth.
 
 ## What runs
@@ -43,7 +45,14 @@ Two Argo CD applications, at one igs commit (the platform builds igs's image at 
 - the jobs by status, and the longest any job ran;
 - the posts and comments stored;
 - the differences from fakeig's truth (the first 20);
-- any job that ended failed, partial or cancelled, and any chaos that failed.
+- any job that ended failed, partial or cancelled, and any chaos that failed;
+- whether the harness held: how many of the driver's world changes fakeig left unanswered, and whether fakeig restarted.
+
+**When the harness fails, the soak fails, and its report says so** ("the harness failed, not necessarily igs; run the soak again"):
+- **fakeig left more than 1% of the world changes unanswered.** Its world then mostly stood still, so the soak didn't test what it should.
+- **fakeig restarted.** fakeig keeps its world in memory and generates it again from the seed at each start, so its truth is no longer the world igs read. The driver compares when fakeig says it started (`/__fakeig/instance`) at the start and at the end.
+
+Either way, the comparison says nothing about igs. Fix the cause and run the soak again. igs's own pods can still be judged from Prometheus, below.
 
 **From Prometheus,** over the 24 hours, for igs's pods (`app.kubernetes.io/name="igs"`; the stores grow with their data, as they should):
 

@@ -10,7 +10,7 @@ All of these must hold:
 
 | | Check | Who |
 |---|---|---|
-| 1 | The soak passed: its line reads `igs soak: PASS` ([igs-soak.md](igs-soak.md)) | the master |
+| 1 | ~~The soak passed~~. **Dropped by the owner's D-045** (7 Nov): "dont test on fake instagram or fake tiktok or fake facebook or fake youtube, test on the real thing". The pilot on the real site is the test; the soak against fakeig gates nothing | done |
 | 2 | igs's proxies exist: 10 ISP IPs plus 3 spares, in the Secret `proxies` (key `proxies.yaml`, tier `isp`, a `static_list` of endpoints; `phase0/proxies.example.yaml` shows the shape) | the owner buys them; the platform creates the Secret |
 | 3 | The proxies' ports are in `networkPolicy.egress.proxies` (production allows 10000–10999). Ports outside that range need the range changed first: a blocked port only shows as timeouts ([network policy](igs-operations.md#network-policy)) | the platform, when it writes the Secret |
 | 4 | Three public accounts that post often, as `config.ig.registry_sync.canary_pages` in the platform's private Argo CD application. Without them registry-sync refuses to run, so it can't follow doc_id rotations. **Done:** the owner chose them (D-033), and the platform set them on 7 Nov | done |

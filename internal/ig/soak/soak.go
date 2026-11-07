@@ -60,6 +60,13 @@ type Report struct {
 	Mutations  map[string]int
 	Chaos      map[string]int
 	ChaosFails []string
+	// MutateTries and MutateFails count the driver's world changes and
+	// those fakeig didn't answer.
+	MutateTries, MutateFails int
+	// HarnessFails say why the soak's own harness failed (fakeig stopped
+	// changing its world, or restarted and generated it again): the
+	// comparison then says nothing about igs, and the soak must run again.
+	HarnessFails []string
 	// BadJobs are jobs that ended failed, partial or cancelled.
 	BadJobs []string
 	Jobs    map[string]int // by status, at the end
@@ -76,7 +83,24 @@ type Report struct {
 // ended badly. Memory and goroutines are judged from Prometheus
 // (docs/runbooks/igs-soak.md).
 func (r Report) Pass() bool {
-	return len(r.Diffs) == 0 && len(r.BadJobs) == 0 && len(r.ChaosFails) == 0
+	return len(r.Diffs) == 0 && len(r.BadJobs) == 0 && len(r.ChaosFails) == 0 && len(r.HarnessFails) == 0
+}
+
+// maxMutateFails is the share of world changes fakeig may leave
+// unanswered before the soak counts its harness as failed.
+const maxMutateFails = 0.01
+
+// harness records why the harness failed, if it did: too many world
+// changes unanswered, or fakeig restarted (started differs from first).
+func (r *Report) harness(first, last string) {
+	if r.MutateTries > 0 && float64(r.MutateFails) > maxMutateFails*float64(r.MutateTries) {
+		r.HarnessFails = append(r.HarnessFails, fmt.Sprintf("fakeig left %d of %d world changes unanswered, so its world mostly "+
+			"stood still", r.MutateFails, r.MutateTries))
+	}
+	if first != last {
+		r.HarnessFails = append(r.HarnessFails, fmt.Sprintf("fakeig restarted (started %s, now %s) and generated its world "+
+			"again, so its truth is not the world igs read", first, last))
+	}
 }
 
 // Lines is the report, the soak's last log lines.
@@ -87,7 +111,7 @@ func (r Report) Lines() []string {
 	}
 	out := []string{
 		fmt.Sprintf("igs soak: %s after %s, %d profiles; ended %s", verdict, r.Took.Round(time.Second), r.Profiles, iraqtime.Format(r.Ended)),
-		fmt.Sprintf("  world changes: %s", counts(r.Mutations)),
+		fmt.Sprintf("  world changes: %s; %d of %d unanswered", counts(r.Mutations), r.MutateFails, r.MutateTries),
 		fmt.Sprintf("  chaos: %s", counts(r.Chaos)),
 		fmt.Sprintf("  jobs: %s; longest running %s", counts(r.Jobs), r.OldestRunning.Round(time.Second)),
 		fmt.Sprintf("  stored: %d posts, %d comments", r.Posts, r.Comments),
@@ -110,6 +134,9 @@ func (r Report) Lines() []string {
 	}
 	for _, f := range r.ChaosFails {
 		out = append(out, "  chaos failed: "+f)
+	}
+	for _, f := range r.HarnessFails {
+		out = append(out, "  the harness failed, not necessarily igs; run the soak again: "+f)
 	}
 	return append(out, "igs soak: "+verdict)
 }
@@ -134,6 +161,20 @@ type driver struct {
 	o   Options
 	key string
 	r   Report
+	// started is when fakeig started, as it said at the soak's start.
+	started string
+}
+
+// fakeigStarted asks fakeig when it started.
+func (d *driver) fakeigStarted(ctx context.Context) (string, error) {
+	var v struct {
+		Started string `json:"started"`
+	}
+	code, err := d.call(ctx, http.MethodGet, d.o.FakeIG+fakeig.AdminPrefix+"instance", "", nil, &v)
+	if err == nil && (code != http.StatusOK || v.Started == "") {
+		err = fmt.Errorf("HTTP %d", code)
+	}
+	return v.Started, err
 }
 
 func (d *driver) logf(format string, args ...any) {
@@ -205,6 +246,9 @@ func run(ctx context.Context, o Options) (Report, error) {
 		return d.r, errors.New("soak: fakeig has no profiles (is it run with -admin?)")
 	}
 	d.r.Profiles = len(names)
+	if d.started, err = d.fakeigStarted(ctx); err != nil {
+		return d.r, fmt.Errorf("soak: when fakeig started: %w", err)
+	}
 	for _, n := range names {
 		code, err := d.call(ctx, http.MethodPost, o.API+"/v1/profiles", key, map[string]any{"profile": n}, nil)
 		if err != nil {
@@ -247,8 +291,10 @@ func (d *driver) drive(ctx context.Context) error {
 		now := time.Now()
 		if !now.Before(nextMutate) {
 			var changes map[string]int
-			if _, err := d.call(ctx, http.MethodPost, o.FakeIG+fakeig.AdminPrefix+"mutate?n=1", "", nil, &changes); err != nil {
-				d.logf("world change failed: %v", err)
+			d.r.MutateTries++
+			if code, err := d.call(ctx, http.MethodPost, o.FakeIG+fakeig.AdminPrefix+"mutate?n=1", "", nil, &changes); err != nil || code != http.StatusOK {
+				d.r.MutateFails++
+				d.logf("world change failed: HTTP %d %v", code, err)
 			}
 			for k, v := range changes {
 				d.r.Mutations[k] += v
@@ -400,6 +446,11 @@ func (d *driver) check(ctx context.Context) error {
 	if err := d.jobs(ctx); err != nil {
 		return err
 	}
+	now, err := d.fakeigStarted(ctx)
+	if err != nil {
+		return fmt.Errorf("soak: when fakeig started: %w", err)
+	}
+	d.r.harness(d.started, now)
 	since := time.Now().Add(-d.o.MaxAge).UTC().Format(time.RFC3339)
 	var truth []fakeig.ProfileTruth
 	if _, err := d.call(ctx, http.MethodGet, d.o.FakeIG+fakeig.AdminPrefix+"truth?since="+url.QueryEscape(since), "", nil,
