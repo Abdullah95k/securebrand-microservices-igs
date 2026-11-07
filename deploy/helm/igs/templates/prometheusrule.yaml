@@ -1,4 +1,24 @@
 {{- if .Values.alerts.enabled }}
+{{- /*
+files/alerts.yaml holds Prometheus annotation templates, so it is parsed as
+data (fromYaml), never rendered: its {{ $value }} reach Prometheus as
+written. An alert about a component that isn't running is left out
+(IgsIgNormalizerLag while the normalizer is off or at 0 replicas: igs
+publishes no content.* then, REQ-019), as is any in alerts.disabled.
+*/}}
+{{- $drop := .Values.alerts.disabled | default list }}
+{{- $n := .Values.components.normalizer | default dict }}
+{{- $off := not $n.enabled }}
+{{- if hasKey $n "replicas" }}{{- if eq (toString $n.replicas) "0" }}{{- $off = true }}{{- end }}{{- end }}
+{{- if $off }}{{- $drop = append $drop "IgsIgNormalizerLag" }}{{- end }}
+{{- $groups := list }}
+{{- range $g := (.Files.Get "files/alerts.yaml" | fromYaml).groups }}
+{{- $kept := list }}
+{{- range $r := $g.rules }}
+{{- if not (has ($r.alert | default "") $drop) }}{{- $kept = append $kept $r }}{{- end }}
+{{- end }}
+{{- $groups = append $groups (set (deepCopy $g) "rules" $kept) }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -9,6 +29,5 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  {{- /* files/alerts.yaml holds Prometheus annotation templates, so it is included verbatim, not rendered. */}}
-  {{- .Files.Get "files/alerts.yaml" | nindent 2 }}
+  {{- toYaml (dict "groups" $groups) | nindent 2 }}
 {{- end }}

@@ -128,6 +128,11 @@ serviceMonitor:
 alerts:
   enabled: true
   labels: {}
+  # Alert names to leave out of the PrometheusRule. IgsIgNormalizerLag is
+  # left out on its own while components.normalizer is off or at 0
+  # replicas (igs publishes no content.* until it adopts the contract,
+  # REQ-019).
+  disabled: []
 
 # Grafana dashboards (files/dashboards/*.json) as ConfigMaps, for the
 # Grafana sidecar that loads ConfigMaps labelled grafana_dashboard.
