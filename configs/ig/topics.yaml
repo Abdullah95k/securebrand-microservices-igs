@@ -46,3 +46,5 @@ topics:
   - {name: content.media.ready.v1,      partitions: 3,  retention: 168h}
   - {name: content.media.processed.v1,  partitions: 3,  retention: 168h}
   - {name: content.media.deleted.v1,    partitions: 3,  retention: 168h}
+  - {name: content.playlist.v1,         partitions: 6,  retention: 168h}
+  - {name: content.audio.v1,            partitions: 6,  retention: 168h}

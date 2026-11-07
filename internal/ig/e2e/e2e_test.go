@@ -250,6 +250,12 @@ func TestContentEventsMatchStore(t *testing.T) {
 		func(m proto.Message) error { return conformance.Metrics(m.(*contentv1.Metrics), opt) })
 	media := read(topics.ContentMedia, func() proto.Message { return &contentv1.Media{} },
 		func(m proto.Message) error { return conformance.Media(m.(*contentv1.Media), opt) })
+	playlists := read(topics.ContentPlaylist, func() proto.Message { return &contentv1.Playlist{} },
+		func(m proto.Message) error { return conformance.Playlist(m.(*contentv1.Playlist), opt) })
+	read(topics.ContentAudio, func() proto.Message { return &contentv1.Audio{} },
+		func(m proto.Message) error {
+			return conformance.Envelope(m.(*contentv1.Audio).Envelope, "audio", opt).Err()
+		})
 	count := func(q string) int {
 		var n int
 		_ = s.DB.QueryRow(context.Background(), q).Scan(&n)
@@ -266,8 +272,8 @@ func TestContentEventsMatchStore(t *testing.T) {
 			t.Errorf("no content account for %s: %v", p.Username, accounts)
 		}
 	}
-	if len(snapshots) == 0 || len(metrics) == 0 || len(media) == 0 {
-		t.Errorf("%d account snapshots, %d metrics and %d media, want some of each", len(snapshots), len(metrics), len(media))
+	if len(snapshots) == 0 || len(metrics) == 0 || len(media) == 0 || len(playlists) == 0 {
+		t.Errorf("%d account snapshots, %d metrics, %d media and %d playlists, want some of each", len(snapshots), len(metrics), len(media), len(playlists))
 	}
 }
 
