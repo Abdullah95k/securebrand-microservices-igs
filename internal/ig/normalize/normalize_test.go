@@ -219,7 +219,7 @@ func TestPostToContent(t *testing.T) {
 		t.Errorf("spans %v", sp)
 	}
 	if len(p.Mentions) != 1 || len(p.Tagged) != 1 || p.Tagged[0].Id != "ig:account:9" || len(p.Coauthors) != 1 ||
-		p.Coauthors[0].Handle != "collab" || p.Location.GetPlatformLocationId() != "77" || p.Audio.GetAudioId() != "900" ||
+		p.Coauthors[0].Handle != "collab" || p.Location.GetPlatformLocationId() != "77" || p.Audio.GetAudioId() != "ig:audio:900" ||
 		!p.Labels.GetAiGenerated() || !p.Flags.GetPinned() || !slices.Equal(p.PlatformTopics, []string{"Food"}) {
 		t.Errorf("post details %v", p)
 	}

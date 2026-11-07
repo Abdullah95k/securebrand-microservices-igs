@@ -130,3 +130,5 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
   - End to end: `TestMediaPipeline` crawls fakeig with media on. Every stored file is announced, the announcement passes production conformance with a 72 h deadline, and another platform's ack is ignored. Every deletion is recorded and conformant.
   - End to end: `TestContentEventsMatchStore` now also checks `content.media.v1`.
 
+**Fix after slice 2:** a post's `audio.audio_id` was Instagram's bare audio ID. The contract wants a contract ID, `ig:audio:<native id>` (`post.proto`, AudioRef), so it now is. Conformance doesn't check this field. The fix landed before slice 1 was pinned in production, so the store never held the bare form.
+

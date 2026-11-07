@@ -517,7 +517,12 @@ func post(p *igv1.Post) []Out {
 		}
 	}
 	if m := p.Music; m != nil {
-		c.Audio = &contentv1.AudioRef{AudioId: m.AudioId, Title: m.Title, Artist: m.Artist, Original: proto.Bool(m.OriginalAudio)}
+		// audio_id is a contract ID, "ig:audio:<native id>", when the
+		// audio has one.
+		c.Audio = &contentv1.AudioRef{Title: m.Title, Artist: m.Artist, Original: proto.Bool(m.OriginalAudio)}
+		if m.AudioId != "" {
+			c.Audio.AudioId = ID("audio", m.AudioId)
+		}
 	}
 	if typ != contentv1.PostType_POST_TYPE_POST {
 		v := &contentv1.VideoInfo{HasAudio: p.HasAudio}
