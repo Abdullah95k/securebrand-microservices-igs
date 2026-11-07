@@ -395,7 +395,20 @@ The fleet-wide rate limit (each exit's pace, `ig.exit_rps`, and the query limits
 
 **Rebalances.** When Kafka moves a partition to another pod (a rollout, a scale-up), the pod that loses it cancels its records still running there and starts none of those still waiting, and never commits them, so the new owner runs them once (ported from fbs `cfc4295`, `ca4769e`, `907e08a`).
 
-**The leader lock.** The leader scheduler holds a Postgres advisory lock on one connection and checks it every few seconds, each check bounded to 3 s: a hung connection counts as lost, and the leader's work stops before another scheduler can take the lock. A connection whose unlock fails is closed, never returned to the pool still holding the lock (fbs `9b1863c`).
+**The leader lease.** One scheduler leads: it holds the lease `igs-scheduler` in table `ig.leases` (holder: pod name and a random suffix).
+- It renews the lease every 5 s; each renewal is one statement, bounded to 3 s, and keeps the lease 15 s.
+- If two renewals miss (Postgres unreachable, or slow), the leader stops its work, 5 s before another scheduler could take over.
+- If the lease went to another holder, the work stops at the next renewal.
+- A scheduler that stops gives the lease back.
+- `igs-registry-sync` takes the lease `igs-registry-sync` for one run. A crashed run's lease expires after the run's timeout and a minute.
+
+Leases replace session advisory locks: the platform's Postgres is a transaction-mode pool, where a session lock can stay on a pooled server session and go to another client.
+
+To see who leads:
+
+```sql
+SELECT * FROM ig.leases;
+```
 
 The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka exporter is needed. The crawler groups are `igs-ig-crawler-<stage>-<lane>`, the persister's is `igs-ig-persister`, the normalizer's `igs-ig-normalizer` and the downloader's `igs-ig-media-downloader`. All of them carry `kafka.topic_prefix`.
 
@@ -452,7 +465,7 @@ The replay puts the records back on their entity topics unchanged. It commits as
 
 ## Stuck jobs
 
-- **No leader (`IgsIgSchedulerNoLeader`):** nothing plans runs, finalizes jobs or runs AIMD. Check the scheduler pods and their Postgres connection. The leader lock is an advisory lock.
+- **No leader (`IgsIgSchedulerNoLeader`):** nothing plans runs, finalizes jobs or runs AIMD. Check the scheduler pods and their Postgres connection. Then look at the lease: `SELECT * FROM ig.leases WHERE name = 'igs-scheduler'`. A row whose `until` has passed means no scheduler could renew it.
 - **Jobs failing (`IgsIgJobsFailing`):** look at the failed jobs' error (`GET /v1/jobs/{id}`) and at the request classes of their queries.
 - **DLQ growing (`IgsIgDLQGrowing`):** tasks dead-lettered after their retries, for example a wall on every attempt, or a private profile. Fix the cause, then:
 

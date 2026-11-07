@@ -34,9 +34,8 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/store"
 )
 
-// leaderKey is igs's scheduler lock, apart from the copied Facebook
-// scheduler's 4_300_100.
-const leaderKey = 4_300_200
+// leaderLease is the scheduler's lease (ig.leases): one scheduler leads.
+const leaderLease = "igs-scheduler"
 
 func main() {
 	fs := flag.NewFlagSet("igs-scheduler", flag.ExitOnError)
@@ -49,7 +48,7 @@ func main() {
 }
 
 func runScheduler(ctx context.Context, cfg *config.Config) error {
-	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM))
+	db, err := pg.OpenSchema(ctx, cfg.Postgres.DSN, cfg.Postgres.MaxConns, store.IGSchema, pg.WithCA(cfg.Postgres.CAPEM), pg.Pooled(cfg.Postgres.Pooled))
 	if err != nil {
 		return err
 	}
@@ -121,7 +120,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	ops.AddCheck("redis", func(ctx context.Context) error { return rdb.Ping(ctx).Err() })
 	ops.AddCheck("kafka", producer.Ping)
 	return run.Group(ctx, ops.Run, func(ctx context.Context) error {
-		return leader.Run(ctx, db, leaderKey, func(ctx context.Context) error {
+		return leader.Run(ctx, db, leaderLease, func(ctx context.Context) error {
 			metrics.SchedulerLeader.Set(1)
 			defer metrics.SchedulerLeader.Set(0)
 			return run.Group(ctx, loops...)

@@ -86,7 +86,7 @@ func TestWithCA(t *testing.T) {
 	with := func(mode, pem string) *tls.Config {
 		t.Helper()
 		c := parsed(mode)
-		if err := WithCA(pem)(c); err != nil {
+		if err := WithCA(pem)(&options{cfg: c}); err != nil {
 			t.Fatal(err)
 		}
 		return c.ConnConfig.TLSConfig
@@ -125,7 +125,7 @@ func TestWithCA(t *testing.T) {
 
 	// prefer: the TLS attempt verifies, the plain fallback stays plain.
 	c := parsed("prefer")
-	if err := WithCA(caPEM)(c); err != nil {
+	if err := WithCA(caPEM)(&options{cfg: c}); err != nil {
 		t.Fatal(err)
 	}
 	if c.ConnConfig.TLSConfig == nil || c.ConnConfig.TLSConfig.VerifyConnection == nil {
@@ -135,10 +135,10 @@ func TestWithCA(t *testing.T) {
 		t.Error("sslmode disable with a CA: TLS turned on")
 	}
 	c = parsed("require")
-	if err := WithCA("  \n")(c); err != nil || c.ConnConfig.TLSConfig.VerifyConnection != nil || c.ConnConfig.TLSConfig.RootCAs != nil {
+	if err := WithCA("  \n")(&options{cfg: c}); err != nil || c.ConnConfig.TLSConfig.VerifyConnection != nil || c.ConnConfig.TLSConfig.RootCAs != nil {
 		t.Errorf("an empty CA changed the TLS settings (%v)", err)
 	}
-	if err := WithCA("not a certificate")(parsed("require")); err == nil {
+	if err := WithCA("not a certificate")(&options{cfg: parsed("require")}); err == nil {
 		t.Error("a CA that is no PEM certificate was accepted")
 	}
 }

@@ -32,6 +32,7 @@ import (
 	igclient "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/client"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/leader"
 	plog "github.com/abdullah95k/securebrand-microservices-igs/internal/platform/log"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/browser"
@@ -187,8 +188,9 @@ func (s *Sync) InitMetrics(ctx context.Context) error {
 	return nil
 }
 
-// lockKey serialises runs across replicas and rollouts.
-const lockKey = "igs:ig-registry-sync"
+// lease serialises runs across replicas and rollouts (ig.leases). It
+// outlasts the longest run; a crashed run's lease expires on its own.
+const lease = "igs-registry-sync"
 
 // Run performs one sync. The report is returned (and stored in
 // registry_sync_runs) even when the run fails.
@@ -197,13 +199,10 @@ func (s *Sync) Run(ctx context.Context) (rep Report, err error) {
 		s.now = time.Now
 	}
 	rep.StartedAt = s.now().UTC()
-	conn, err := s.DB.Acquire(ctx)
+	// A lease row, not a session lock: Postgres may sit behind a
+	// transaction-mode pool.
+	locked, err := leader.TryLease(ctx, s.DB, lease, leader.Holder, s.leaseTTL())
 	if err != nil {
-		return s.finish(ctx, rep, err)
-	}
-	defer conn.Release()
-	var locked bool
-	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, lockKey).Scan(&locked); err != nil {
 		return s.finish(ctx, rep, err)
 	}
 	if !locked {
@@ -212,12 +211,20 @@ func (s *Sync) Run(ctx context.Context) (rep Report, err error) {
 		return rep, nil
 	}
 	defer func() {
-		// The lock is per connection; release it before the connection
-		// goes back to the pool, even when ctx is done.
-		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, lockKey)
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = leader.ReleaseLease(rctx, s.DB, lease, leader.Holder)
 	}()
 	err = s.run(ctx, &rep)
 	return s.finish(ctx, rep, err)
+}
+
+// leaseTTL outlasts a run: its timeout and a minute more.
+func (s *Sync) leaseTTL() time.Duration {
+	if s.Cfg.Timeout <= 0 {
+		return 15 * time.Minute
+	}
+	return s.Cfg.Timeout + time.Minute
 }
 
 func (s *Sync) finish(ctx context.Context, rep Report, err error) (Report, error) {
