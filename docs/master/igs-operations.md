@@ -490,7 +490,7 @@ The pilot must measure all of this (D5).
    - The linked Facebook page ID is dropped, and its name is put in `Link.url`.
    - Comment deletions are never published. *(Fixed: REQ-008 fix 14.)*
    - Walled posts (2.6%) publish nothing. *(Fixed: REQ-008 fix 15.)*
-   - Photos and carousels have no metrics series.
+   - Photos and carousels have no metrics series. *(Wrong: they have had one since M6. REQ-008 fix 16 adds the test that shows it.)*
    - Exits are named by address.
    - `schemas apply` would register `content.*` subjects.
    - Discovery has no daily cap by default.
