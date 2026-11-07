@@ -3,7 +3,7 @@
 Each build session updates this file at the end of its work. The plan and rules are in [`build-brief.md`](build-brief.md).
 
 **Next step (7 Nov 2026, Iraq time morning):** igs runs in production (namespace `igs`): the API, scheduler, persister, normalizer and media components are up. The crawlers, crawler-retry and registry-sync are held at 0 until igs's proxies (`PROXIES_IGS`) exist. Production runs `cdaa420` (platform #34, synced 08:42Z, Healthy at 08:57Z, Iraq 11:57): fix 21's egress rules, fix 22a's Go and brotli updates, the start-up fix (the ops server before the stores; no liveness kills while the shared database is short of connections), readiness checking the stores at most once a minute, and a 15-minute start-up wait for a full database. igs held 3 of the shared database's server connections at 07:55Z, down from 11. REQ-008's build fixes are all merged (1 to 12 and 14 to 23; the tracker is [`igs-fixes.md`](../master/igs-fixes.md)). Still open:
-- **Fix 13, the 48-hour pilot:** when the owner says.
+- **Fix 13, the 48-hour pilot:** the owner started it (7 Nov, 12:45 Iraq time; D-036). The plan, the owner's commands and the platform's changes are in [`igs-pilot.md`](../runbooks/igs-pilot.md). It begins once the soak passes (report due 8 Nov, 07:00 to 09:00), igs's proxies exist and PostgreSQL has room.
 - **Per-component PostgreSQL roles:** held until the owner decides on a larger database (agreed with the master); Kafka users and Spaces keys per component follow in a platform PR.
 - **For the owner to decide:**
   - erasure removes a person's media but keeps their raw responses (kept under "keep all data"): should erasure also delete raw objects?

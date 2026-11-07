@@ -35,7 +35,7 @@ The owner's approved fixes for igs (REQ-008, 6 November 2026), in the order to b
 
 | # | Fix | PR | Status | Evidence |
 |---|---|---|---|---|
-| 13 | The 48-hour pilot on the production cluster, with the owner's 348 Phase 0 accounts; report in `docs/master/igs-pilot-report.md` | - | waiting: the cluster, and fixes 1 to 12 | |
+| 13 | The 48-hour pilot on the production cluster, with the owner's 348 Phase 0 accounts; report in `docs/master/igs-pilot-report.md`. Started by the owner on 7 Nov, 12:45 Iraq time (D-036); the plan, commands and checks are in `docs/runbooks/igs-pilot.md` | - | ready: waits for the soak's PASS, igs's proxies and room in PostgreSQL | |
 
 ## After the pilot, before the full production run
 

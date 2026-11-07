@@ -1,0 +1,141 @@
+# igs pilot: 48 hours on real profiles
+
+REQ-008 fix 13 (D-036: the owner started it on 7 Nov 2026, 12:45 Iraq time). igs runs in production on the owner's Phase 0 accounts for 48 hours. The pilot measures what the review could only estimate: what an exit tolerates, data per account, memory, database growth and connections. The report goes in `docs/master/igs-pilot-report.md`, as counts only.
+
+Times are Iraq time. Account lists stay off git: no usernames, names or comment text in the repository.
+
+## 1. Before it starts
+
+All of these must hold:
+
+| | Check | Who |
+|---|---|---|
+| 1 | The soak passed: its line reads `igs soak: PASS` ([igs-soak.md](igs-soak.md)) | the master |
+| 2 | igs's proxies exist: 10 ISP IPs plus 3 spares, in the Secret `proxies` (key `proxies.yaml`, tier `isp`, a `static_list` of endpoints; `phase0/proxies.example.yaml` shows the shape) | the owner buys them; the platform creates the Secret |
+| 3 | The proxies' ports are in `networkPolicy.egress.proxies` (production allows 10000–10999). Ports outside that range need the range changed first: a blocked port only shows as timeouts ([network policy](igs-operations.md#network-policy)) | the platform, when it writes the Secret |
+| 4 | Three public accounts that post often, as `config.ig.registry_sync.canary_pages` in the platform's private Argo CD application. Without them registry-sync refuses to run, so it can't follow doc_id rotations | the owner chooses them; the platform sets them |
+| 5 | PostgreSQL has room: 12 or more connections free (35 of 50 were in use at 09:35Z on 7 Nov). The pilot adds about 6 to 9 server connections (section 5) | the master |
+
+The owner keeps two files on their own machine, one username or profile link per line: `pilot-first-50.txt` (50 accounts from the Phase 0 list) and `pilot-rest.txt` (the other 298).
+
+## 2. What the platform changes
+
+In the platform's Argo CD application for igs (`gitops/services/igs.yaml`), in one change, once checks 2 to 4 hold:
+
+- **Crawlers on, at fixed sizes.** Replace the four holds at 0 with:
+  - crawler-profile 1;
+  - crawler-post 2;
+  - crawler-retry 1;
+  - registry-sync 1.
+
+  Keep `keda.enabled: false` for the pilot. Each crawler pod runs up to 240 tasks at once, so the 10 exits set the pace, not the pod count. KEDA's production minimums (crawler-profile 2, crawler-post 4) and its scaling of the persister and normalizer would add database connections the shared server doesn't have. KEDA comes back after the pilot, with the connection limit the owner decides.
+- **Restart the scheduler** so it reads the new proxies file (discovery's hold counts the exits): `components.scheduler.podAnnotations: {igs/proxies-added: "<date>"}`.
+- **Nothing else.** These stay as they are:
+  - the pace: `exit_rps` 0.25, `identity_rps` 0.33;
+  - `exit_page_loads_per_day: 0` (off; the pilot measures page loads per exit);
+  - discovery: on, with no daily cap, as the owner decided on 6 Nov.
+
+  Discovery can't crowd out the registered accounts. It vets only while the schedule is on time and no tier is mostly resting (fix 6), and keyword discovery uses at most 10% of each exit (D-027). The report counts discovered accounts apart.
+
+## 3. Commands for the owner
+
+**Start, step 1: the first 50 accounts.** Then watch the signals in section 4 for 2 hours: backfills start, the block rate stays under 5%, and exits rest only now and then.
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles import --file - < pilot-first-50.txt
+```
+
+**Start, step 2: the other 298.** Run this only if the first 2 hours were healthy. The 48 hours start now.
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles import --file - < pilot-rest.txt
+```
+
+**Check.** Run this each morning and evening, and whenever something looks wrong. It prints, in Iraq time:
+- profiles on the schedule;
+- how late the schedule is;
+- the last hour's jobs;
+- when data was last stored;
+- the exits resting;
+- the consumers' lag.
+
+It exits with 1 when something is BAD, and says what to look at.
+
+```bash
+kubectl -n igs exec deploy/igs-api -- igsctl health
+```
+
+**Stop.** This pauses every pilot account's schedule. Their data stays, and nothing more is read for them.
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles pause --file - < pilot-first-50.txt
+```
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles pause --file - < pilot-rest.txt
+```
+
+**Resume.** The same two files:
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles resume --file - < pilot-first-50.txt
+```
+
+```bash
+kubectl -n igs exec -i deploy/igs-api -- igsctl profiles resume --file - < pilot-rest.txt
+```
+
+**Stop all reading at once**, for example a block storm on every exit: the platform sets the four crawler deployments back to 0 in the Argo CD application. That is the same hold as before the pilot.
+
+## 4. What to watch
+
+| Signal | Healthy | Where |
+|---|---|---|
+| Block rate | under 5% | `igs:ig_block_ratio:rate5m` |
+| Exits resting | a few at a time, not most | `igs_exits_resting` / `igs_exits` |
+| Why exits rest | mostly `rate_limited`; `checkpoint` or `page_wall` on one exit means replace it with a spare | `igs_exit_rests_total` by reason |
+| Schedule lag | well under 3 hours | `igs:ig_leader:schedule_lag_seconds` |
+| Parked tasks, dead letters | near 0 | `igs_dlq_total`, `igsctl health` |
+| Data stored | grows every hour | `igs_persist_rows_total` by entity |
+| Memory | no pod above 90% of its limit, no OOM kills | `container_memory_working_set_bytes`, alert `IgsIgMemoryNearLimit` |
+| PostgreSQL connections | igs at about 10 or fewer server connections; the server not full | the platform's pg-pool view |
+
+## 5. Connections and pods it adds
+
+- **Pods:** 5 more: crawler-profile 1, crawler-post 2, crawler-retry 1, registry-sync 1. They request 1.7 vCPU and 1.9 GiB in all; the cluster now grows to 8 nodes (platform PR #37).
+- **Server connections:** igs holds about 3 while idle.
+  - Collecting, each crawler and persister pod touches the database more often than every 10 seconds, so each keeps about one server connection warm.
+  - Expect about 8 to 10 in all, and up to about 12 in bursts. crawler-retry needs none: it only moves tasks between topics.
+- **If the server nears full**, lower crawler-post to 1. The exits, not the pods, set the pace, so collection barely slows.
+
+## 6. Tests during the run
+
+- **A pod restart**, about hour 12: delete one crawler-post pod. Its tasks go back to Kafka and finish on the other pod; nothing is lost or stored twice.
+- **An hour with no crawling**, about hour 24: the platform holds the crawlers at 0 for one hour, then restores them. The schedule falls behind and catches up. The report gives the lag at its worst and how long the catch-up took.
+
+## 7. The report (counts only)
+
+The build session writes `docs/master/igs-pilot-report.md` from what the master sends. Times are in Iraq time.
+
+| Measure | How |
+|---|---|
+| Posts and comments per hour | `sum by (entity) (increase(igs_persist_rows_total[1h]))` |
+| Blocked requests and resting exits over time | `igs:ig_block_ratio:rate5m`, `igs_exits_resting`, `sum by (reason) (increase(igs_exit_rests_total[1h]))` |
+| Page loads per exit per day | `sum by (exit) (increase(igs_exit_page_loads_total[1d]))` |
+| Proxy data per account per day | `sum(increase(igs_proxy_bytes_total[1d]))` divided by the profiles on the schedule (`igsctl health`) |
+| Peak memory and CPU per pod | `max_over_time(container_memory_working_set_bytes{namespace="igs"}[48h])`, `rate(container_cpu_usage_seconds_total{namespace="igs"}[5m])` |
+| PostgreSQL growth per day | schema `ig`'s size at the start and every 24 hours: `SELECT pg_size_pretty(sum(pg_total_relation_size(c.oid))) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'ig' AND c.relkind = 'r'` |
+| Server connections | the platform's pg-pool view, at idle and while collecting |
+| Dead letters and stuck jobs | `igs_dlq_total`; `igsctl health`'s jobs line |
+| Discovered accounts | the count registered by discovery, apart from the 348 |
+| Completeness | 10 accounts checked by hand in a logged-out browser against `GET /v1/profiles/<username>/posts` |
+| Cost per 1,000 accounts | proxies from the data per account; compute from the pods' requests |
+
+**Pass:**
+- fewer than 5% of requests blocked;
+- no OOM kills;
+- no account waiting more than 3 hours past its due time;
+- dead letters near 0;
+- the 10 manual checks matching.
+
+Then the go-live ramp follows ([igs-go-live.md](igs-go-live.md) §9), with the measured numbers in place of the estimates.
