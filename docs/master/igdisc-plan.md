@@ -14,7 +14,7 @@ Read with:
 
 ## In short
 
-1. **It lives in the igs repository,** in its own folder (`internal/igdisc`), its own migrations folder, its own docs folder, its own branch and pull requests. It reuses igs's identities, exits and pacing, vetting, Iraq score, keyword table, fake Instagram and registration. A few of igs's own files need small hooks; each one goes to the igs session as a separate small PR.
+1. **It lives in the igs repository,** in its own folder (`internal/ig/igdisc`), its own migrations folder, its own docs folder, its own branch and pull requests. It reuses igs's identities, exits and pacing, vetting, Iraq score, keyword table, fake Instagram and registration. A few of igs's own files need small hooks; each one goes to the igs session as a separate small PR.
 2. **Logged-out keyword search on Instagram most likely needs a login now.** The best evidence (a scraping vendor's changelog) dates the hashtag pages' move behind a login to 9 October 2024. The search box, keyword results and location pages look the same, but nothing here is measured yet. Your recording (option a) will settle it. If it confirms a login wall, **igdisc will not search Instagram by keyword at all,** because getting past a login wall is out (your decision of 6 November).
 3. **So the plan has three tracks:**
    - **Track 1 always works, and costs no new requests to find accounts.** igs already reads every registered account's newest posts every 3 hours, with their comments. igdisc matches those captions, comments and post places against the shared keyword list. Accounts met in a matching post or comment in the last 6 hours, and not yet listed, become candidates with the keyword as evidence.
@@ -47,19 +47,19 @@ Read with:
 
 | New part | Where | Track |
 |---|---|---|
-| **Keyword sightings:** match captions, comments and post places against the keyword list, and record the evidence | `internal/igdisc/evidence` | 1 |
+| **Keyword sightings:** match captions, comments and post places against the keyword list, and record the evidence | `internal/ig/igdisc` (built: `recorder.go`, `keywords.go`) | 1 |
 | **The evidence table** `ig.igdisc_evidence`: account, keyword ID, language, the matching post or comment, its time, how it was met. Kept forever; erasure deletes it | `migrations/igdisc` | 1, 2 |
-| **Hashtag forms:** each keyword written as Instagram hashtags (`Sadr City` becomes `sadrcity`; `مدينة الصدر` becomes `مدينة_الصدر` and `مدينةالصدر`), deduplicated | `internal/igdisc/forms` | 2 |
-| **Search stage and planner:** one search per hashtag form or Iraqi place every interval, lane p3 | `internal/igdisc/search`, `internal/igdisc/plan` | 2, only if the recording allows |
-| **Iraqi places table** `ig.igdisc_locations`, built from the post places igs already reads: places inside Iraq whose names match the place list | `migrations/igdisc`, `internal/igdisc/plan` | 2 |
-| **Candidate publisher:** `discovery.candidate.v1`, found and decided, checked by the contract's `conformance` package | `internal/igdisc/candidate` | all |
-| **Priority guard:** lane p3, the exit share, the pause rule | `internal/igdisc/guard`, with a hook in the crawler | all |
+| **Hashtag forms:** each keyword written as Instagram hashtags (`Sadr City` becomes `sadrcity`; `مدينة الصدر` becomes `مدينة_الصدر` and `مدينةالصدر`), deduplicated | `internal/ig/igdisc/forms` | 2 |
+| **Search stage and planner:** one search per hashtag form or Iraqi place every interval, lane p3 | `internal/ig/igdisc/search`, `internal/ig/igdisc/plan` | 2, only if the recording allows |
+| **Iraqi places table** `ig.igdisc_locations`, built from the post places igs already reads: places inside Iraq whose names match the place list | `migrations/igdisc`, `internal/ig/igdisc/plan` | 2 |
+| **Candidate publisher:** `discovery.candidate.v1`, found and decided, checked by the contract's `conformance` package | `internal/ig/igdisc/candidate` | all |
+| **Priority guard:** lane p3, the exit share, the pause rule | `internal/ig/igdisc/guard`, with a hook in the crawler | all |
 | **fakeig search pages:** hashtag, location and top-search answers, each with a login wall switch | `internal/fakeig/search.go` (a new file) | tests |
-| Metrics `igs_igdisc_*`, alerts, a runbook section | `internal/igdisc`, `deploy/helm/igs`, `docs/igdisc/` | all |
+| Metrics `igs_igdisc_*`, alerts, a runbook section | `internal/ig/igdisc`, `deploy/helm/igs`, `docs/igdisc/` | all |
 
 ### 1.3 Keeping out of the igs session's way
 
-- **My folders:** `internal/igdisc/`, `migrations/igdisc/` (its own goose version table, so migration numbers never clash with igs's `migrations/ig/`), `docs/igdisc/`, and this file in `docs/master/`.
+- **My folders:** `internal/ig/igdisc/` (under `internal/ig/` so igs's integration job, which tests `./internal/ig/...`, runs igdisc's database tests without a change to CI), `migrations/igdisc/` (its own goose version table, so migration numbers never clash with igs's `migrations/ig/`), `docs/igdisc/`, and this file in `docs/master/`.
 - **My branch:** `claude/focused-gauss-hdwmvo`. The igs session works on `claude/ecstatic-hypatia-zj27mg`. Every PR is a draft until the owner approves.
 - **Keys and names:** tables `ig.igdisc_*`, metrics `igs_igdisc_*`, Valkey keys `igs:igdisc:*`, config section `ig.igdisc`.
 - **Hooks in igs's own files.** Each is a separate small PR for the igs session to review (your approval of 6 November):
@@ -290,7 +290,7 @@ None of the reliabilities below has been measured as precision or recall. They a
 | Another country named, with no Iraqi signal | −2 | **Medium** | Iraqis abroad naming where they live |
 | Iraqi audience: how many registered accounts link to it | 1 to 3 | **Strong for influencers and foreign accounts aimed at Iraq** | A world star Iraqi fans tag (capped at 2 for a million followers or more) |
 | Seen on posts placed in Iraq | 1.5 | **Strong but rare** (10% of posts carry a place) | Tourist posts |
-| **New: keyword evidence** (igdisc) | **Proposed: 0.5 per distinct keyword met in someone else's content in the window, at most 1, inside the network cap of 4** | **Weak alone:** a hashtag like `#baghdad` is used by tourists, news and diaspora | Counted only on others' content, because the account's own captions are already in the vet's 12 |
+| **New: keyword evidence** (igdisc) | **0.5 per distinct place of the shared list (Iraq, the Kurdistan Region, a governorate) met in someone else's content in the window, at most 1, inside the network cap of 4.** One place in several spellings (Basra, البصرة, بصرة) counts once | **Weak alone:** a hashtag like `#baghdad` is used by tourists, news and diaspora | Counted only on others' content, because the account's own captions are already in the vet's 12 |
 | **New: located at an Iraqi place page** (Track 2) | Proposed: the same weight as "seen on posts placed in Iraq" (1.5) | **Strong** | Tourist posts |
 
 **How it will be measured:**
@@ -365,7 +365,7 @@ None of the reliabilities below has been measured as precision or recall. They a
 | Step | What | Needs | Effort |
 |---|---|---|---|
 | 0 | Your recording; my findings note | Your recording | 0.5 day after it arrives |
-| 1 | Track 1: keyword sightings, the evidence table, keyword-aware priority | The hooks (igs session) | 1.5 days |
+| 1 | Track 1: keyword sightings, the evidence table, keyword-aware priority. **In progress (7 Nov):** igdisc's own code in #65; the hooks into igs's files in a second PR stacked on it, one commit per hook, for the igs session to review | The hooks PR merged after #65 | 1.5 days |
 | 2 | Lane p3, the exit share, the pause rule, discovery identities | Agreement with the igs session on who builds the share | 1.5 days |
 | 3 | The candidate publisher and conformance in CI; publishing off until the topic exists | | 1 day |
 | 4 | fakeig search pages and the e2e tests | | 1 day |
@@ -379,7 +379,7 @@ None of the reliabilities below has been measured as precision or recall. They a
 - **O3.** Discovery's share of each exit: 10% to start (my proposal)?
 - **O4.** For the canary week, a cap of 50 new accounts a day while you label the sample, then none?
 
-**The master's answers to O1 to O4 (6 November, 18:15). They wait for your confirmation:** the master cites a decision D-027 that lets it decide these, and this session hasn't seen it.
+**O1 to O4: decided by the master under D-027 (6 November, 18:15); the owner confirmed D-027 and said to start step 1 (7 November).**
 - **O1:** approved. Track 1 first; Track 2 only if the recording shows logged-out access. Logged out only, and stop at any login wall or challenge.
 - **O2:** the proposal. A private account goes to the second list only if it passes the Iraq check from its profile.
 - **O3:** 10% to start. Agree with the igs session on who builds the share.
