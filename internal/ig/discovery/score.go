@@ -108,13 +108,16 @@ func (s Signals) Sum() float64 {
 
 // Score rates how Iraqi a candidate is, or how much it addresses an Iraqi
 // audience. Its own words count most:
-//   - Iraq named (any script, 🇮🇶): 3; an Iraqi phone (+964, 07xx) 3; an
-//     .iq link 2; a place in an Iraqi governorate 2, 3 for two or more
-//     governorates (1 when only in captions); Kurdistan 1.5. Places are
-//     the shared keyword list's (places, UseKeywords);
+//   - Iraq named (any script, 🇮🇶): 3; an Iraqi phone 3 (+964 or 00964, or
+//     07xx xxx xxxx, the Iraqi grouping), 1 for any other 07 number (an
+//     unspaced 07700900123 is also a UK mobile's shape); an .iq link 2; a
+//     place in an Iraqi governorate 2, 3 for two or more governorates (1
+//     when only in captions); Kurdistan 1.5. Places are the shared keyword
+//     list's (places, UseKeywords);
 //   - Sorani Kurdish letters 1.5; Iraqi dialect 1, 2 for three or more
 //     markers; mostly Arabic script 1;
-//   - another country named without Iraq: -2.
+//   - another country named without Iraq (or an Iraqi phone, .iq link or
+//     place): -2.
 //
 // Network evidence (every candidate was met in registered, Iraqi, profiles)
 // adds up to 4:
@@ -137,8 +140,11 @@ func Score(v Vet, s Sightings) Signals {
 	if own.iraq || caps.iraq {
 		sig["iraq_named"] = 3
 	}
-	if own.phone {
+	switch {
+	case own.phone:
 		sig["iraq_phone"] = 3
+	case own.localPhone:
+		sig["iraq_phone"] = 1
 	}
 	if own.iqDomain {
 		sig["iq_link"] = 2
@@ -166,7 +172,8 @@ func Score(v Vet, s Sightings) Signals {
 	if arabicShare(own.letters+caps.letters, own.arabic+caps.arabic) >= 0.3 {
 		sig["arabic_script"] = 1
 	}
-	if (own.otherCountry || caps.otherCountry) && sig["iraq_named"] == 0 && sig["iraq_phone"] == 0 && sig["iq_link"] == 0 && sig["iraq_city"] == 0 {
+	// A bare 07 number is too weak to outweigh another country named.
+	if (own.otherCountry || caps.otherCountry) && sig["iraq_named"] == 0 && !own.phone && sig["iq_link"] == 0 && sig["iraq_city"] == 0 {
 		sig["other_country"] = -2
 	}
 	ownSignal := false
@@ -241,18 +248,22 @@ func InIraq(name string, lat, lng *float64) bool {
 }
 
 type textSignals struct {
-	iraq, phone, iqDomain, kurdistan, sorani, otherCountry bool
-	cities                                                 map[string]bool
-	dialect                                                int
-	letters, arabic                                        int
+	iraq, phone, localPhone, iqDomain, kurdistan, sorani, otherCountry bool
+	cities                                                             map[string]bool
+	dialect                                                            int
+	letters, arabic                                                    int
 }
 
 var (
-	// +964 or 00964 (any spacing), or an Iraqi mobile number: 07 then 7, 8,
-	// 5 or 9 (Asiacell, Zain, Korek...), then 8 digits.
-	phoneRe = regexp.MustCompile(`(\+|00)\s?964|(^|[^0-9])07[3-9][0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}([^0-9]|$)`)
-	iqRe    = regexp.MustCompile(`(?i)\.iq(/|\b|$)`)
-	digits  = strings.NewReplacer("٠", "0", "١", "1", "٢", "2", "٣", "3", "٤", "4", "٥", "5", "٦", "6", "٧", "7", "٨", "8", "٩", "9",
+	// An Iraqi number: +964 or 00964 (any spacing), or a mobile number
+	// (07, then 7, 8, 5 or 9: Asiacell, Zain, Korek...) grouped the Iraqi
+	// way, 4-3-4.
+	phoneRe = regexp.MustCompile(`(\+|00)\s?964|(^|[^0-9])07[3-9][0-9][\s-][0-9]{3}[\s-][0-9]{4}([^0-9]|$)`)
+	// Any other 07 mobile number, unspaced or grouped otherwise: other
+	// countries' mobiles look the same (a UK 07700 900123).
+	localPhoneRe = regexp.MustCompile(`(^|[^0-9])07[3-9][0-9][\s-]?[0-9]{3}[\s-]?[0-9]{4}([^0-9]|$)`)
+	iqRe         = regexp.MustCompile(`(?i)\.iq(/|\b|$)`)
+	digits       = strings.NewReplacer("٠", "0", "١", "1", "٢", "2", "٣", "3", "٤", "4", "٥", "5", "٦", "6", "٧", "7", "٨", "8", "٩", "9",
 		"۰", "0", "۱", "1", "۲", "2", "۳", "3", "۴", "4", "۵", "5", "۶", "6", "۷", "7", "۸", "8", "۹", "9")
 )
 
@@ -263,6 +274,7 @@ func scan(text string) textSignals {
 	}
 	ascii := digits.Replace(text)
 	t.phone = phoneRe.MatchString(ascii)
+	t.localPhone = !t.phone && localPhoneRe.MatchString(ascii)
 	t.iqDomain = iqRe.MatchString(text)
 	if strings.Contains(text, "🇮🇶") {
 		t.iraq = true

@@ -19,8 +19,18 @@ func TestScoreSignals(t *testing.T) {
 			Signals{"iraq_named": 3, "arabic_script": 1}},
 		{"flag", Vet{FullName: "Ali 🇮🇶"}, Sightings{}, Signals{"iraq_named": 3}},
 		{"phone, international", Vet{Biography: "orders: +964 770 123 4567"}, Sightings{}, Signals{"iraq_phone": 3}},
-		{"phone, local, Arabic-Indic digits", Vet{Biography: "للحجز ٠٧٨٠١٢٣٤٥٦٧ واتساب فقط والتوصيل"}, Sightings{},
-			Signals{"iraq_phone": 3, "arabic_script": 1}},
+		{"phone, local, grouped the Iraqi way, Arabic-Indic digits", Vet{Biography: "للحجز ٠٧٨٠ ١٢٣ ٤٥٦٧ واتساب فقط والتوصيل"},
+			Sightings{}, Signals{"iraq_phone": 3, "arabic_script": 1}},
+		{"phone, local, grouped with dashes", Vet{Biography: "orders 0750-123-4567"}, Sightings{}, Signals{"iraq_phone": 3}},
+		// An unspaced 07 number is also another country's mobile (the UK's
+		// 07700 900123 range is set aside for fiction): 1 (the master, 7
+		// November 2026).
+		{"phone, local, unspaced, Arabic-Indic digits", Vet{Biography: "للحجز ٠٧٨٠١٢٣٤٥٦٧ واتساب فقط والتوصيل"}, Sightings{},
+			Signals{"iraq_phone": 1, "arabic_script": 1}},
+		{"UK mobile, synthetic", Vet{Biography: "bookings 07700900123"}, Sightings{}, Signals{"iraq_phone": 1}},
+		{"UK mobile, synthetic, grouped 5-6: no Iraqi shape", Vet{Biography: "call 07911 123456"}, Sightings{}, Signals{}},
+		{"a bare 07 number does not outweigh another country", Vet{Biography: "Dubai 07701234567"}, Sightings{},
+			Signals{"iraq_phone": 1, "other_country": -2}},
 		{"iq link", Vet{Links: []string{"https://shop.example.iq/x"}}, Sightings{}, Signals{"iq_link": 2}},
 		{"one city, with a preposition", Vet{Biography: "مطعم ببغداد شارع فلسطين"}, Sightings{},
 			Signals{"iraq_city": 2, "arabic_script": 1, "other_country": 0}},
@@ -87,7 +97,8 @@ func TestScoreAtTheDefaultThreshold(t *testing.T) {
 		pass bool
 	}{
 		{"photographer in Baghdad", Vet{FullName: "علي", Biography: "مصور فوتوغرافي | بغداد"}, true},
-		{"shop with a phone", Vet{Biography: "ملابس اطفال توصيل لكل المحافظات 07701234567"}, true},
+		{"shop with a phone", Vet{Biography: "ملابس اطفال توصيل لكل المحافظات 0770 123 4567"}, true},
+		{"shop with an unspaced number, met once", Vet{Biography: "ملابس اطفال توصيل لكل المحافظات 07701234567"}, false},
 		{"Kurdish in Sulaymaniyah", Vet{Biography: "خۆشەویستی و ژیان لە سلێمانی"}, true},
 		{"dialect in captions", Vet{Captions: []string{"شلونكم حبايب", "هسه نزلت الفيديو", "ماكو مثلكم", "كلش حلو"}}, true},
 		{"Arabic in Riyadh", Vet{Biography: "مصورة في الرياض السعودية"}, false},
