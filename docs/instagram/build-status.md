@@ -2,7 +2,13 @@
 
 Each build session updates this file at the end of its work. The plan and rules are in [`build-brief.md`](build-brief.md).
 
-**Next step:** production. Legal signed off (C4, 2026-11-03), and the owner tests on real profiles in production. Phase 0 (C3) ran on ISP: GO on bootstrap, blocks and latency; complete grids 88.9% against 90%, each short grid stopped at its first rate limit, which the kit does not retry and production does. The owner chose to add exits rather than re-run it. M10d (rotation, retries and failover) and M10e (release, production values, budget, an uncapped planner, the go-live runbook [`igs-go-live.md`](../runbooks/igs-go-live.md)) are done; M11 (profile discovery: Iraqi profiles found and added without a cap) is done, with M11b (data kept forever), M11c (the Iraqi-audience signal, so Iraqi influencers are added) and M11d (a candidate intake and an optional daily cap). Every build milestone is done; what remains is the owner's go-live ([`igs-go-live.md`](../runbooks/igs-go-live.md)). Left open on purpose: U2 (a cheap post-detail query), so each new post costs one post page; C1 (the owner's grid-click and tagged-tab recordings) at any time.
+**Next step (7 Nov 2026, Iraq time morning):** igs runs in production (namespace `igs`): the API, scheduler, persister, normalizer and media components are up. The crawlers, crawler-retry and registry-sync are held at 0 until igs's proxies (`PROXIES_IGS`) exist. The master pinned `f6bdddb` (platform PR #30), which brings fix 21 (egress rules), fix 22a's Go and brotli updates, and the start-up fix (no more liveness kills while the shared database is short of connections). REQ-008's build fixes are all merged (1 to 12 and 14 to 23; the tracker is [`igs-fixes.md`](../master/igs-fixes.md)). Still open:
+- **Fix 13, the 48-hour pilot:** when the owner says.
+- **Per-component PostgreSQL roles:** held until the owner decides on a larger database (agreed with the master); Kafka users and Spaces keys per component follow in a platform PR.
+- **For the owner to decide:** erasure removes a person's media but keeps their raw responses (kept under "keep all data"); whether erasure should also delete raw objects.
+- **REQ-019:** the shared contract v1.0.0, later.
+
+Earlier state: legal signed off (C4, 2026-11-03); Phase 0 (C3) ran on ISP, GO except complete grids 88.9% against 90% (the owner chose more exits over a re-run); every build milestone (M0 to M12) is done; go-live follows [`igs-go-live.md`](../runbooks/igs-go-live.md). Left open on purpose: U2 (a cheap post-detail query) and C1 (the owner's grid-click and tagged-tab recordings).
 
 ## Decisions taken in the M0 session (2026-10-31)
 
