@@ -11,7 +11,10 @@ breaking:
     - FILE
   # The copied fbs contracts (securebrand.fb.v1, securebrand.fbs.task.v1)
   # were deleted with the copied Facebook code (ADR 0004 §2); fbs owns them
-  # in its own repository.
+  # in its own repository. igs's draft securebrand.content.v1 was deleted
+  # for the shared contract (securebrand-contracts v1.2.0, REQ-019), which
+  # owns that package now.
   ignore:
     - api/proto/securebrand/fb
     - api/proto/securebrand/fbs
+    - api/proto/securebrand/content
