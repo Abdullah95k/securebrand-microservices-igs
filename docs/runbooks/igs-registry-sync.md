@@ -12,7 +12,10 @@ Every `ig.registry_sync.interval` (30 minutes):
 
 1. Loads each canary profile's page (`ig.registry_sync.canary_pages`:
    usernames of public profiles with regular posts, comments, reels and
-   highlights; set at least three).
+   highlights; set at least three). **At least one must have highlights:**
+   igs checks the highlights query only on a canary that has some. Without
+   one, highlights stays unchecked on every run, no run counts as a
+   success, and `IgsIgRegistrySyncNotRunning` fires after 3 hours.
 2. Scans the page and its script bundles (`static.cdninstagram.com`) for
    Relay operation ids. That Instagram's bundles declare them, as Facebook's
    do, is open question U6; when they do not, and `ig.browser.enabled` is

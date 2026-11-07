@@ -348,3 +348,19 @@ func TestNoFbsSeries(t *testing.T) {
 		}
 	}
 }
+
+// A ratio whose numerator counts only some classes is 0 when none of them
+// has happened yet, not absent: the block classes have no series until the
+// first block, and an absent block rate read as "no data" in the pilot's
+// first watch (7 Nov 2026).
+func TestBlockRatioIsZeroWithoutBlocks(t *testing.T) {
+	forCharts(t, func(t *testing.T, c chart) {
+		for _, g := range loadRules(t, c).Groups {
+			for _, r := range g.Rules {
+				if r.Record == c.recordPrefix+"block_ratio:rate5m" && !strings.Contains(r.Expr, "or vector(0)") {
+					t.Errorf("%s: the numerator needs \"or vector(0)\", or the ratio is absent while nothing is blocked", r.Record)
+				}
+			}
+		}
+	})
+}

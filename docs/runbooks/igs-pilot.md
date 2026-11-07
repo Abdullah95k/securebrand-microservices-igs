@@ -13,7 +13,7 @@ All of these must hold:
 | 1 | ~~The soak passed~~. **Dropped by the owner's D-045** (7 Nov): "dont test on fake instagram or fake tiktok or fake facebook or fake youtube, test on the real thing". The pilot on the real site is the test; the soak against fakeig gates nothing | done |
 | 2 | igs's proxies exist: 10 ISP IPs plus 3 spares, in the Secret `proxies` (key `proxies.yaml`, tier `isp`, a `static_list` of endpoints; `phase0/proxies.example.yaml` shows the shape) | the owner buys them; the platform creates the Secret |
 | 3 | The proxies' ports are in `networkPolicy.egress.proxies` (production allows 10000–10999). Ports outside that range need the range changed first: a blocked port only shows as timeouts ([network policy](igs-operations.md#network-policy)) | the platform, when it writes the Secret |
-| 4 | Three public accounts that post often, as `config.ig.registry_sync.canary_pages` in the platform's private Argo CD application. Without them registry-sync refuses to run, so it can't follow doc_id rotations. **Done:** the owner chose them (D-033), and the platform set them on 7 Nov | done |
+| 4 | Three public accounts that post often, as `config.ig.registry_sync.canary_pages` in the platform's private Argo CD application. Without them registry-sync refuses to run, so it can't follow doc_id rotations. **Done:** the owner chose them (D-033), and the platform set them on 7 Nov. At least one must have highlights, or registry-sync can't check the highlights query and records no successful run ([igs-registry-sync.md](igs-registry-sync.md)) | done |
 | 5 | PostgreSQL has room. **Done:** `max_connections` is 200 since 7 Nov, 11:32Z (D-037), up from 50; the pilot adds about 6 to 9 server connections (section 5) | done |
 
 The owner keeps two files on their own machine, one username or profile link per line, both cut from their list of 348 Phase 0 accounts:
@@ -95,21 +95,22 @@ kubectl -n igs exec -i deploy/igs-api -- igsctl profiles resume --file - < pilot
 
 | Signal | Healthy | Where |
 |---|---|---|
-| Block rate | under 5% | `igs:ig_block_ratio:rate5m` |
-| Exits resting | a few at a time, not most | `igs_exits_resting` / `igs_exits` |
+| Block rate | under 5% | `igs:ig_block_ratio:rate5m` (0 while nothing is blocked; before #108 the rule gave no series then) |
+| Exits resting | a few at a time, not most | `igs_exits_resting` / `igs_exits` (`igs_exits_resting` has no series until an exit first rests: read it as 0) |
 | Why exits rest | mostly `rate_limited`; `checkpoint` or `page_wall` on one exit means replace it with a spare | `igs_exit_rests_total` by reason |
 | Schedule lag | well under 3 hours | `igs:ig_leader:schedule_lag_seconds` |
 | Parked tasks, dead letters | near 0 | `igs_dlq_total`, `igsctl health` |
 | Data stored | grows every hour | `igs_persist_rows_total` by entity |
 | Memory | no pod above 90% of its limit, no OOM kills | `container_memory_working_set_bytes`, alert `IgsIgMemoryNearLimit` |
-| PostgreSQL connections | igs at about 10 or fewer server connections; the server not full | the platform's pg-pool view |
+| PostgreSQL connections | igs at 40 or fewer server connections (about 26 seen while 50 accounts backfilled); the server not full | the platform's pg-pool view |
+| Registry | every query at 1, none `failing`; a run that checked every query within the hour, once a canary has highlights | `igs_registry_query_healthy`, registry-sync's `run finished` log line |
 
 ## 5. Connections and pods it adds
 
 - **Pods:** 5 more: crawler-profile 1, crawler-post 2, crawler-retry 1, registry-sync 1. They request 1.7 vCPU and 1.9 GiB in all; the cluster now grows to 8 nodes (platform PR #37).
 - **Server connections:** igs holds about 3 while idle.
-  - Collecting, each crawler and persister pod touches the database more often than every 10 seconds, so each keeps about one server connection warm.
-  - Expect about 8 to 10 in all, and up to about 12 in bursts. crawler-retry needs none: it only moves tasks between topics.
+  - Ten pods open PostgreSQL: api, scheduler, persister, both media pods, crawler-profile, both crawler-post pods, crawler-retry and registry-sync. Each keeps a client pool of at most 4 (`max_conns: 4`), so igs never holds more than 40 server connections: PgBouncer in transaction mode holds no more server connections than clients.
+  - Collecting, most pods touch the database every few seconds, and PgBouncer runs several processes, each with its own pools. On 7 Nov, with 50 accounts backfilling, igs held 26 (the first estimate here, 8 to 12, was too low).
 - **Room:** with `max_connections` at 200 (D-037) this fits easily. If the server ever nears full, lower crawler-post to 1. The exits, not the pods, set the pace, so collection barely slows.
 
 ## 6. Tests during the run
