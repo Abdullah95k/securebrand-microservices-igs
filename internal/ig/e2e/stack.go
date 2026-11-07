@@ -41,6 +41,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igdisc"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/igtest"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
@@ -280,6 +281,9 @@ func (s *Stack) StartScheduler() {
 	}
 	if s.Cfg.IG.Discovery.Enabled {
 		vetter := &discovery.Vetter{DB: s.DB, Dispatch: s.Dispatch, Cfg: s.Cfg}
+		if s.Cfg.IG.IGDisc.Enabled {
+			vetter.KeywordContext = igdisc.KeywordContextFunc(s.DB)
+		}
 		if s.Cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(s.Redis, s.Cfg.Kafka.TopicPrefix)
 		}
