@@ -31,6 +31,7 @@ var IGLayout = Layout{
 		"posts":    {"caption", "usertags", "extra"},
 		"comments": {"text", "extra"},
 	},
+	Create: IGSchema + ".create_partition",
 }
 
 func igProvider(ctx context.Context, pool *pgxpool.Pool) (*goose.Provider, *sql.DB, error) {

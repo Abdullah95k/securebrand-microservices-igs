@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -65,7 +66,28 @@ func PostgresIG(t testing.TB) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	// The per-component roles exist on the test server (they are the
+	// server's, shared by every test database) and get their grants here,
+	// as igsctl migrate up gives them in production.
+	ensureRoles(t, pool)
+	if _, err := store.ApplyRoleGrants(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
 	return pool
+}
+
+// ensureRoles creates the per-component roles once per test server. Tests
+// run at once in several packages, so a role another test just created is
+// fine.
+func ensureRoles(t testing.TB, db *pgxpool.Pool) {
+	t.Helper()
+	for _, role := range store.RoleNames() {
+		_, err := db.Exec(context.Background(), `DO $$ BEGIN CREATE ROLE `+pgx.Identifier{role}.Sanitize()+` NOLOGIN;
+			EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$`)
+		if err != nil {
+			t.Fatalf("create role %s: %v", role, err)
+		}
+	}
 }
 
 func replaceDB(dsn, name string) string {
