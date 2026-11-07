@@ -237,8 +237,16 @@ func (r *Recorder) Comments(ownerPK int64, cs []*igv1.Comment) {
 	if r == nil || !r.Cfg.Commenters || len(cs) == 0 {
 		return
 	}
+	// Match outside the lock: crawling tasks call this at once (up to the
+	// pod's slots), and only adding to the batch needs to be serialised.
+	type hit struct {
+		username string
+		pk       int64
+		kws      []Keyword
+		e        Evidence
+	}
 	x := r.index.Load()
-	r.mu.Lock()
+	var hits []hit
 	for _, cm := range cs {
 		a := cm.GetAuthor()
 		if a.GetUsername() == "" || cm.GetIsOp() || cm.GetRedacted() || cm.GetCreatedAt() == nil {
@@ -256,8 +264,15 @@ func (r *Recorder) Comments(ownerPK int64, cs []*igv1.Comment) {
 		if src == 0 {
 			src = cm.GetOwnerPk()
 		}
-		r.add(a.GetUsername(), a.GetUserPk(), kws, Evidence{ContentID: "ig:comment:" + strconv.FormatInt(cm.GetCommentPk(), 10),
-			ContentTime: at.UTC(), Via: ViaComment, SourcePK: src})
+		hits = append(hits, hit{a.GetUsername(), a.GetUserPk(), kws, Evidence{ContentID: "ig:comment:" + strconv.FormatInt(cm.GetCommentPk(), 10),
+			ContentTime: at.UTC(), Via: ViaComment, SourcePK: src}})
+	}
+	if len(hits) == 0 {
+		return
+	}
+	r.mu.Lock()
+	for _, h := range hits {
+		r.add(h.username, h.pk, h.kws, h.e)
 	}
 	full := len(r.pending) >= maxPending
 	r.mu.Unlock()
