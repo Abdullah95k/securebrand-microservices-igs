@@ -678,7 +678,7 @@ entities:
     present: often
     present_pct: 97
     source: post page (HTML with embedded JSON) (like_count); reels-tab query for reels
-    stored_at: posts.like_count (NULL when hidden); post_metrics.like_count (reels)
+    stored_at: posts.like_count (NULL when hidden); post_metrics.like_count
     published_at: Post.like_count; content.post.v1 Post.likes (absent when hidden)
     history: latest
     personal_data: false
@@ -702,7 +702,7 @@ entities:
     present: always
     present_pct: null
     source: post page (HTML with embedded JSON); reels-tab query
-    stored_at: posts.comment_count; post_metrics.comment_count (reels)
+    stored_at: posts.comment_count; post_metrics.comment_count
     published_at: Post.comment_count; content.post.v1 Post.comments
     history: latest
     personal_data: false
@@ -914,7 +914,7 @@ entities:
 - name: post_metrics
   unified: post_metrics
   fetched: The reels tab on every visit, back to max_age_days (365); the post page on each read and re-read (latest values only).
-  notes: 'A row is stored only when a count changed. Only reels have a metrics series. Photos, carousels and non-reel videos get their likes and comments from post-page re-reads, which update posts (latest) and publish a new content.post.v1 version, but no metrics event and no post_metrics row. Planned fix: a metrics event per post-page read.'
+  notes: 'A row is stored only when a count changed. Every re-read post has a metrics series (REQ-008 fix 16): each read of a post''s page publishes a sample on ig.post_metrics.v1 (likes, comment count, likes hidden), and so does each read of the reels tab (reels: views, likes, comment count). This has been so since M6; an earlier version said only reels had a series, which was wrong. An unavailable post (gone, or walled) publishes no sample.'
   fields:
   - name: media_pk
     meaning: The post
@@ -922,7 +922,7 @@ entities:
     example: '3000000000000000001'
     present: always
     present_pct: null
-    source: reels-tab query
+    source: post page; reels-tab query
     stored_at: post_metrics.media_pk
     published_at: ig.post_metrics.v1 PostMetrics.media_pk; content.metrics.v1 Envelope.native_id (target post)
     history: key
@@ -934,7 +934,7 @@ entities:
     example: '1000000001'
     present: always
     present_pct: null
-    source: reels-tab query
+    source: post page; reels-tab query
     stored_at: post_metrics.owner_pk
     published_at: PostMetrics.owner_pk; Metrics.parent_id
     history: key
@@ -982,7 +982,7 @@ entities:
     example: '125'
     present: often
     present_pct: null
-    source: reels-tab query
+    source: post page; reels-tab query
     stored_at: post_metrics.like_count (NULL when hidden)
     published_at: PostMetrics.like_count; Metrics.likes (absent when hidden)
     history: snapshots
@@ -994,7 +994,7 @@ entities:
     example: '6'
     present: always
     present_pct: null
-    source: reels-tab query
+    source: post page; reels-tab query
     stored_at: post_metrics.comment_count
     published_at: PostMetrics.comment_count; Metrics.comments
     history: snapshots
@@ -1006,7 +1006,7 @@ entities:
     example: 'false'
     present: always
     present_pct: null
-    source: reels-tab query
+    source: post page; reels-tab query
     stored_at: post_metrics.counts_hidden
     published_at: PostMetrics.counts_hidden; Metrics.counts_hidden
     history: snapshots
@@ -1954,8 +1954,8 @@ planned:
   change: Added optional fields; old ones kept.
 - field: post metrics from post pages
   entity: post_metrics
-  why: Photos and carousels have no metrics series.
-  change: Publish ig.post_metrics.v1 (likes, comments) from each post-page read.
+  why: 'Thought missing: photos and carousels seemed to have no metrics series. Already in place since M6; shown by a test (REQ-008 fix 16).'
+  change: Each post-page read publishes ig.post_metrics.v1 (likes, comments).
 - field: comment deletions
   entity: comment
   why: E7.

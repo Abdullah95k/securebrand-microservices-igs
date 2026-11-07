@@ -102,9 +102,9 @@ Post = feed post, video, carousel or reel (reel = product type `clips`). The pos
 | `music` | title, artist, audio_id, original_audio | object | {title: "Example Song", artist: "Example Artist", audio_id: "900000001", original_audio: false} | often (50%) | post page (HTML with embedded JSON) (`clips_metadata`: `music_info` or original sound) | `posts.music` (JSON) | `Post.music`; `extras.music` | latest | no | 50% of post pages: 200 licensed tracks in the sample, the rest original audio. `is_explicit`, `audio_filter_infos` and similar keys dropped. |
 | `topics` | Instagram's related topics | list of text | ["Example topic"] | often (89%) | post page (HTML with embedded JSON) (`related_topic_pills[].topic_name`) | `posts.topics` | `Post.topics`; `extras.topics` | latest | no | 89% of post pages. `topic_id` dropped. |
 | `ai_label` | AI-generated label text | text | AI info | rare (7%) | post page (HTML with embedded JSON) (`ai_label_info`) | `posts.ai_label` | `Post.ai_label`; `extras.ai_label` | latest | no | 7% of post pages. |
-| `like_count` | Likes | int64 (optional) | 68 | often (97%) | post page (HTML with embedded JSON) (`like_count`); reels-tab query for reels | `posts.like_count` (NULL when hidden); `post_metrics.like_count` (reels) | `Post.like_count`; `content.post.v1 Post.likes` (absent when hidden) | latest | no | Exact. When the owner hides likes, Instagram answers 0 to 3: igs stores nothing and sets `counts_hidden`. Hidden on 3% of post pages. |
+| `like_count` | Likes | int64 (optional) | 68 | often (97%) | post page (HTML with embedded JSON) (`like_count`); reels-tab query for reels | `posts.like_count` (NULL when hidden); `post_metrics.like_count` | `Post.like_count`; `content.post.v1 Post.likes` (absent when hidden) | latest | no | Exact. When the owner hides likes, Instagram answers 0 to 3: igs stores nothing and sets `counts_hidden`. Hidden on 3% of post pages. |
 | `counts_hidden` | The owner hid likes | bool | false | always | post page (HTML with embedded JSON) (`like_and_view_counts_disabled`); reels-tab query | `posts.counts_hidden`; `post_metrics.counts_hidden` | `Post.counts_hidden`; `extras.counts_hidden`; `Metrics.counts_hidden` | latest | no | True on 3% of post pages and 6,074 of 325,681 reels (1.9%). |
-| `comment_count` | Comments, as Instagram counts them | int64 (optional) | 5 | always | post page (HTML with embedded JSON); reels-tab query | `posts.comment_count`; `post_metrics.comment_count` (reels) | `Post.comment_count`; `content.post.v1 Post.comments` | latest | no | Exact. Whether it includes replies is unknown. Compared with comments collected for completeness. |
+| `comment_count` | Comments, as Instagram counts them | int64 (optional) | 5 | always | post page (HTML with embedded JSON); reels-tab query | `posts.comment_count`; `post_metrics.comment_count` | `Post.comment_count`; `content.post.v1 Post.comments` | latest | no | Exact. Whether it includes replies is unknown. Compared with comments collected for completeness. |
 | `commenting_disabled` | Comments turned off | bool | false | always | post page (HTML with embedded JSON) (`comments_disabled`, `commenting_disabled_for_viewer`) | `posts.commenting_disabled` | `Post.commenting_disabled`; `extras.commenting_disabled` | latest | no |  |
 | `play_count` | Views (reels) | int64 (optional) | 7739 | often (99.4%) | reels-tab query (`play_count`); the post page serves none logged out | `posts.play_count`; `post_metrics.play_count` | `ig.post_metrics.v1 PostMetrics.play_count`; `content.post.v1 Post.views`; `Metrics.views` | snapshots | no | Reels only: 99.4% of reels carry views. Photos and carousels: no views logged out. Exact integers. |
 | `shares, saves, reposts` | Share and save counts | int64 | - | logged_in_only | - | not stored | not published | - | no | Not served logged out (post page and reels tab checked). |
@@ -127,18 +127,18 @@ Post = feed post, video, carousel or reel (reel = product type `clips`). The pos
 
 **Fetched:** The reels tab on every visit, back to `max_age_days` (365); the post page on each read and re-read (latest values only).
 
-A row is stored only when a count changed. **Only reels have a metrics series.** Photos, carousels and non-reel videos get their likes and comments from post-page re-reads, which update `posts` (latest) and publish a new `content.post.v1` version, but no metrics event and no `post_metrics` row. Planned fix: a metrics event per post-page read.
+A row is stored only when a count changed. **Every re-read post has a metrics series** (REQ-008 fix 16). Each read of a post's page publishes a sample on `ig.post_metrics.v1` (likes, comment count, likes hidden), and so does each read of the reels tab (reels: views, likes, comment count). This has been so since M6; an earlier version of this page said only reels had a series, which was wrong. An unavailable post (gone, or walled) publishes no sample.
 
 | Field | Meaning | Type | Synthetic example | Present | Source | Stored at | Published at | History | PD | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `media_pk` | The post | int64 | 3000000000000000001 | always | reels-tab query | `post_metrics.media_pk` | `ig.post_metrics.v1 PostMetrics.media_pk`; `content.metrics.v1 Envelope.native_id` (target post) | key | no |  |
-| `owner_pk` | The account | int64 | 1000000001 | always | reels-tab query | `post_metrics.owner_pk` | `PostMetrics.owner_pk`; `Metrics.parent_id` | key | yes |  |
+| `media_pk` | The post | int64 | 3000000000000000001 | always | post page; reels-tab query | `post_metrics.media_pk` | `ig.post_metrics.v1 PostMetrics.media_pk`; `content.metrics.v1 Envelope.native_id` (target post) | key | no |  |
+| `owner_pk` | The account | int64 | 1000000001 | always | post page; reels-tab query | `post_metrics.owner_pk` | `PostMetrics.owner_pk`; `Metrics.parent_id` | key | yes |  |
 | `taken_at` | Posting time | timestamp | 2026-11-01T18:30:00Z | always | derived by igs (from the pk) | - | `PostMetrics.taken_at`; `Envelope.published_at` | key | no |  |
 | `captured_at` | When igs read it | timestamp (UTC) | 2026-11-05T09:00:00Z | always | derived by igs | `post_metrics.captured_at` (monthly partitions) | `PostMetrics.captured_at`; `Envelope.observed_at` | key | no |  |
-| `play_count` | Views | int64 (optional) | 7739 | always | reels-tab query | `post_metrics.play_count` | `PostMetrics.play_count`; `Metrics.views` | snapshots | no | Exact. |
-| `like_count` | Likes | int64 (optional) | 125 | often | reels-tab query | `post_metrics.like_count` (NULL when hidden) | `PostMetrics.like_count`; `Metrics.likes` (absent when hidden) | snapshots | no |  |
-| `comment_count` | Comments | int64 (optional) | 6 | always | reels-tab query | `post_metrics.comment_count` | `PostMetrics.comment_count`; `Metrics.comments` | snapshots | no |  |
-| `counts_hidden` | Likes hidden | bool | false | always | reels-tab query | `post_metrics.counts_hidden` | `PostMetrics.counts_hidden`; `Metrics.counts_hidden` | snapshots | no |  |
+| `play_count` | Views | int64 (optional) | 7739 | always | reels-tab query | `post_metrics.play_count` | `PostMetrics.play_count`; `Metrics.views` | snapshots | no | Exact. Reels only; a post page's sample carries the stored views forward. |
+| `like_count` | Likes | int64 (optional) | 125 | often | post page; reels-tab query | `post_metrics.like_count` (NULL when hidden) | `PostMetrics.like_count`; `Metrics.likes` (absent when hidden) | snapshots | no |  |
+| `comment_count` | Comments | int64 (optional) | 6 | always | post page; reels-tab query | `post_metrics.comment_count` | `PostMetrics.comment_count`; `Metrics.comments` | snapshots | no |  |
+| `counts_hidden` | Likes hidden | bool | false | always | post page; reels-tab query | `post_metrics.counts_hidden` | `PostMetrics.counts_hidden`; `Metrics.counts_hidden` | snapshots | no |  |
 
 ### comment (unified: comment)
 
@@ -414,7 +414,7 @@ Proposals only; each needs the owner's approval. All are additions: nothing is r
 |---|---|---|---|
 | linked Facebook page ID | account | Cross-platform linking. **Done (REQ-008 fix 9).** | `Profile.linked_facebook_page_id` and a link with `platform` `fb` on `content.account.v1`; the name no longer in `Link.url`. |
 | is_business / category as optional | account | `false` and empty mean unknown today. | Added optional fields; old ones kept. |
-| post metrics from post pages | post_metrics | Photos and carousels have no metrics series. | Publish `ig.post_metrics.v1` (likes, comments) from each post-page read. |
+| post metrics from post pages | post_metrics | Thought missing: photos and carousels seemed to have no metrics series. **Already in place since M6; shown by a test (REQ-008 fix 16).** | Each post-page read publishes `ig.post_metrics.v1` (likes, comments). |
 | comment deletions | comment | E7. **Done (REQ-008 fix 14).** | After a complete re-read (refresh window, or the one at 30 days), comments that are gone are published as deleted. |
 | walled posts | post | 2.6% of posts publish nothing. **Done (REQ-008 fix 15).** | The grid's fields are published with status unavailable, reason `login_wall`. |
 | parser version on raw lines | raw | E8 asks for it. | Add `parser` to each raw line. |

@@ -296,7 +296,7 @@ After the pilot:
 - E7, comment deletions and 30-day re-reads;
 - E10, walled posts and per-post coverage;
 - E8, parser version and re-parse;
-- post metrics from post pages;
+- post metrics from post pages (already in place since M6; shown by a test in REQ-008 fix 16);
 - F3 and F5, alerts and `igsctl health`;
 - I1 to I3;
 - G4, gitleaks;
