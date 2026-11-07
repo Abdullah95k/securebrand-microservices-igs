@@ -31,10 +31,11 @@ config:
     media_bucket: "securebrand-igs-media"
     raw_bucket: "securebrand-igs-raw"
   media:
-    # Kept until the analysis service acknowledged it (0); a duration
-    # deletes it after that long without an acknowledgement.
-    ttl: 0s
-    required_consumers: ["analysis"]
+    # Deleted once the analysis service acknowledged it, and at the latest
+    # this long after it was stored (the contract: at least 24h, 72h by
+    # default).
+    ttl: 72h
+    required_consumers: ["sb-analysis"]
   ig:
     base_url: "https://www.instagram.com"
     # The owner's probe pace (C2): 0.3 requests a second per identity,

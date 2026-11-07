@@ -1,6 +1,6 @@
 // Command igs-media runs igs's temporary media pipeline over schema ig:
-// the downloader (igs.task.media into object storage, ig.media.ready.v1)
-// and the janitor (acks on ig.media.processed.v1, the TTL sweep, orphan
+// the downloader (igs.task.media into object storage, content.media.ready.v1)
+// and the janitor (acks on content.media.processed.v1, the deadline sweep, orphan
 // objects). Media files are downloaded only for jobs that ask for them
 // (ig.limits.include_media, D5). --roles runs one of them per Deployment.
 package main

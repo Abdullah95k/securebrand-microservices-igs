@@ -53,9 +53,10 @@ config:
     media_prefix: igs/
     manage_buckets: false
   media:
-    # Kept until the analysis service acknowledged it.
-    ttl: 0s
-    required_consumers: ["analysis"]
+    # Deleted once the analysis service acknowledged it, and at the latest
+    # 72h after it was stored (the contract's default).
+    ttl: 72h
+    required_consumers: ["sb-analysis"]
   ig:
     exit_rps: 0.25
     rate_limit_rest: 10m

@@ -7,12 +7,16 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
+	"github.com/abdullah95k/securebrand-contracts/conformance"
+	mediav1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/media/v1"
+
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/normalize"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 )
 
@@ -84,12 +88,41 @@ func TestMediaPipeline(t *testing.T) {
 			t.Fatalf("object %s: %v", o.key, err)
 		}
 	}
-	// The analysis service acknowledges every object.
-	b := s.Producer.NewBatch()
+	// Each stored file is announced on content.media.ready.v1 in the
+	// contract's form (REQ-019 slice 2).
+	opt := conformance.Options{Production: true}
+	announced := map[string]bool{}
+	for _, r := range s.ReadTopic(t, topics.ContentMediaReady, 3*time.Second) {
+		var m mediav1.MediaReady
+		if err := proto.Unmarshal(r.Value, &m); err != nil {
+			t.Fatal(err)
+		}
+		if err := conformance.MediaReady(&m, opt); err != nil {
+			t.Errorf("%s: %v", m.MediaId, err)
+		}
+		if string(r.Key) != m.MediaId || m.Attempt != 1 || m.DeleteAfter.AsTime().Sub(m.StoredAt.AsTime()) != 72*time.Hour {
+			t.Errorf("%s: key %s attempt %d deadline %v", m.MediaId, r.Key, m.Attempt, m.DeleteAfter.AsTime().Sub(m.StoredAt.AsTime()))
+		}
+		announced[m.MediaId] = true
+	}
 	for _, o := range objs {
-		if err := b.AddProto(ctx, topics.MediaProcessed, o.id, &commonv1.MediaProcessed{EventId: o.id + ":ack", MediaId: o.id,
-			Consumer: s.Cfg.Media.RequiredConsumers[0], Status: commonv1.ProcessStatus_PROCESS_STATUS_PROCESSED,
-			ProcessedAt: timestamppb.Now()}); err != nil {
+		if !announced[normalize.MediaID(o.id)] {
+			t.Errorf("media %s stored but not announced", o.id)
+		}
+	}
+	// The analysis service acknowledges every object; another platform's
+	// ack on the shared topic is left alone.
+	ack := func(id string) *mediav1.MediaProcessed {
+		return &mediav1.MediaProcessed{EventId: id + ":ack", MediaId: id, Consumer: s.Cfg.Media.RequiredConsumers[0],
+			Status: mediav1.ProcessStatus_PROCESS_STATUS_PROCESSED, ProcessedAt: timestamppb.Now(), Platform: "ig"}
+	}
+	b := s.Producer.NewBatch()
+	if err := b.AddProto(ctx, topics.ContentMediaProcessed, "tt:media:x", ack("tt:media:x")); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range objs {
+		id := normalize.MediaID(o.id)
+		if err := b.AddProto(ctx, topics.ContentMediaProcessed, id, ack(id)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -112,6 +145,20 @@ func TestMediaPipeline(t *testing.T) {
 		if _, err := s.S3.StatObject(ctx, o.bucket, o.key, minio.StatObjectOptions{}); err == nil {
 			t.Fatalf("object %s still stored", o.key)
 		}
+	}
+	deleted := 0
+	for _, r := range s.ReadTopic(t, topics.ContentMediaDeleted, 3*time.Second) {
+		var m mediav1.MediaDeleted
+		if err := proto.Unmarshal(r.Value, &m); err != nil {
+			t.Fatal(err)
+		}
+		if err := conformance.MediaDeleted(&m, opt); err != nil || m.Reason != mediav1.DeleteReason_DELETE_REASON_PROCESSED {
+			t.Errorf("%s: %v, reason %v", m.MediaId, err, m.Reason)
+		}
+		deleted++
+	}
+	if deleted != len(objs) {
+		t.Errorf("%d deletions recorded for %d files", deleted, len(objs))
 	}
 }
 

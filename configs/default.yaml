@@ -294,16 +294,15 @@ scheduler:
 
 media:
   concurrency: 50
-  # Media is kept until every required consumer (the analysis service)
-  # acknowledged it (architecture: media until its analysis is complete).
-  # A ttl > 0 deletes it after that long even without an acknowledgement.
-  ttl: 0
-  required_consumers: ["analysis"]
+  # A stored file is deleted once every required consumer acknowledged it
+  # (securebrand-contracts v1.2.0, owner R5), and at the latest ttl after it
+  # was stored: at least 24h, 72h when 0. The consumers are the registry's
+  # names (registry/platforms.yaml).
+  ttl: 72h
+  required_consumers: ["sb-analysis"]
   max_retryable_failures: 3
   sweep_interval: 1h
   orphan_interval: 24h
-  presign: false
-  presign_ttl: 24h
   max_bytes: 524288000   # 500 MiB per object
 
 api:

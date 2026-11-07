@@ -184,7 +184,7 @@ Each line holds `at`, `query`, `doc_id` (GraphQL answers), `parser` and `parser_
 
 Nothing expires by age, the job log included (the owner, 6 November 2026): `jobs_days` and `media_rows_days` are 0. A media row stays after its file is deleted, as the record of what was downloaded. Plan Postgres for about 8,000 jobs a day per 1,000 long-tail profiles (a few KB each).
 
-Media files are deleted once the analysis service acknowledged them (or after `media.ttl`, if set).
+Media files are deleted once the analysis service acknowledged them, and at the latest `media.ttl` after they were stored (72 h by default, at least 24 h).
 
 An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, including discovery rows, and suppresses them from later crawls.
 
@@ -549,7 +549,8 @@ The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka 
 | `ig.post.v1` | `content.post.v1`: photo, carousel, video, igtv, or reel as `SHORT_VIDEO`. A walled post is a partial event, `RESTRICTED`; an unavailable one `UNAVAILABLE` |
 | `ig.post_metrics.v1` | `content.metrics.v1`, target the post |
 | `ig.comment.v1` | `content.comment.v1` and `content.metrics.v1` (target the comment). A deletion is a partial `DELETED` event. Redacted comments publish nothing |
-| `ig.media.v1`, `ig.highlight.v1` | nothing yet (REQ-019 slices 2 and 3) |
+| `ig.media.v1` | `content.media.v1`: type and role (photo, video, reel, thumbnail, cover, profile picture, comment attachments), owner (the post, a carousel child's post, the comment or the account), size, duration, alt text and the signed CDN URL with its expiry. Re-signed URLs don't change the content hash. Highlight media waits for slice 3 |
+| `ig.highlight.v1` | nothing yet (REQ-019 slice 3) |
 
 - **On the wire:** plain Protobuf, one message type per topic, headers `sb-type` (the full message name) and `sb-contract` (`1.2.0`). Keys: the account ID (`ig:account:<pk>`) for accounts and snapshots; the post ID (`ig:post:<pk>`) for posts, comments and metrics.
 - **The envelope:** `platform` `ig`, `id` `ig:<kind>:<native id>`, `version` = `observed_at` in microseconds, `content_hash` (SHA-256 of the content without counts), `event_id` (SHA-256 of `id|observed_at µs|content_hash`), and provenance (collector, version, parser version `<query>:<n>`, the query and its doc_id, job IDs, logged-out scraping, the crawl mode, `raw_ref`).
@@ -658,7 +659,7 @@ The planner runs each scheduled profile at its tier's interval, and its profile 
 
 Media files are downloaded only with `ig.limits.include_media` (D5: metadata always, files once the analysis service exists). Instagram's CDN URLs expire within hours, so a backlog on `igs.task.media` turns into failed downloads (`IgsIgMediaDownloadsFailing`). Scale the downloader, or check the CDN responses.
 
-The janitor deletes a file once every `media.required_consumers` acknowledged it (`ig.media.processed.v1`): media is kept until its analysis is complete (architecture). With `media.ttl` set (0 by default), it also deletes a file not acknowledged within that time; `IgsIgMediaTTLExpiries` then means the analysis service does not keep up with `ig.media.ready.v1`, or its acks do not arrive. With no TTL, watch the media bucket's size instead: files waiting for analysis stay.
+The hand-off is the contract's (`securebrand.media.v1`, REQ-019 slice 2). The downloader announces each stored file on `content.media.ready.v1`, with its deadline and `media.required_consumers` (registry names: `sb-analysis`). The janitor deletes it once each of them acknowledged it on `content.media.processed.v1` (processed, failed for good, or skipped), and records the deletion on `content.media.deleted.v1`. After a retryable failure it announces the file again, at most 3 times. Every file has a deadline: `media.ttl`, 72 h by default and never under 24 h (the contract; 0 means 72 h). `IgsIgMediaTTLExpiries` means the analysis service did not keep up with `content.media.ready.v1`, or its acks did not arrive. Acks for other collectors' media, on the same topic, are skipped.
 
 ## Capacity and sizing
 

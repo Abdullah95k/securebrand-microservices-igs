@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,9 +13,10 @@ import (
 	"github.com/minio/minio-go/v7/pkg/lifecycle"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
-	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
+	mediav1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/media/v1"
+
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/normalize"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
@@ -38,14 +38,16 @@ type Janitor struct {
 	Prefix string
 }
 
-// Handle consumes ig.media.processed.v1.
+// Handle consumes content.media.processed.v1. Every collector's consumers
+// acknowledge on it, so acks for media that isn't igs's are skipped.
 func (j *Janitor) Handle(ctx context.Context, rec *kgo.Record) error {
-	var ack commonv1.MediaProcessed
+	var ack mediav1.MediaProcessed
 	if err := proto.Unmarshal(rec.Value, &ack); err != nil {
 		slog.Error("igs janitor: undecodable ack", "err", err)
 		return nil
 	}
-	if ack.MediaId == "" || ack.Consumer == "" {
+	id, ours := normalize.NativeMediaID(ack.MediaId)
+	if !ours || ack.Consumer == "" {
 		return nil
 	}
 	status := strings.ToLower(strings.TrimPrefix(ack.Status.String(), "PROCESS_STATUS_"))
@@ -53,37 +55,46 @@ func (j *Janitor) Handle(ctx context.Context, rec *kgo.Record) error {
 	if ack.ProcessedAt != nil {
 		at = ack.ProcessedAt.AsTime()
 	}
+	detail := ack.Error
+	if ack.Reason != "" {
+		detail = strings.TrimSpace(ack.Reason + ": " + ack.Error)
+	}
 	tag, err := j.DB.Exec(ctx, `INSERT INTO media_acks (media_id, consumer, status, error, acked_at)
 		SELECT $1::uuid, $2, $3, NULLIF($4,''), $5 WHERE EXISTS (SELECT 1 FROM media WHERE media_id = $1::uuid)
 		ON CONFLICT (media_id, consumer) DO UPDATE SET status = EXCLUDED.status, error = EXCLUDED.error, acked_at = EXCLUDED.acked_at`,
-		ack.MediaId, ack.Consumer, status, ack.Error, at)
+		id, ack.Consumer, status, detail, at)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return nil // unknown media (already purged)
 	}
-	if ack.Status == commonv1.ProcessStatus_PROCESS_STATUS_FAILED_RETRYABLE {
-		return j.retry(ctx, ack.MediaId)
+	if ack.Status == mediav1.ProcessStatus_PROCESS_STATUS_FAILED_RETRYABLE {
+		return j.retry(ctx, id)
 	}
-	return j.deleteIfAcked(ctx, ack.MediaId)
+	return j.deleteIfAcked(ctx, id)
 }
 
-// deleteIfAcked deletes the object when all required consumers are done.
+// deleteIfAcked deletes the object when all required consumers are done:
+// processed, failed for good, or skipped by their policy.
 func (j *Janitor) deleteIfAcked(ctx context.Context, mediaID string) error {
 	var done int
 	if err := j.DB.QueryRow(ctx, `SELECT count(DISTINCT consumer) FROM media_acks WHERE media_id = $1
-		AND consumer = ANY($2) AND status IN ('processed','failed_permanent')`, mediaID, j.RequiredConsumers).Scan(&done); err != nil {
+		AND consumer = ANY($2) AND status IN ('processed','failed_permanent','skipped')`, mediaID, j.RequiredConsumers).Scan(&done); err != nil {
 		return err
 	}
 	if done < len(j.RequiredConsumers) {
 		return nil
 	}
-	return j.Delete(ctx, mediaID, commonv1.DeleteReason_DELETE_REASON_ACKED)
+	return j.Delete(ctx, mediaID, mediav1.DeleteReason_DELETE_REASON_PROCESSED)
 }
 
-// retry announces the object again after a retryable failure, until
-// MaxRetryableFailures.
+// MaxReannouncements is the contract's limit: a file is announced again at
+// most 3 times after retryable failures.
+const MaxReannouncements = 3
+
+// retry announces the object again after a retryable failure, at most
+// min(MaxRetryableFailures, 3) times; after that it is done with.
 func (j *Janitor) retry(ctx context.Context, mediaID string) error {
 	var failures int
 	err := j.DB.QueryRow(ctx, `UPDATE media SET retryable_failures = retryable_failures + 1 WHERE media_id = $1 AND status = 'ready'
@@ -94,50 +105,23 @@ func (j *Janitor) retry(ctx context.Context, mediaID string) error {
 	if err != nil {
 		return err
 	}
-	if failures > j.MaxRetryableFailures {
-		return j.Delete(ctx, mediaID, commonv1.DeleteReason_DELETE_REASON_ACKED)
+	if failures > min(j.MaxRetryableFailures, MaxReannouncements) {
+		return j.Delete(ctx, mediaID, mediav1.DeleteReason_DELETE_REASON_PROCESSED)
 	}
-	ready, err := j.readyEvent(ctx, mediaID, uint32(failures+1))
+	ready, err := readyEvent(ctx, j.DB, mediaID, int32(failures+1), j.RequiredConsumers, nil)
 	if err != nil {
 		return err
 	}
 	b := j.Producer.NewBatch()
-	if err := b.AddProto(ctx, topics.MediaReady, mediaID, ready); err != nil {
+	if err := b.AddProto(ctx, topics.ContentMediaReady, ready.MediaId, ready); err != nil {
 		return err
 	}
 	return b.Wait(ctx)
 }
 
-func (j *Janitor) readyEvent(ctx context.Context, mediaID string, attempt uint32) (*commonv1.MediaReady, error) {
-	var kind, variant, src string
-	var user, post, parent, comment, size, dur *int64
-	var w, h *int32
-	var sha []byte
-	var bucket, key, ct, alt *string
-	var deleteAfter *time.Time
-	err := j.DB.QueryRow(ctx, `SELECT source_media_id, kind, variant, user_pk, media_pk, parent_media_pk, comment_pk, width, height,
-		duration_ms, sha256, s3_bucket, s3_key, size_bytes, mime, alt_text, delete_after FROM media WHERE media_id = $1`, mediaID).
-		Scan(&src, &kind, &variant, &user, &post, &parent, &comment, &w, &h, &dur, &sha, &bucket, &key, &size, &ct, &alt, &deleteAfter)
-	if err != nil {
-		return nil, err
-	}
-	r := &commonv1.MediaReady{EventId: mediaID + ":ready:" + strconv.Itoa(int(attempt)), Platform: commonv1.Platform_PLATFORM_INSTAGRAM,
-		MediaId: mediaID, SourceMediaId: src, Variant: variant, Attempt: attempt,
-		Kind:      commonv1.MediaKind(commonv1.MediaKind_value["MEDIA_KIND_"+strings.ToUpper(kind)]),
-		AccountId: val(user), PostId: val(post), CommentId: comment, Width: val32(w), Height: val32(h), DurationMs: val(dur),
-		AltText: str(alt), Object: &commonv1.S3Object{Bucket: str(bucket), Key: str(key), Size: val(size), Sha256: sha, ContentType: str(ct)}}
-	if parent != nil {
-		r.PostId = *parent
-	}
-	if deleteAfter != nil {
-		r.DeleteAfter = timestamppb.New(*deleteAfter)
-	}
-	return r, nil
-}
-
-// Delete removes a ready object, marks its row and publishes
-// ig.media.deleted.v1.
-func (j *Janitor) Delete(ctx context.Context, mediaID string, reason commonv1.DeleteReason) error {
+// Delete removes a ready object, marks its row and records the deletion on
+// content.media.deleted.v1. The media row itself is kept.
+func (j *Janitor) Delete(ctx context.Context, mediaID string, reason mediav1.DeleteReason) error {
 	var bucket, key *string
 	err := j.DB.QueryRow(ctx, `SELECT s3_bucket, s3_key FROM media WHERE media_id = $1 AND status = 'ready'`, mediaID).Scan(&bucket, &key)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -151,20 +135,18 @@ func (j *Janitor) Delete(ctx context.Context, mediaID string, reason commonv1.De
 			return err
 		}
 	}
-	status := "deleted"
-	if reason == commonv1.DeleteReason_DELETE_REASON_TTL_EXPIRED {
-		status = "expired"
+	status, label := "deleted", "acked"
+	if reason == mediav1.DeleteReason_DELETE_REASON_EXPIRED {
+		status, label = "expired", "ttl_expired"
 	}
 	if _, err := j.DB.Exec(ctx, `UPDATE media SET status = $2, deleted_at = now(),
 		processed_at = CASE WHEN $2 = 'deleted' THEN now() ELSE processed_at END WHERE media_id = $1`, mediaID, status); err != nil {
 		return err
 	}
-	name := strings.ToLower(strings.TrimPrefix(reason.String(), "DELETE_REASON_"))
-	metrics.MediaDeleted.WithLabelValues(name).Inc()
+	metrics.MediaDeleted.WithLabelValues(label).Inc()
+	ev := deletedEvent(mediaID, reason, time.Now())
 	b := j.Producer.NewBatch()
-	if err := b.AddProto(ctx, topics.MediaDeleted, mediaID, &commonv1.MediaDeleted{EventId: mediaID + ":" + name, MediaId: mediaID,
-		Object: &commonv1.S3Object{Bucket: str(bucket), Key: str(key)}, Reason: reason, DeletedAt: timestamppb.Now(),
-		Platform: commonv1.Platform_PLATFORM_INSTAGRAM}); err != nil {
+	if err := b.AddProto(ctx, topics.ContentMediaDeleted, ev.MediaId, ev); err != nil {
 		return err
 	}
 	return b.Wait(ctx)
@@ -182,7 +164,7 @@ func (j *Janitor) Sweep(ctx context.Context) error {
 			return err
 		}
 		for _, id := range ids {
-			if err := j.Delete(ctx, id, commonv1.DeleteReason_DELETE_REASON_TTL_EXPIRED); err != nil {
+			if err := j.Delete(ctx, id, mediav1.DeleteReason_DELETE_REASON_EXPIRED); err != nil {
 				return err
 			}
 		}
@@ -193,13 +175,13 @@ func (j *Janitor) Sweep(ctx context.Context) error {
 }
 
 // Orphans deletes stored objects no ready media row references, older than
-// the TTL (at least a day) plus an hour, under igs's prefix only.
+// a file's lifetime plus an hour, under igs's prefix only.
 func (j *Janitor) Orphans(ctx context.Context) error {
 	if j.Prefix == "" {
 		// The whole bucket: other services' objects too. Never sweep it.
 		return errors.New("igs janitor: no media prefix: the orphan sweep would list the whole bucket")
 	}
-	cutoff := time.Now().Add(-max(j.TTL, 24*time.Hour) - time.Hour)
+	cutoff := time.Now().Add(-Lifetime(j.TTL) - time.Hour)
 	for obj := range j.S3.ListObjects(ctx, j.Bucket, minio.ListObjectsOptions{Prefix: j.Prefix, Recursive: true}) {
 		if obj.Err != nil {
 			return obj.Err
@@ -237,22 +219,15 @@ func val(v *int64) int64 {
 	return *v
 }
 
-func val32(v *int32) int32 {
-	if v == nil {
-		return 0
-	}
-	return *v
-}
-
 // Lifecycle sets the bucket's expiry rule for igs's objects (under
-// prefix), a safety net behind the janitor: objects expire a day after the
-// TTL. It replaces the bucket's whole lifecycle configuration, so it is
+// prefix), a safety net behind the janitor: objects expire a day after
+// their lifetime. It replaces the bucket's whole lifecycle configuration, so it is
 // only for a bucket igs owns (s3.manage_buckets).
 func Lifecycle(ctx context.Context, s3 *minio.Client, bucket, prefix string, ttl time.Duration) {
-	if ttl <= 0 || prefix == "" {
-		// Kept until analysed: no expiry rule.
+	if prefix == "" {
 		return
 	}
+	ttl = Lifetime(ttl)
 	cfg := &lifecycle.Configuration{Rules: []lifecycle.Rule{{
 		ID: "igs-ig-media-ttl", Status: "Enabled", RuleFilter: lifecycle.Filter{Prefix: prefix},
 		Expiration: lifecycle.Expiration{Days: lifecycle.ExpirationDays(int(ttl.Hours()/24) + 1)},

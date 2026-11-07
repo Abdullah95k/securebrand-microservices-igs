@@ -22,8 +22,8 @@ import (
 var MediaRoles = []string{"downloader", "janitor"}
 
 // NewMedia builds igs's media roles: the downloader (igs.task.media into
-// object storage, ig.media.ready.v1) and the janitor (acks on
-// ig.media.processed.v1, the TTL sweep, orphans). db is a pool on schema ig.
+// object storage, content.media.ready.v1) and the janitor (acks on
+// content.media.processed.v1, the deadline sweep, orphans). db is a pool on schema ig.
 func NewMedia(cfg *config.Config, db *pgxpool.Pool, s3 *minio.Client, producer *kafka.Producer, roles []string) ([]run.Func, error) {
 	kcfg, err := clients.Kafka(cfg, "-igs-media")
 	if err != nil {
@@ -37,7 +37,7 @@ func NewMedia(cfg *config.Config, db *pgxpool.Pool, s3 *minio.Client, producer *
 		switch r {
 		case "downloader":
 			d := &media.Downloader{DB: db, S3: s3, Bucket: cfg.S3.MediaBucket, Producer: producer, HTTP: media.NewHTTPClient(),
-				TTL: cfg.Media.TTL, MaxBytes: cfg.Media.MaxBytes, Presign: cfg.Media.Presign, PresignTTL: cfg.Media.PresignTTL,
+				TTL: cfg.Media.TTL, MaxBytes: cfg.Media.MaxBytes, RequiredConsumers: cfg.Media.RequiredConsumers,
 				Prefix: cfg.S3.MediaPrefix}
 			c, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "igs-ig-media-downloader",
 				Topics: []string{topics.TaskMedia}, MaxInflight: max(cfg.Media.Concurrency, 1), DrainTimeout: 60 * time.Second}, d.Handle)
@@ -50,7 +50,7 @@ func NewMedia(cfg *config.Config, db *pgxpool.Pool, s3 *minio.Client, producer *
 				RequiredConsumers: cfg.Media.RequiredConsumers, MaxRetryableFailures: cfg.Media.MaxRetryableFailures, TTL: cfg.Media.TTL,
 				Prefix: cfg.S3.MediaPrefix}
 			c, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: "igs-ig-media-janitor",
-				Topics: []string{topics.MediaProcessed}, MaxInflight: 32, DrainTimeout: 20 * time.Second}, j.Handle)
+				Topics: []string{topics.ContentMediaProcessed}, MaxInflight: 32, DrainTimeout: 20 * time.Second}, j.Handle)
 			if err != nil {
 				return nil, err
 			}

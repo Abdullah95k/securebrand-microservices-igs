@@ -29,17 +29,20 @@ topics:
   - {name: ig.comment.v1,         partitions: 12, retention: 168h}
   - {name: ig.media.v1,           partitions: 3,  retention: 168h}
   - {name: ig.highlight.v1,       partitions: 3,  retention: 168h}
-  - {name: ig.media.ready.v1,     partitions: 3,  retention: 168h}
-  - {name: ig.media.processed.v1, partitions: 3,  retention: 168h}
-  - {name: ig.media.deleted.v1,   partitions: 3,  retention: 168h}
   - {name: ig.job.v1,             partitions: 3,  retention: 168h}
   - {name: ig.erasure.v1,         partitions: 3,  retention: 720h}
   # The shared content contract (securebrand-contracts v1.2.0), from
   # igs-normalizer. The platform owns these topics: igsctl kafka apply
   # leaves every content.* topic out unless --include-content asks for it
-  # (a Kafka of igs's own). content.media.v1 joins with REQ-019 slice 2.
+  # (a Kafka of igs's own). The media hand-off (content.media.ready,
+  # processed and deleted) replaced igs's ig.media.ready, processed and
+  # deleted topics; igs deletes no topic, so those stay where they exist.
   - {name: content.post.v1,             partitions: 48, retention: 168h}
   - {name: content.comment.v1,          partitions: 96, retention: 168h}
   - {name: content.account.v1,          partitions: 24, retention: 168h}
   - {name: content.account_snapshot.v1, partitions: 24, retention: 168h}
   - {name: content.metrics.v1,          partitions: 96, retention: 168h}
+  - {name: content.media.v1,            partitions: 24, retention: 168h}
+  - {name: content.media.ready.v1,      partitions: 3,  retention: 168h}
+  - {name: content.media.processed.v1,  partitions: 3,  retention: 168h}
+  - {name: content.media.deleted.v1,    partitions: 3,  retention: 168h}

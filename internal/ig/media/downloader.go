@@ -1,8 +1,8 @@
 // Package media is igs's temporary media pipeline (D5: used only when a job
 // asks for files): download from Instagram's CDN into object storage,
-// announce on ig.media.ready.v1, and delete once every required consumer
-// acknowledged on ig.media.processed.v1 (or the TTL passed). It mirrors the
-// copied Facebook pipeline on schema ig and the common media contracts.
+// announce on content.media.ready.v1, and delete once every required
+// consumer acknowledged on content.media.processed.v1, or at the file's
+// deadline (securebrand-contracts v1.2.0, securebrand.media.v1).
 package media
 
 import (
@@ -23,7 +23,6 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
@@ -35,15 +34,17 @@ import (
 
 // Downloader consumes igs.task.media. DB is a pool on schema ig.
 type Downloader struct {
-	DB         *pgxpool.Pool
-	S3         *minio.Client
-	Bucket     string
-	Producer   *kafka.Producer
-	HTTP       *http.Client // direct egress, never the proxies
-	TTL        time.Duration
-	MaxBytes   int64
-	Presign    bool
-	PresignTTL time.Duration
+	DB       *pgxpool.Pool
+	S3       *minio.Client
+	Bucket   string
+	Producer *kafka.Producer
+	HTTP     *http.Client // direct egress, never the proxies
+	// TTL is media.ttl; Lifetime turns it into the file's deadline.
+	TTL      time.Duration
+	MaxBytes int64
+	// RequiredConsumers must acknowledge each file (registry names, such
+	// as sb-analysis).
+	RequiredConsumers []string
 	// Prefix starts every object key (s3.media_prefix).
 	Prefix string
 }
@@ -126,12 +127,7 @@ func (d *Downloader) Handle(ctx context.Context, rec *kgo.Record) error {
 		return err // the consumer retries with backoff
 	}
 	now := time.Now().UTC()
-	// With no TTL the media waits for its acknowledgements however long.
-	var deleteAfter *time.Time
-	if d.TTL > 0 {
-		t := now.Add(d.TTL)
-		deleteAfter = &t
-	}
+	deleteAfter := now.Add(Lifetime(d.TTL))
 	_, err = d.DB.Exec(ctx, `
 		INSERT INTO media (media_id, source_media_id, variant, kind, owner_type, user_pk, media_pk, parent_media_pk, position,
 			comment_pk, source_url, width, height, duration_ms, mime, alt_text, status, s3_bucket, s3_key, size_bytes, sha256,
@@ -147,28 +143,16 @@ func (d *Downloader) Handle(ctx context.Context, rec *kgo.Record) error {
 	if err != nil {
 		return err
 	}
-	ready := &commonv1.MediaReady{
-		EventId: m.MediaId + ":ready:1", Platform: commonv1.Platform_PLATFORM_INSTAGRAM, MediaId: m.MediaId,
-		SourceMediaId: m.SourceMediaId, Kind: m.Kind, Variant: m.Variant, AccountId: m.UserPk, PostId: m.MediaPk,
-		CommentId: m.CommentPk, Object: obj, Width: m.Width, Height: m.Height, DurationMs: m.DurationMs, AltText: m.AltText,
-		DiscoveredAt: m.GetObs().GetObservedAt(), StoredAt: timestamppb.New(now), Attempt: 1,
-	}
-	if m.ParentMediaPk != nil {
-		ready.PostId = *m.ParentMediaPk // a carousel child belongs to its post
-	}
-	if deleteAfter != nil {
-		ready.DeleteAfter = timestamppb.New(*deleteAfter)
-	}
+	var jobIDs []string
 	if t.JobId != "" {
-		ready.JobIds = []string{t.JobId}
+		jobIDs = []string{t.JobId}
 	}
-	if d.Presign {
-		if u, err := d.S3.PresignedGetObject(ctx, obj.Bucket, obj.Key, d.PresignTTL, nil); err == nil {
-			ready.PresignedUrl = u.String()
-		}
+	ready, err := readyEvent(ctx, d.DB, m.MediaId, 1, d.RequiredConsumers, jobIDs)
+	if err != nil {
+		return err
 	}
 	b := d.Producer.NewBatch()
-	if err := b.AddProto(ctx, topics.MediaReady, m.MediaId, ready); err != nil {
+	if err := b.AddProto(ctx, topics.ContentMediaReady, ready.MediaId, ready); err != nil {
 		return err
 	}
 	if err := b.Wait(ctx); err != nil {
