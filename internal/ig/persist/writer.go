@@ -225,9 +225,16 @@ func (w *Writer) Posts(ctx context.Context, posts []*igv1.Post) error {
 		}
 	}
 	var written int64
+	locked := make([]int64, 0, len(posts))
+	for _, p := range posts {
+		locked = append(locked, p.MediaPk)
+	}
 	err := w.withPartitions(ctx, []string{"posts", "comments"}, months, func() error {
 		written = 0
 		return pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
+			if err := lockPosts(ctx, tx, locked); err != nil {
+				return err
+			}
 			if len(rows) > 0 {
 				if err := copyTemp(ctx, tx, "tmp_posts", "posts", postCols, rows); err != nil {
 					return err
@@ -257,6 +264,13 @@ func (w *Writer) Posts(ctx context.Context, posts []*igv1.Post) error {
 				written = tag.RowsAffected()
 				if _, err := tx.Exec(ctx, `INSERT INTO post_index (media_pk, owner_pk, taken_at, shortcode)
 					SELECT media_pk, owner_pk, taken_at, shortcode FROM tmp_posts ON CONFLICT DO NOTHING`); err != nil {
+					return err
+				}
+				// Comments stored before the post's row: counted now.
+				if _, err := tx.Exec(ctx, `UPDATE posts p SET comments_collected = (SELECT count(*) FROM comments c
+						WHERE c.taken_at = p.taken_at AND c.media_pk = p.media_pk AND c.depth = 0 AND c.status = 'visible')
+					FROM tmp_posts tp WHERE p.taken_at = tp.taken_at AND p.media_pk = tp.media_pk
+					  AND p.comments_collected IS NULL AND p.status = 'visible'`); err != nil {
 					return err
 				}
 				// Views read from the reels tab before the post's page.
@@ -489,6 +503,9 @@ func (w *Writer) Comments(ctx context.Context, cs []*igv1.Comment) error {
 	err := w.withPartitionsFor(ctx, map[string][]time.Time{"comments": months, "comment_metrics": captured}, func() error {
 		written, edited = 0, 0
 		return pgx.BeginFunc(ctx, w.DB, func(tx pgx.Tx) error {
+			if err := lockPosts(ctx, tx, postMedia); err != nil {
+				return err
+			}
 			if err := copyTemp(ctx, tx, "tmp_comments", "comments", commentCols, rows); err != nil {
 				return err
 			}
@@ -597,6 +614,9 @@ func MarkDeleted(ctx context.Context, db *pgxpool.Pool, cs []*igv1.Comment) (int
 	}
 	var n int64
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if err := lockPosts(ctx, tx, media); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `UPDATE comments c SET status = 'deleted', deleted_at = d.at
 			FROM unnest($1::timestamptz[], $2::bigint[], $3::bigint[], $4::timestamptz[]) AS d(taken, media, id, at)
 			WHERE c.taken_at = d.taken AND c.media_pk = d.media AND c.comment_pk = d.id
@@ -612,6 +632,20 @@ func MarkDeleted(ctx context.Context, db *pgxpool.Pool, cs []*igv1.Comment) (int
 	}
 	metrics.CommentChanges.WithLabelValues("deleted").Add(float64(n))
 	return n, nil
+}
+
+// lockPosts takes a transaction lock per post, first thing in a
+// transaction, so a post's row and its comments, written by two consumers
+// at once, never both miss each other when they count its comments: the
+// second waits for the first to commit. Locks are taken in key order; the
+// class 1957 keeps them apart from other advisory locks.
+func lockPosts(ctx context.Context, tx pgx.Tx, media []int64) error {
+	if len(media) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(1957, k) FROM (
+		SELECT DISTINCT (m % 2147483647)::int AS k FROM unnest($1::bigint[]) AS m ORDER BY k) s`, media)
+	return err
 }
 
 // recount sets posts.comments_collected, a post's visible top-level
