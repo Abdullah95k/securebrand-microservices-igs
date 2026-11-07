@@ -2,10 +2,12 @@
 
 Each build session updates this file at the end of its work. The plan and rules are in [`build-brief.md`](build-brief.md).
 
-**Next step (7 Nov 2026, Iraq time morning):** igs runs in production (namespace `igs`): the API, scheduler, persister, normalizer and media components are up. The crawlers, crawler-retry and registry-sync are held at 0 until igs's proxies (`PROXIES_IGS`) exist. The master pinned `f6bdddb` (platform PR #30), which brings fix 21 (egress rules), fix 22a's Go and brotli updates, and the start-up fix (no more liveness kills while the shared database is short of connections). REQ-008's build fixes are all merged (1 to 12 and 14 to 23; the tracker is [`igs-fixes.md`](../master/igs-fixes.md)). Still open:
+**Next step (7 Nov 2026, Iraq time morning):** igs runs in production (namespace `igs`): the API, scheduler, persister, normalizer and media components are up. The crawlers, crawler-retry and registry-sync are held at 0 until igs's proxies (`PROXIES_IGS`) exist. Production runs `cdaa420` (platform #34, synced 08:42Z, Healthy at 08:57Z, Iraq 11:57): fix 21's egress rules, fix 22a's Go and brotli updates, the start-up fix (the ops server before the stores; no liveness kills while the shared database is short of connections), readiness checking the stores at most once a minute, and a 15-minute start-up wait for a full database. igs held 3 of the shared database's server connections at 07:55Z, down from 11. REQ-008's build fixes are all merged (1 to 12 and 14 to 23; the tracker is [`igs-fixes.md`](../master/igs-fixes.md)). Still open:
 - **Fix 13, the 48-hour pilot:** when the owner says.
 - **Per-component PostgreSQL roles:** held until the owner decides on a larger database (agreed with the master); Kafka users and Spaces keys per component follow in a platform PR.
-- **For the owner to decide:** erasure removes a person's media but keeps their raw responses (kept under "keep all data"); whether erasure should also delete raw objects.
+- **For the owner to decide:**
+  - erasure removes a person's media but keeps their raw responses (kept under "keep all data"): should erasure also delete raw objects?
+  - the shared database's connection limit, the lasting fix for its shortage (it also gates the per-component PostgreSQL roles).
 - **REQ-019:** the shared contract v1.0.0, later.
 
 Earlier state: legal signed off (C4, 2026-11-03); Phase 0 (C3) ran on ISP, GO except complete grids 88.9% against 90% (the owner chose more exits over a re-run); every build milestone (M0 to M12) is done; go-live follows [`igs-go-live.md`](../runbooks/igs-go-live.md). Left open on purpose: U2 (a cheap post-detail query) and C1 (the owner's grid-click and tagged-tab recordings).
