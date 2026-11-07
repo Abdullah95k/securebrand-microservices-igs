@@ -1,0 +1,159 @@
+# Throwaway stores for the soak: Postgres, Redpanda (Kafka), Valkey and an
+# in-memory S3. Public images, pinned by digest.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: {app: postgres}
+  ports: [{name: postgres, port: 5432}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+          env:
+            # Reachable only inside the sealed namespace; nothing to protect.
+            - {name: POSTGRES_HOST_AUTH_METHOD, value: trust}
+            - {name: POSTGRES_USER, value: igs}
+            - {name: POSTGRES_DB, value: igs}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          args: ["-c", "max_connections=200", "-c", "shared_buffers=256MB"]
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "igs", "-d", "igs"]}
+            periodSeconds: 5
+          resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: 750m, memory: 1536Mi}}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 10Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+spec:
+  selector: {app: redpanda}
+  ports: [{name: kafka, port: 9092}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+spec:
+  serviceName: redpanda
+  replicas: 1
+  selector:
+    matchLabels: {app: redpanda}
+  template:
+    metadata:
+      labels: {app: redpanda}
+    spec:
+      securityContext: {fsGroup: 101}
+      containers:
+        - name: redpanda
+          image: redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+          args:
+            - redpanda
+            - start
+            - --mode=dev-container
+            - --smp=1
+            - --memory=1G
+            - --kafka-addr=internal://0.0.0.0:9092
+            - --advertise-kafka-addr=internal://redpanda:9092
+          ports: [{name: kafka, containerPort: 9092}]
+          readinessProbe:
+            exec: {command: ["rpk", "cluster", "health", "--exit-when-healthy"]}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources: {requests: {cpu: 500m, memory: 1536Mi}, limits: {cpu: 750m, memory: 1536Mi}}
+          volumeMounts: [{name: data, mountPath: /var/lib/redpanda/data}]
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 10Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+spec:
+  selector: {app: valkey}
+  ports: [{name: valkey, port: 6379}]
+---
+# The soak restarts it once (igs-soak --valkey-at): its data is lost, as
+# after a crash; igs rebuilds what it keeps there.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey
+spec:
+  serviceName: valkey
+  replicas: 1
+  selector:
+    matchLabels: {app: valkey}
+  template:
+    metadata:
+      labels: {app: valkey}
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+          args: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "384mb"]
+          ports: [{name: valkey, containerPort: 6379}]
+          readinessProbe:
+            exec: {command: ["valkey-cli", "ping"]}
+            periodSeconds: 5
+          resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: 250m, memory: 512Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3
+spec:
+  selector: {app: s3}
+  ports: [{name: s3, port: 9000}]
+---
+# igs's in-memory S3 (cmd/devs3). igs keeps only failed raw responses
+# (ig.capture_raw: failures) and downloads no media, so it stays small.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s3}
+  template:
+    metadata:
+      labels: {app: s3}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 65532}
+      containers:
+        - name: s3
+          image: igs
+          command: ["/usr/local/bin/devs3", "-addr", ":9000"]
+          ports: [{name: s3, containerPort: 9000}]
+          readinessProbe:
+            tcpSocket: {port: 9000}
+            periodSeconds: 5
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 250m, memory: 512Mi}}

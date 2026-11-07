@@ -70,28 +70,12 @@ func TestSoak(t *testing.T) {
 		len(profiles), duration, restartEvery)
 
 	mutate := func() {
-		p := profiles[rng.IntN(len(profiles))]
-		switch n := rng.IntN(10); {
-		case n < 3:
-			if _, err := s.World.AddPosts(p.Username, 1, time.Minute); err != nil {
-				t.Fatal(err)
-			}
-			mutations["new posts"]++
-		case n < 7:
-			post := p.Posts[rng.IntN(min(len(p.Posts), 10))]
-			if post.Gated {
-				return
-			}
-			if err := s.World.AddComments(post.PK, 1+rng.IntN(4)); err != nil {
-				t.Fatal(err)
-			}
-			mutations["comments on recent posts"]++
-		default:
-			post := p.Posts[rng.IntN(len(p.Posts))]
-			if err := s.World.SetLikes(post.PK, post.Likes+int64(1+rng.IntN(50))); err != nil {
-				t.Fatal(err)
-			}
-			mutations["like counts"]++
+		what, err := s.World.Mutate(rng)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if what != "" {
+			mutations[what]++
 		}
 	}
 	sampleHealth := func(elapsed time.Duration) {

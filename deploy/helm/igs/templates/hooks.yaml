@@ -37,6 +37,9 @@ spec:
           env: {{- include "igs.env" $root | nindent 12 }}
           {{- include "igs.envFrom" $root | nindent 10 }}
           securityContext: {{- toYaml $root.Values.securityContext | nindent 12 }}
+          {{- with $root.Values.hooks.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts: {{- include "igs.volumeMounts" $root | nindent 12 }}
       volumes: {{- include "igs.hookVolumes" $root | nindent 8 }}
 {{- end }}

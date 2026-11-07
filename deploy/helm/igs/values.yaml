@@ -186,6 +186,9 @@ hooks:
   # `igsctl clickhouse migrate`: creates the shared content store's tables
   # (with components.content-writer enabled).
   clickhouse: true
+  # Every hook job's container (a namespace with a ResourceQuota refuses
+  # pods without them).
+  resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 256Mi}}
 
 api:
   service:

@@ -1,0 +1,23 @@
+# igs's 24-hour soak against fakeig (REQ-008 fix 12), in the namespace
+# igs-soak on the production cluster. Two Argo CD applications use this
+# repository at one commit:
+#   - this folder (kustomize): throwaway stores, fakeig and the soak driver;
+#   - deploy/helm/igs with values file deploy/soak/values-soak.yaml, release
+#     name igs (the driver reaches igs-api).
+# Nothing here reaches Instagram or the platform's stores, and nothing is
+# a secret: the stores are throwaway and live only in this namespace.
+# The platform sets the igs image (built at the same commit, default target
+# of deploy/docker/Dockerfile) with a kustomize image override for "igs".
+# Runbook: docs/runbooks/igs-soak.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: igs-soak
+    includeSelectors: false
+resources:
+  - stores.yaml
+  - fakeig.yaml
+  - driver.yaml
+images:
+  - name: igs

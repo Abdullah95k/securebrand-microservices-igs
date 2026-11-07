@@ -1,0 +1,82 @@
+# igs on the soak's throwaway stores (REQ-008 fix 12): the Helm application
+# for deploy/helm/igs in the namespace igs-soak, release name igs. The
+# stores, fakeig and the driver come from this folder's kustomization.
+# Nothing here is a secret: the stores are reachable only inside the
+# namespace, and the S3 keys and the authors' HMAC key are igs's
+# development defaults (service.env soak is not production).
+config:
+  service: {name: igs, env: soak}
+  log: {level: info, format: json}
+  postgres:
+    dsn: "postgres://igs@postgres:5432/igs?sslmode=disable"
+    max_conns: 10
+  kafka:
+    brokers: ["redpanda:9092"]
+  redis:
+    addr: "valkey:6379"
+  s3:
+    endpoint: "s3:9000"
+    use_ssl: false
+    region: "us-east-1"
+    media_bucket: "igs-media"
+    raw_bucket: "igs-raw"
+  media:
+    required_consumers: ["analysis"]
+  ig:
+    base_url: "http://fakeig:8091"
+    identity_rps: 20
+    profile_rps: 20
+    profile_rps_p0: 20
+    global_rps: 200
+    proxy:
+      tiers: [{name: direct, kind: direct}]
+      routing: {default: [direct]}
+    # Discovery would register fakeig's commenters, which are not
+    # fakeig's profiles: off, so the store is compared with fakeig's truth.
+    discovery:
+      enabled: false
+    registry_sync:
+      canary_pages: [profile_01, profile_02, profile_03]
+
+secretFiles:
+  existingSecret: ""
+
+# Fixed replicas: no KEDA in the soak.
+keda:
+  enabled: false
+
+hooks:
+  migrate: true
+  topics: true
+  topicReplicas: 1
+  topicPartitionsCap: 3
+  # The soak's Kafka is its own, so it creates the content topics the
+  # normalizer writes. No schema registry.
+  topicsIncludeContent: true
+  schemas: false
+
+# The platform's Prometheus scrapes the pods' metrics port (9090, named
+# metrics): go_goroutines and the pods' memory (cAdvisor) judge the soak.
+serviceMonitor:
+  enabled: true
+  interval: 30s
+alerts:
+  enabled: false
+dashboards:
+  enabled: false
+# The namespace has the platform's own sealed policy.
+networkPolicy:
+  enabled: false
+
+# Every container has requests and limits (the namespace's ResourceQuota).
+components:
+  api: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 250m, memory: 256Mi}}}
+  scheduler: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 250m, memory: 256Mi}}}
+  crawler-profile: {replicas: 1, pdb: null, resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: 400m, memory: 1Gi}}}
+  crawler-post: {replicas: 2, pdb: null, resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: 400m, memory: 1Gi}}}
+  crawler-retry: {replicas: 1, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 100m, memory: 128Mi}}}
+  persister: {replicas: 1, pdb: null, resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: 400m, memory: 1Gi}}}
+  normalizer: {replicas: 1, pdb: null, resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 250m, memory: 384Mi}}}
+  media-downloader: {replicas: 1, pdb: null, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 100m, memory: 128Mi}}}
+  media-janitor: {replicas: 1, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 100m, memory: 128Mi}}}
+  registry-sync: {replicas: 1, resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 100m, memory: 128Mi}}}
