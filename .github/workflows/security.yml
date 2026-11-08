@@ -26,9 +26,9 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {fetch-depth: 0}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: gitleaks (every commit)
@@ -39,8 +39,8 @@ jobs:
   go-vulns:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: govulncheck
@@ -52,7 +52,7 @@ jobs:
       # aquasec/trivy:0.76.0
       TRIVY: aquasec/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build both images
         run: |
           docker build -f deploy/docker/Dockerfile -t igs:scan .
