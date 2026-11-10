@@ -81,6 +81,7 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 | 3.1 and 3.3 (slice 3) | #115 (merge f2c40b8) | See "Slice 3, as built"; 3.2 waits for the owner's check |
 | 4.2 (slice 4) | #117 | See "Slice 4, as built" |
 | 4.4 (slice 4) | the extras PR | See "Slice 4, as built" |
+| 4.1, Instagram candidates (slice 4) | the candidates PR | See "Slice 4, as built"; cross-platform candidates from bio links follow |
 
 **Slice 1, as built** (`internal/ig/normalize`, `internal/ig/app/normalizer.go`):
 - **1.1:** `go.mod` requires `securebrand-contracts v1.2.0`. igs's own `securebrand.content.v1` (proto, generated code, embed) is deleted.
@@ -157,6 +158,14 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
   - completeness, with the ratios only when posts were read;
   - the missing data as reason classes. Walled posts are `wall`, login pages `login_required`, private profiles `private`, missing profiles and posts `removed`, cut-short timelines and caps `limit`, and blocks `rate_limited`.
   - The contract has no JobCoverage check, so the tests check its fields.
+- **4.1, Instagram candidates** (`internal/ig/discovery/candidate.go`): each time discovery decides a candidate, igs-scheduler publishes it on `discovery.candidate.v1` with its outcome. Key: the account ID, or `ig:u:<handle>` before igs knows it.
+  - **Outcomes:** registered is `ADDED` (scope full). Below the threshold is `NOT_RELEVANT`. Private is `SECOND_LIST` (scope profile only). Gone, or unreadable after three tries, is `UNAVAILABLE`, with the reason.
+  - **Source:** the way the crawl met it most often (tag, co-author, mention, commenter), or import for accounts from `igsctl discovery import`.
+  - **Evidence:** one entry per way, with sightings and distinct registered accounts.
+  - **Relevance:** the score, whether it passed the threshold, and the country signals as matched rules.
+  - **Capped is never published.** The contract allows it only in tests and the canary, and production runs no caps (D-008).
+  - **If publishing fails,** the decision is still stored and the failure is logged. The candidate goes out again when it is next decided.
+  - **Not yet:** cross-platform candidates (an Instagram bio linking a Facebook page or a YouTube channel) and keyword IDs on the evidence.
 - **4.4, account extras:**
   - The profile parser now reads `latest_reel_media` (the newest story's time) and `show_text_post_app_badge` (Instagram's Threads hint) into igs's Profile, as `latest_story_at` and `threads_badge` (additive fields).
   - The normalizer publishes them as the registered extras `ig.latest_story_at` (RFC 3339) and `ig.threads_badge`, only when the answer has them.

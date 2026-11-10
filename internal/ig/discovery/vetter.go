@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -51,6 +52,9 @@ type Vetter struct {
 	// Rests, when set, are the exit rests the crawlers share: vets wait
 	// while most exits of a tier rest (ig.discovery.hold_resting_share).
 	Rests RestLoader
+	// Candidates, when set, publishes each decided candidate in the
+	// contract's form (discovery.candidate.v1).
+	Candidates CandidatePublisher
 	// held is the last hold reason, for logging its changes.
 	held string
 }
@@ -159,7 +163,7 @@ func (v *Vetter) rescore(ctx context.Context) error {
 // back to the queue.
 func (v *Vetter) decide(ctx context.Context) error {
 	rows, err := v.DB.Query(ctx, `SELECT c.username, coalesce(c.user_pk, 0), c.vet, c.tags, c.coauthors, c.mentions, c.comments,
-			c.iraq_context, c.sources, c.attempts
+			c.iraq_context, c.sources, c.attempts, c.origins, c.first_seen_at
 		FROM discovery_candidates c LEFT JOIN jobs j ON j.job_id = c.vet_job_id
 		WHERE c.status = 'vetting' AND (c.vet IS NOT NULL OR j.job_id IS NULL OR j.status IN ('completed','partial','failed','cancelled'))
 		LIMIT 1000`)
@@ -172,11 +176,13 @@ func (v *Vetter) decide(ctx context.Context) error {
 		vet      []byte
 		s        Sightings
 		attempts int
+		origins  []string
+		seen     time.Time
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
 		var x row
 		return x, r.Scan(&x.username, &x.pk, &x.vet, &x.s.Tags, &x.s.Coauthors, &x.s.Mentions, &x.s.Comments, &x.s.IraqContext, &x.s.Sources,
-			&x.attempts)
+			&x.attempts, &x.origins, &x.seen)
 	})
 	if err != nil {
 		return err
@@ -192,6 +198,11 @@ func (v *Vetter) decide(ctx context.Context) error {
 			if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = $2, decided_at = CASE WHEN $2 = 'failed' THEN now() END
 				WHERE username = $1`, x.username, status); err != nil {
 				return err
+			}
+			if status == StatusFailed {
+				if err := v.publish(ctx, x.username, x.pk, nil, x.s, x.origins, status, 0, false, x.seen); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -249,6 +260,9 @@ func (v *Vetter) decide(ctx context.Context) error {
 		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = $2, score = $3, signals = $4,
 				user_pk = COALESCE(NULLIF($5::bigint, 0), user_pk), sources_at_decision = $6, decided_at = now()
 			WHERE username = $1`, x.username, status, score, sb, pk, x.s.Sources); err != nil {
+			return err
+		}
+		if err := v.publish(ctx, x.username, pk, &vet, x.s, x.origins, status, score, score >= d.Threshold, x.seen); err != nil {
 			return err
 		}
 		slog.Info("discovery: candidate decided", plog.Account(pk, "u:"+x.username), "status", status, "score", score)
@@ -474,4 +488,23 @@ func Register(ctx context.Context, db *pgxpool.Pool, d *dispatch.Dispatcher, cfg
 		_, err = db.Exec(ctx, `UPDATE profile_schedule SET user_pk = $2 WHERE profile_ref = $1 AND user_pk IS NULL`, ref, pk)
 	}
 	return err
+}
+
+// publish sends a decided candidate on discovery.candidate.v1, when the
+// scheduler set a publisher. A failure leaves the decision stored and
+// retries nothing: the candidate is published again when it is next
+// decided.
+func (v *Vetter) publish(ctx context.Context, username string, pk int64, vet *Vet, s Sightings, origins []string, status string,
+	score float64, relevant bool, firstSeen time.Time) error {
+	if v.Candidates == nil {
+		return nil
+	}
+	key, c, ok := CandidateEvent(username, pk, vet, s, origins, status, score, relevant, firstSeen, time.Now())
+	if !ok {
+		return nil
+	}
+	if err := v.Candidates(ctx, key, c); err != nil {
+		slog.Warn("discovery: candidate not published", plog.Account(pk, "u:"+username), "status", status, "err", err)
+	}
+	return nil
 }

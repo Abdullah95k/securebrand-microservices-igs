@@ -106,7 +106,7 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 		loops = append(loops, func(ctx context.Context) error { return scheduler.Every(ctx, "aimd", cfg.IG.AIMD.Interval, aimd.Tick) })
 	}
 	if cfg.IG.Discovery.Enabled {
-		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg}
+		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: cfg, Candidates: igapp.CandidatePublisher(producer)}
 		if cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(rdb, cfg.Kafka.TopicPrefix)
 		}

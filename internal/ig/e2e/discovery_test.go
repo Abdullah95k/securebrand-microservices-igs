@@ -3,6 +3,10 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"github.com/abdullah95k/securebrand-contracts/conformance"
+	discoveryv1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/discovery/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
+	"google.golang.org/protobuf/proto"
 	"net/http"
 	"testing"
 	"time"
@@ -78,6 +82,28 @@ func TestDiscoveryRegistersIraqiProfiles(t *testing.T) {
 			t.Fatalf("candidates %v, want %v", got, want)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+	// Each decision is published in the contract's form (REQ-019 item
+	// 4.1), passing its production check.
+	outcome := map[string]discoveryv1.Outcome{"registered": discoveryv1.Outcome_OUTCOME_ADDED,
+		"below": discoveryv1.Outcome_OUTCOME_NOT_RELEVANT, "private": discoveryv1.Outcome_OUTCOME_SECOND_LIST,
+		"gone": discoveryv1.Outcome_OUTCOME_UNAVAILABLE}
+	published := map[string]discoveryv1.Outcome{}
+	for _, r := range s.ReadTopic(t, topics.DiscoveryCandidate, 3*time.Second) {
+		var c discoveryv1.Candidate
+		if err := proto.Unmarshal(r.Value, &c); err != nil {
+			t.Fatal(err)
+		}
+		checkHeaders(t, r, &c)
+		if err := conformance.Candidate(&c, conformance.Options{Production: true}); err != nil {
+			t.Errorf("candidate %s: %v", c.Account.GetHandle(), err)
+		}
+		published[c.Account.GetHandle()] = c.Outcome
+	}
+	for u, st := range want {
+		if published[u] != outcome[st] {
+			t.Errorf("%s (%s) published as %v, want %v", u, st, published[u], outcome[st])
+		}
 	}
 	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE comments > 0`); n == 0 {
 		t.Error("no commenter was counted")

@@ -288,7 +288,7 @@ func (s *Stack) StartScheduler() {
 		},
 	}
 	if s.Cfg.IG.Discovery.Enabled {
-		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: s.Cfg}
+		vetter := &discovery.Vetter{DB: db, Dispatch: disp, Cfg: s.Cfg, Candidates: igapp.CandidatePublisher(s.Producer)}
 		if s.Cfg.IG.ShareExitRests {
 			vetter.Rests = ratelimit.NewExitRests(s.Redis, s.Cfg.Kafka.TopicPrefix)
 		}
