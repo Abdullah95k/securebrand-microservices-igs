@@ -125,7 +125,7 @@ The fleet therefore reads at most exits × `ig.exit_rps`: 2.5 requests a second 
 - After `crawler.max_attempts` (5) retries without progress, about 15 minutes, or `crawler.max_total_attempts` (50) in all, the task goes to the DLQ (`igs_dlq_total{reason}`). [Replay it](#stuck-jobs) with `igsctl dlq replay` once the cause is gone.
 - Proxy tiers escalate on retries without progress, cheapest first, skipping tiers whose exits all rest. igs routes everything to `isp`, so this matters only if more tiers are added.
 
-**Every exit resting.** A task that finds no usable exit parks: it waits 5 minutes, without counting toward `max_attempts`, and tries again. `max_total_attempts` bounds parking at about 4 hours. Parked tasks show as `igs_tasks_total{outcome="parked"}`. `IgsIgExitsMostlyResting` and `IgsIgTasksParked` fire before tasks start reaching the DLQ.
+**Every exit resting.** A task that finds no usable exit parks: it waits 5 minutes, without counting toward `max_attempts`, and tries again. `max_total_attempts` bounds parking: about 4 hours at the default 50, about 25 hours at production's 300 (raised after the pilot, where post tasks waited longer than 4 hours for exits at 0.1 rps and 53,239 reached the DLQ). Parked tasks show as `igs_tasks_total{outcome="parked"}`. `IgsIgExitsMostlyResting` and `IgsIgTasksParked` fire before tasks start reaching the DLQ.
 
 What to do when exits keep resting:
 1. Compare `igs_exit_rests_total` by reason with `igs_exits_resting` and `igs_exits`.
