@@ -538,6 +538,11 @@ ig:
   registry_sync:
     interval: 30m
     canary_pages: []             # usernames of public profiles; set at least three in production
+    # Canary pages taken from the store each run: active public accounts
+    # igs has, with posts or highlights, chosen for what each query needs
+    # (one with highlights first). canary_pages fill what the store can't.
+    # A run loads max(store_canaries, len(canary_pages)) pages. 0 = off.
+    store_canaries: 0
     tier: ""
     max_bundles: 60
     bundles_via_proxy: false

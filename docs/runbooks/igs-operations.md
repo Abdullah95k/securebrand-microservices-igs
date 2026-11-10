@@ -352,7 +352,7 @@ Instagram rotates the doc_ids of its GraphQL operations with its deploys. Sympto
 - the query breaker opens (`IgsIgQueryBreakerOpen`);
 - `igs_registry_query_healthy{query} == 0`.
 
-`igs-registry-sync` handles it every `ig.registry_sync.interval` (30 min), on the canary profiles in `ig.registry_sync.canary_pages`. It finds doc_ids in the profile page's bundles, or in a headless render when the bundles declare none. It checks each candidate with real requests chained profile → grid → comments → reels → highlights, and promotes one that parses, keeping the former entry as a fallback. [`igs-registry-sync.md`](igs-registry-sync.md) has the details.
+`igs-registry-sync` handles it every `ig.registry_sync.interval` (30 min), on canary profiles it chooses each run from the accounts igs has (`ig.registry_sync.store_canaries`), with `ig.registry_sync.canary_pages` filling in. It finds doc_ids in the profile page's bundles, or in a headless render when the bundles declare none. It checks each candidate with real requests chained profile → grid → comments → reels → highlights, and promotes one that parses, keeping the former entry as a fallback. [`igs-registry-sync.md`](igs-registry-sync.md) has the details.
 
 1. `GET /v1/admin/registry-sync/runs` shows the last runs: candidates, promotions, `failing`, `not_found`.
 2. If no run succeeds (`IgsIgRegistrySyncNotRunning`), check three things:

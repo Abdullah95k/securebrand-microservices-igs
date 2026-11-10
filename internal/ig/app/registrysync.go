@@ -61,7 +61,7 @@ func NewRegistrySync(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, 
 		BaseURL: g.BaseURL, Profile: g.FingerprintProfile, Profiles: g.FingerprintProfiles, Timeout: g.RequestTimeout,
 		IdentityRPS: g.IdentityRPS, IdentityBurst: g.IdentityBurst,
 		MaxRequestsMin: g.IdentityMaxRequestsMin, MaxRequestsMax: g.IdentityMaxRequestsMax,
-		MaxPerTier: len(rc.CanaryPages) + 2,
+		MaxPerTier: rc.PageLoads() + 2,
 	}
 	// The sync shares the crawlers' exits and their rests (with Valkey;
 	// without it, its own), but keeps its own pace on each exit, a fifth of

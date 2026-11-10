@@ -252,10 +252,11 @@ func (s *Sync) finish(ctx context.Context, rep Report, err error) (Report, error
 }
 
 func (s *Sync) run(ctx context.Context, rep *Report) error {
-	if len(s.Cfg.CanaryPages) == 0 {
-		return errors.New("ig.registry_sync.canary_pages is empty: configure public profiles with regular posts, comments, reels and highlights")
+	list := s.canaryPages(ctx)
+	if len(list) == 0 {
+		return errors.New("no canary page: the store has no active account with posts or highlights (ig.registry_sync.store_canaries), and ig.registry_sync.canary_pages is empty")
 	}
-	pages := s.loadCanaries(ctx, rep)
+	pages := s.loadCanaries(ctx, list, rep)
 	defer func() {
 		for _, c := range pages {
 			s.Pool.Release(c.id)
@@ -353,9 +354,9 @@ func (s *Sync) renderMissing(ctx context.Context, pages []*canary, entries []*en
 }
 
 // loadCanaries loads every canary page through its own identity.
-func (s *Sync) loadCanaries(ctx context.Context, rep *Report) []*canary {
+func (s *Sync) loadCanaries(ctx context.Context, list []string, rep *Report) []*canary {
 	var out []*canary
-	for _, p := range s.Cfg.CanaryPages {
+	for _, p := range list {
 		c, err := s.loadCanary(ctx, p)
 		if err != nil {
 			rep.Pages = append(rep.Pages, PageResult{Page: p, Reason: err.Error()})

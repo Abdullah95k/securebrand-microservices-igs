@@ -265,7 +265,8 @@ groups:
             (a private or deleted profile, a walled exit), the probes are
             blocked (every check inconclusive), the canaries lack posts with
             comments, no canary has highlights (the highlights query stays
-            unchecked), or ig.registry_sync.canary_pages is empty.
+            unchecked), or there is no canary at all (store_canaries finds
+            no active account and canary_pages is empty).
           runbook_url: https://github.com/abdullah95k/securebrand-microservices-igs/blob/main/docs/runbooks/igs-operations.md#registry-stale-doc_id-rotated
       - alert: IgsIgSchemaDrift
         expr: igs:ig_parse_drift_ratio:rate15m > 0.05

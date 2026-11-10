@@ -83,7 +83,7 @@ kubectl -n igs create secret generic igs-proxies --from-file=proxies.yaml=phase0
 
 Copy [`deploy/helm/igs/examples/production.yaml`](../../deploy/helm/igs/examples/production.yaml) and replace every `<...>`. The settings that matter most:
 
-- **`config.ig.registry_sync.canary_pages`:** three or more public profiles that post often. igs-registry-sync follows Instagram's doc_id rotations on them.
+- **`config.ig.registry_sync.canary_pages`:** three or more public profiles that post often. igs-registry-sync follows Instagram's doc_id rotations on canaries it takes from the store (`store_canaries`, 3 in production); these fill in while the store has too few active accounts, as on a new install.
 - **`config.ig.privacy.pii_mode`:**
   - `full` stores commenters' usernames and names (behind the `pii:read` scope);
   - `pseudonymized` stores keyed hashes instead.
