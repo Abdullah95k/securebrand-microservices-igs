@@ -10,12 +10,25 @@ classed `registry_stale`). igs keeps its ids in the registry (`ig.queries`);
 
 Every `ig.registry_sync.interval` (30 minutes):
 
-1. Loads each canary profile's page (`ig.registry_sync.canary_pages`:
-   usernames of public profiles with regular posts, comments, reels and
-   highlights; set at least three). **At least one must have highlights:**
-   igs checks the highlights query only on a canary that has some. Without
-   one, highlights stays unchecked on every run, no run counts as a
-   success, and `IgsIgRegistrySyncNotRunning` fires after 3 hours.
+1. Chooses its canary profiles and loads each one's page.
+   - **From the store** (`ig.registry_sync.store_canaries`, 3 in
+     production): each run draws 200 accounts at random from the ones igs
+     has, keeping only active public accounts with posts or highlights.
+     From those it picks, in order, the account that has the most of what
+     the queries still need (highlights, reels, a post of the last 30 days
+     with comments, posts), until every need is met, then the richest
+     accounts left. So the first canary is normally one with highlights,
+     and over many runs every account takes its turn.
+   - **From `ig.registry_sync.canary_pages`** (usernames of public
+     profiles with regular posts, comments, reels and highlights): these
+     fill what the store can't, for example on a new install with an empty
+     store. They are never repeated.
+
+   A run loads `store_canaries` or the length of `canary_pages`, whichever
+   is larger, so choosing from the store adds no page loads. igs checks the
+   highlights query only on a canary that has highlights. Without one,
+   highlights stays unchecked, the run doesn't count as a success, and
+   after 3 hours `IgsIgRegistrySyncNotRunning` fires.
 
 Its requests go through the crawlers' exits and honour their rests, but
 keep a pace of their own on each exit: a fifth of `ig.exit_rps`. Before,

@@ -88,6 +88,11 @@ config:
       # (private) Argo CD application, as config.ig.registry_sync.
       # canary_pages[0], [1] and [2]. Real accounts never go in this file.
       canary_pages: []
+      # Each run takes its 3 canaries from the accounts igs has instead:
+      # one with highlights first, then what the other queries need (owner,
+      # 10 Nov 2026: "test on all the accounts you have"). The 3 above only
+      # fill in when the store has too few. Still 3 page loads a run.
+      store_canaries: 3
   crawler:
     # A task parks for 5 minutes at a time while every exit of its tier
     # rests, and each park counts toward max_total_attempts. 50 gave up

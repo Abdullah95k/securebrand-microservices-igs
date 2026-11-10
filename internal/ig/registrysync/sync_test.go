@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/fakeig"
 	igclient "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/client"
@@ -23,6 +25,14 @@ var igQueries = registry.In(registry.IGTables)
 
 func setup(t *testing.T, promote bool, faults ...fakeig.Faults) (*Sync, *igtest.Env) {
 	t.Helper()
+	s, env, _ := setupDB(t, promote, faults...)
+	return s, env
+}
+
+// setupDB is setup that also returns the test database's admin pool, for
+// rows the sync's own role may only read.
+func setupDB(t *testing.T, promote bool, faults ...fakeig.Faults) (*Sync, *igtest.Env, *pgxpool.Pool) {
+	t.Helper()
 	db := testenv.PostgresIG(t)
 	sp := fakeig.DefaultSpec()
 	sp.Profiles, sp.Highlights = 2, 2
@@ -38,7 +48,7 @@ func setup(t *testing.T, promote bool, faults ...fakeig.Faults) (*Sync, *igtest.
 		Fetch: docids.HTTPFetcher(http.DefaultClient),
 		Cfg: config.RegistrySync{CanaryPages: []string{"profile_01", "@profile_02"}, Tier: "direct", MaxBundles: 10, Promote: promote,
 			KeepFallbacks: 2, RetireAfter: 3, RecheckRetired: time.Hour, Timeout: time.Minute}}
-	return s, env
+	return s, env, db
 }
 
 // fakeig accepts only rotated doc_ids, which its page's bundle declares:

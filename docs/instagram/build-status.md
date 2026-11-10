@@ -348,7 +348,13 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - the dead letters are replayed once that is pinned, with `igsctl dlq replay --max 5000` from the scheduler pod, in batches.
   - **The owner's later answers (21:33Z):**
     - account requests: on (`ig.account_requests.enabled: true` in values-production.yaml, #121);
-    - registry-sync tests each query on every active account igs has, not only the 3 canaries (being built);
-    - media downloads and the hand-off: yes.
+    - registry-sync tests each query on every active account igs has, not only the 3 canaries (built: see below);
+    - media downloads and the hand-off: yes. I recommended to the master that media comes one pin after the DLQ replay, so each change can be read on its own: `include_media: true` is one line, about 1,700 CDN downloads an hour over direct egress, and about 1.4 GB an hour into S3 until sb-analysis acknowledges.
+  - **#121 merged (`baaa000`).**
+  - **Registry-sync on the accounts igs has** (`ig.registry_sync.store_canaries`, 3 in production):
+    - Each run draws 200 active public accounts with posts or highlights from the store. It picks first the account with the most of what the queries need (highlights, reels, a recent post with comments, posts), then the one that adds what's still missing.
+    - The configured `canary_pages` only fill in when the store has too few.
+    - A run still loads 3 pages, on the same tier and exits.
+    - Over many runs, every account takes its turn.
   - **Still open:** the read-only check for highlight items as story posts.
 

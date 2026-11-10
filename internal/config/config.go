@@ -50,6 +50,11 @@ type RegistrySync struct {
 	// threads; validation reads one timeline page and a few comment pages
 	// of each, in order, until every query has a verdict.
 	CanaryPages []string `koanf:"canary_pages"`
+	// StoreCanaries is how many canary pages a run takes from the store:
+	// active public accounts igs has, with posts or highlights, chosen for
+	// what each query needs. canary_pages fill what the store can't. 0 =
+	// canary_pages only.
+	StoreCanaries int `koanf:"store_canaries"`
 	// Tier is the proxy tier page loads and probes use; "" = the first one.
 	Tier string `koanf:"tier"`
 	// MaxBundles caps the JS bundles fetched per canary page and run.
@@ -71,6 +76,10 @@ type RegistrySync struct {
 	// Timeout bounds one run.
 	Timeout time.Duration `koanf:"timeout"`
 }
+
+// PageLoads is how many canary pages a run loads at most: the store's
+// share or the configured list, whichever is larger.
+func (r RegistrySync) PageLoads() int { return max(len(r.CanaryPages), r.StoreCanaries) }
 
 type Service struct {
 	Name string `koanf:"name"`

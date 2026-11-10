@@ -83,7 +83,8 @@ type IG struct {
 	Limits       IGLimits       `koanf:"limits"`
 	// RegistrySync follows Instagram's doc_id rotations (igs-registry-sync):
 	// canary_pages are public profiles (usernames) with regular posts,
-	// comments, reels and highlights.
+	// comments, reels and highlights; store_canaries takes them from the
+	// accounts igs has instead.
 	RegistrySync RegistrySync `koanf:"registry_sync"`
 	Schedule     IGSchedule   `koanf:"schedule"`
 	// Budget is the daily request and byte budget, fleet-wide (D9): when
