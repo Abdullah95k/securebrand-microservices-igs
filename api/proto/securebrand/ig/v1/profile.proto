@@ -5,6 +5,7 @@ syntax = "proto3";
 // fields, never as a changed one.
 package securebrand.ig.v1;
 
+import "google/protobuf/timestamp.proto";
 import "securebrand/common/v1/common.proto";
 
 option go_package = "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1;igv1";
@@ -60,4 +61,10 @@ message Profile {
   // The profile's website, when the answer serves it as external_url
   // (REQ-008 fix 18); logged out, it has come as the first bio link.
   string external_url = 23;
+  // When the profile's newest story was posted (latest_reel_media), if it
+  // has one: a cheap activity signal (REQ-019 item 4.4).
+  google.protobuf.Timestamp latest_story_at = 24;
+  // Instagram's badge hinting that a Threads account exists
+  // (show_text_post_app_badge), when the answer says.
+  optional bool threads_badge = 25;
 }

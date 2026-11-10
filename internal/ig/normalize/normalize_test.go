@@ -523,3 +523,20 @@ func TestPostAudio(t *testing.T) {
 		t.Errorf("a sound without an ID published %d events", len(outs)-1)
 	}
 }
+
+// A profile's newest story and Threads hint go to the account's registered
+// extras (REQ-019 item 4.4); unknown, they are left out.
+func TestProfileActivityExtras(t *testing.T) {
+	yes := true
+	outs := Map(&igv1.Profile{Obs: obs(), UserPk: 42, Username: "brand", LatestStoryAt: timestamppb.New(at.Add(-time.Hour)), ThreadsBadge: &yes})
+	conform(t, outs)
+	a, _ := one[*contentv1.Account](t, outs)
+	x := a.Extras.AsMap()
+	if x["ig.latest_story_at"] != at.Add(-time.Hour).Format(time.RFC3339) || x["ig.threads_badge"] != true {
+		t.Errorf("extras %v", x)
+	}
+	a, _ = one[*contentv1.Account](t, Map(&igv1.Profile{Obs: obs(), UserPk: 42, Username: "brand"}))
+	if x := a.Extras.AsMap(); x["ig.latest_story_at"] != nil || x["ig.threads_badge"] != nil {
+		t.Errorf("unknown activity published: %v", x)
+	}
+}

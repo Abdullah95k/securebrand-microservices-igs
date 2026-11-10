@@ -49,3 +49,4 @@ topics:
   - {name: content.playlist.v1,         partitions: 6,  retention: 168h}
   - {name: content.audio.v1,            partitions: 6,  retention: 168h}
   - {name: collection.coverage.v1,      partitions: 3,  retention: 168h}
+  - {name: discovery.candidate.v1,      partitions: 3,  retention: 168h}

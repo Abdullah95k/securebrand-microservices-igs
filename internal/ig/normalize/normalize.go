@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"golang.org/x/net/publicsuffix"
@@ -395,6 +396,12 @@ func profile(p *igv1.Profile) []Out {
 	x := map[string]any{"ig.pronouns": p.Pronouns, "ig.requested_ref": p.RequestedRef}
 	if p.HighlightCount != nil {
 		x["ig.highlight_count"] = float64(*p.HighlightCount)
+	}
+	if p.LatestStoryAt != nil {
+		x["ig.latest_story_at"] = p.LatestStoryAt.AsTime().UTC().Format(time.RFC3339)
+	}
+	if p.ThreadsBadge != nil {
+		x["ig.threads_badge"] = *p.ThreadsBadge
 	}
 	a.Extras = extras(x)
 	seal(env, a)
