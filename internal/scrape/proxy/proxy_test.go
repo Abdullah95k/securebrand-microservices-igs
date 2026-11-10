@@ -1,13 +1,18 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/breaker"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/scrape/detect"
 )
 
@@ -259,5 +264,52 @@ func TestRestedExitIsProbed(t *testing.T) {
 		if _, err := p.NextWhere("isp", func(ep Endpoint) bool { return ep.Exit() != a.Exit() }); err != nil {
 			t.Fatalf("good answers put the exit back in use: %v", err)
 		}
+	}
+}
+
+func value(g prometheus.Gauge) float64 {
+	var m dto.Metric
+	if err := g.Write(&m); err != nil {
+		panic(err)
+	}
+	return m.GetGauge().GetValue()
+}
+
+type noRests struct{}
+
+func (noRests) Publish(context.Context, string, time.Time) error   { return nil }
+func (noRests) Load(context.Context) (map[string]time.Time, error) { return nil, nil }
+
+// An ended rest leaves igs_exits_resting at the next rest sync, though
+// this pod hasn't used the exit since (pilot, 10 Nov 2026: idle pods
+// counted 8 of 10 resting while 7 were).
+func TestEndedRestLeavesTheGauge(t *testing.T) {
+	p, err := New(config.Proxy{Tiers: []config.ProxyTier{{Name: "sweep", Kind: "static_list",
+		Endpoints: []string{"http://sweep.example:10001", "http://sweep.example:10002"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gauge := metrics.ExitsResting.WithLabelValues("sweep")
+	before := value(gauge)
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p.rests.SetClock(func() time.Time { return t0 })
+	a, _ := p.Next("sweep")
+	p.Rest(a, 10*time.Minute)
+	if got := value(gauge); got != before+1 {
+		t.Fatalf("resting %v, want %v", got, before+1)
+	}
+	p.rests.SetClock(func() time.Time { return t0.Add(11 * time.Minute) })
+	p.ShareRests(noRests{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- p.SyncRests(ctx, time.Hour) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for value(gauge) != before && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if got := value(gauge); got != before {
+		t.Fatalf("after its rest ended the exit still counts as resting: %v, want %v", got, before)
 	}
 }

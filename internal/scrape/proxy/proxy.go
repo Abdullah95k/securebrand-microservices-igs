@@ -133,6 +133,11 @@ func (p *Pool) SyncRests(ctx context.Context, every time.Duration) error {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
+		// Ended rests leave igs_exits_resting here even on a pod that
+		// hasn't used the exit since (registry-sync between runs, an idle
+		// crawler-retry): the gauge and IgsIgExitsMostlyResting otherwise
+		// counted them until the pod next did.
+		p.rests.Sweep()
 		if err := p.PullRests(ctx); err != nil && ctx.Err() == nil {
 			slog.Debug("proxy: shared exit rests", "err", err)
 		}

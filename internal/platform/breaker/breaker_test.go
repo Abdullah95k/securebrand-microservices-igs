@@ -201,3 +201,24 @@ func TestFailedProbeAfterTripDoublesTheTrip(t *testing.T) {
 		t.Fatal("probe after 4m")
 	}
 }
+
+// Sweep ends a rest no one asked about since: the key goes half-open and
+// OnChange hears it.
+func TestSweepEndsCooldowns(t *testing.T) {
+	s := New(Config{Cooldown: time.Minute})
+	clk := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.SetClock(func() time.Time { return clk })
+	var got []State
+	s.OnChange = func(_ string, _, to State) { got = append(got, to) }
+	s.Trip("a", 10*time.Minute)
+	s.Trip("b", 30*time.Minute)
+	clk = clk.Add(10 * time.Minute)
+	s.Sweep()
+	if len(got) != 3 || got[2] != HalfOpen {
+		t.Fatalf("changes %v: a's rest ended, b's not", got)
+	}
+	s.Sweep()
+	if len(got) != 3 {
+		t.Fatalf("a second sweep changes nothing: %v", got)
+	}
+}

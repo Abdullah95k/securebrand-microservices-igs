@@ -336,6 +336,10 @@ What to check:
 3. `igs_identity_retired_total` by reason. `IgsIgIdentitiesRetiringFast` fires when most identities retire on blocks rather than at their budget. If it does, lower `ig.exit_rps` or add exits.
 4. Login walls on page loads mean exits are resting: watch `class="login_wall"` on the `page` queries. A wall at the same grid depth everywhere is coverage, not blocking (U1): jobs end `partial` (see [Partial jobs](#partial-jobs)).
 5. If Instagram answers with a code or page the rules do not know, responses show as `soft_error`. Add the marker under `ig.detect` (appended to the built-in rules) and roll the crawlers.
+6. **Most exits resting with a block rate of 0** is normal after a burst of rests. A resting exit sends nothing, so the block rate only covers the exits still in use.
+   - After a rest, one probe goes out. A blocked probe rests the exit again for twice as long, at most `ig.proxy.breaker.max_cooldown` (30 min).
+   - `igs_exit_rests_total` counts first rests only. A failed probe shows in the logs instead: `proxy: exit` with `from=probing to=resting`, and `to="in use"` when the exit is back.
+   - The true count is `igsctl health`'s "proxy exits resting", which reads the shared rests in Valkey.
 
 To pin the ceiling by hand during an incident, set the key the crawlers read. They pick it up within 5 s; the key starts with `igs:` and then the topic prefix:
 
