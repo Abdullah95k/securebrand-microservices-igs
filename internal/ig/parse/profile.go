@@ -2,9 +2,11 @@ package parse
 
 import (
 	"crypto/sha256"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tidwall/gjson"
 
@@ -80,6 +82,13 @@ func Profile(parts []gjson.Result) (ProfileResult, walk.Report) {
 		IsVerified: u.Get("is_verified").Bool(), IsPrivate: u.Get("is_private").Bool(),
 		Category: walk.First(u, "category_name", "category").String(), IsBusiness: u.Get("is_business_account").Bool(),
 		Status: igv1.ProfileStatus_PROFILE_STATUS_ACTIVE,
+	}
+	if v := u.Get("latest_reel_media"); v.Type == gjson.Number && v.Int() > 0 {
+		p.LatestStoryAt = timestamppb.New(time.Unix(v.Int(), 0).UTC())
+	}
+	if v := u.Get("show_text_post_app_badge"); v.IsBool() {
+		b := v.Bool()
+		p.ThreadsBadge = &b
 	}
 	if p.IsPrivate {
 		p.Status = igv1.ProfileStatus_PROFILE_STATUS_PRIVATE
