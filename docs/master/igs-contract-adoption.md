@@ -78,7 +78,8 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 | Plan and re-estimate | this file | v1.2.0 read on 7 Nov; the contract's Go module resolves at v1.2.0 |
 | 1.1 to 1.11 (slice 1) | #112 (merge 0c7e102) | See below |
 | 2.1 and 2.2 (slice 2) | #113 (merge dc79342) | See "Slice 2, as built" |
-| 3.1 and 3.3 (slice 3) | the slice 3 PR | See "Slice 3, as built"; 3.2 waits for the owner's check |
+| 3.1 and 3.3 (slice 3) | #115 (merge f2c40b8) | See "Slice 3, as built"; 3.2 waits for the owner's check |
+| 4.2 (slice 4) | the coverage PR | See "Slice 4, as built" |
 
 **Slice 1, as built** (`internal/ig/normalize`, `internal/ig/app/normalizer.go`):
 - **1.1:** `go.mod` requires `securebrand-contracts v1.2.0`. igs's own `securebrand.content.v1` (proto, generated code, embed) is deleted.
@@ -146,4 +147,15 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 - **Evidence:**
   - `TestHighlightToPlaylist`, `TestPostAudio`, and the conformance helper covering both types.
   - End to end: `TestContentEventsMatchStore` checks every record on `content.playlist.v1` and `content.audio.v1`, and expects playlists. fakeig gives reels no sound, so Audio is covered by the unit tests.
+
+**Slice 4, as built so far:**
+- **4.2, `collection.coverage.v1`** (`internal/ig/scheduler/jobcoverage.go`): when a job ends, the finalizer publishes its JobCoverage beside `ig.job.v1`, keyed by the job ID. It carries:
+  - kind (scheduled, backfill, on demand) and status;
+  - the account as `ig:account:<pk>` and the reference the job was asked for;
+  - the counters: the contract's shared names as they are, and igs's own as `ig.<name>`;
+  - completeness, with the ratios only when posts were read;
+  - the missing data as reason classes. Walled posts are `wall`, login pages `login_required`, private profiles `private`, missing profiles and posts `removed`, cut-short timelines and caps `limit`, and blocks `rate_limited`.
+  - The contract has no JobCoverage check, so the tests check its fields.
+- **Headers fix:** igs-media's hand-off records (`content.media.ready.v1` and `deleted`) had no `sb-type` or `sb-contract` headers. They have them now, from the same helper as the normalizer's (`normalize.Headers`). Media downloads are off in production, so none went out without them.
+- **Evidence:** `TestJobCoverage`. End to end: `TestPostCoverage` checks a backfill's coverage record (key, headers, kind, status, account, counters, completeness), and `TestMediaPipeline` checks the hand-off headers.
 

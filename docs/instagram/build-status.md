@@ -329,3 +329,8 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **Audio ID fix:** a post's `audio_id` is now a contract ID (`ig:audio:<id>`, #114). It was fixed before slice 1 reached production.
   - **Waiting for the owner:** highlight items as story posts need one real read-only check that logged-out Instagram serves them.
 
+- **2026-11-10 (REQ-019 slice 4, job coverage):**
+  - **Job coverage:** every finished job now publishes its coverage in the contract's form on `collection.coverage.v1`: what it read, how complete it was, and why data is missing.
+  - **Headers fix:** igs-media's hand-off records now carry the contract's headers. Media downloads are still off.
+  - **Production:** the master and this session were both paused from 7 to 10 Nov, so nothing was pinned. igs stays on `94eeb74` with the normalizer at 0, and the pilot ran unattended with 0 restarts. The master pins `f2c40b8` (slices 1 to 3) once its watch is clean.
+

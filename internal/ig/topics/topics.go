@@ -41,12 +41,14 @@ const (
 	ContentMediaDeleted   = "content.media.deleted.v1"
 	ContentPlaylist       = "content.playlist.v1"
 	ContentAudio          = "content.audio.v1"
+	// One coverage record per finished job (securebrand.coverage.v1).
+	CollectionCoverage = "collection.coverage.v1"
 )
 
 // Content lists the content topics igs publishes or reads (REQ-019
 // slices 1 to 3), in configs/ig/topics.yaml's order.
 var Content = []string{ContentPost, ContentComment, ContentAccount, ContentAccountSnapshot, ContentMetrics, ContentMedia,
-	ContentMediaReady, ContentMediaProcessed, ContentMediaDeleted, ContentPlaylist, ContentAudio}
+	ContentMediaReady, ContentMediaProcessed, ContentMediaDeleted, ContentPlaylist, ContentAudio, CollectionCoverage}
 
 // Internal work queues.
 const (

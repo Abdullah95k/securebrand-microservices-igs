@@ -97,6 +97,7 @@ func TestMediaPipeline(t *testing.T) {
 		if err := proto.Unmarshal(r.Value, &m); err != nil {
 			t.Fatal(err)
 		}
+		checkHeaders(t, r, &m)
 		if err := conformance.MediaReady(&m, opt); err != nil {
 			t.Errorf("%s: %v", m.MediaId, err)
 		}
@@ -152,6 +153,7 @@ func TestMediaPipeline(t *testing.T) {
 		if err := proto.Unmarshal(r.Value, &m); err != nil {
 			t.Fatal(err)
 		}
+		checkHeaders(t, r, &m)
 		if err := conformance.MediaDeleted(&m, opt); err != nil || m.Reason != mediav1.DeleteReason_DELETE_REASON_PROCESSED {
 			t.Errorf("%s: %v, reason %v", m.MediaId, err, m.Reason)
 		}

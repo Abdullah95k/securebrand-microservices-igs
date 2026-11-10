@@ -3,12 +3,18 @@ package e2e
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/proto"
+
+	coveragev1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/coverage/v1"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/httpapi"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/api"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 )
 
 // Each post's comment coverage is written when its job ends (REQ-008 fix
@@ -32,6 +38,30 @@ func TestPostCoverage(t *testing.T) {
 	job := reg.BackfillJob.ID.String()
 	if st := s.WaitStatus(t, job, 3*time.Minute); st != "completed" {
 		t.Fatalf("backfill %s", st)
+	}
+	// The finalizer publishes the job's coverage in the contract's form
+	// (REQ-019 item 4.2), keyed by the job, with the contract's headers.
+	var got *coveragev1.JobCoverage
+	for _, r := range s.ReadTopic(t, topics.CollectionCoverage, 3*time.Second) {
+		var c coveragev1.JobCoverage
+		if err := proto.Unmarshal(r.Value, &c); err != nil {
+			t.Fatal(err)
+		}
+		checkHeaders(t, r, &c)
+		if c.JobId == job {
+			if string(r.Key) != job {
+				t.Errorf("coverage keyed %s, want the job ID", r.Key)
+			}
+			got = &c
+		}
+	}
+	if got == nil {
+		t.Fatalf("no coverage record for job %s", job)
+	}
+	if got.Platform != "ig" || got.EventId == "" || got.JobCount != 1 || got.SubjectId != "ig:account:"+strconv.FormatInt(p.PK, 10) ||
+		got.Kind != coveragev1.JobKind_JOB_KIND_BACKFILL || got.Status != coveragev1.JobStatus_JOB_STATUS_COMPLETED ||
+		got.Counters["posts"] == 0 || got.Completeness.GetPosts() == 0 || got.CreatedAt == nil || got.FinishedAt == nil {
+		t.Errorf("coverage %+v", got)
 	}
 	truth, _ := s.World.Truth(p.Username, time.Now().Add(-time.Duration(s.Limits().MaxAgeSeconds)*time.Second))
 	type cov struct {
