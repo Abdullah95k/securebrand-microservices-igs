@@ -417,7 +417,7 @@ func profile(p *igv1.Profile) []Out {
 		seal(senv, s)
 		out = append(out, Out{Topic: topics.ContentAccountSnapshot, Key: env.Id, Msg: s})
 	}
-	return out
+	return append(out, linkCandidates(p, a.Links)...)
 }
 
 func containsURL(urls []string, u string) bool {

@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	contentv1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/content/v1"
+	discoveryv1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/discovery/v1"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/redisx"
 )
@@ -34,6 +35,22 @@ func Filter(ctx context.Context, v Volume, outs []Out) []Out {
 	}
 	kept := outs[:0]
 	for _, o := range outs {
+		if c, ok := o.Msg.(*discoveryv1.Candidate); ok {
+			// A link candidate: once a day per link.
+			day := time.Now().UTC().Format(time.DateOnly)
+			if t := c.GetFoundAt(); t != nil {
+				day = t.AsTime().UTC().Format(time.DateOnly)
+			}
+			publish, err := v.Publish(ctx, "candidate:"+o.Key, "", day)
+			if err != nil {
+				slog.Warn("igs normalizer: volume rule unavailable; publishing", "err", err)
+				publish = true
+			}
+			if publish {
+				kept = append(kept, o)
+			}
+			continue
+		}
 		m, ok := o.Msg.(*contentv1.Metrics)
 		if !ok {
 			kept = append(kept, o)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/abdullah95k/securebrand-contracts/conformance"
 	contentv1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/content/v1"
+	discoveryv1 "github.com/abdullah95k/securebrand-contracts/gen/go/securebrand/discovery/v1"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
@@ -51,6 +52,8 @@ func conform(t *testing.T, outs []Out) {
 			err, want = conformance.Media(m, opt), topics.ContentMedia
 		case *contentv1.Playlist:
 			err, want = conformance.Playlist(m, opt), topics.ContentPlaylist
+		case *discoveryv1.Candidate:
+			err, want = conformance.Candidate(m, opt), topics.DiscoveryCandidate
 		case *contentv1.Audio:
 			// The contract has no Audio check yet: its envelope, and a
 			// lossless round trip (as tks does).
@@ -538,5 +541,56 @@ func TestProfileActivityExtras(t *testing.T) {
 	a, _ = one[*contentv1.Account](t, Map(&igv1.Profile{Obs: obs(), UserPk: 42, Username: "brand"}))
 	if x := a.Extras.AsMap(); x["ig.latest_story_at"] != nil || x["ig.threads_badge"] != nil {
 		t.Errorf("unknown activity published: %v", x)
+	}
+}
+
+// A profile's links to Facebook, TikTok and YouTube are candidates for
+// those platforms' collectors, pending their decision; an Instagram link,
+// or a platform with no collector, is not. The volume rule passes each
+// once a day.
+func TestLinkCandidates(t *testing.T) {
+	prof := &igv1.Profile{Obs: obs(), UserPk: 42, Username: "brand",
+		BioLinks:    []*igv1.BioLink{{Url: "https://youtube.com/@brand"}, {Url: "https://www.instagram.com/other/"}, {Url: "https://x.com/brand"}},
+		ExternalUrl: "https://www.tiktok.com/@brand", LinkedFacebookPageId: "1234"}
+	outs := Map(prof)
+	conform(t, outs)
+	got := map[string]*discoveryv1.Candidate{}
+	for _, o := range outs {
+		if c, ok := o.Msg.(*discoveryv1.Candidate); ok {
+			got[o.Key] = c
+		}
+	}
+	for key, platform := range map[string]string{"yt:url:https://youtube.com/@brand": "yt", "tt:url:https://www.tiktok.com/@brand": "tt",
+		"fb:id:1234": "fb"} {
+		c := got[key]
+		if c == nil {
+			t.Errorf("no candidate %s (have %v)", key, got)
+			continue
+		}
+		if c.TargetPlatform != platform || c.SourcePlatform != "ig" || c.Source != discoveryv1.Source_SOURCE_PROFILE_LINK ||
+			c.Outcome != discoveryv1.Outcome_OUTCOME_PENDING || c.FoundBy != "igs" || len(c.Evidence) != 1 ||
+			c.Evidence[0].ContentId != "ig:account:42" {
+			t.Errorf("%s: %+v", key, c)
+		}
+	}
+	if len(got) != 3 {
+		t.Errorf("%d candidates, want 3 (no Instagram or X link)", len(got))
+	}
+	v := &MemVolume{}
+	ctx := context.Background()
+	count := func(outs []Out) int {
+		n := 0
+		for _, o := range outs {
+			if _, ok := o.Msg.(*discoveryv1.Candidate); ok {
+				n++
+			}
+		}
+		return n
+	}
+	if n := count(Filter(ctx, v, Map(prof))); n != 3 {
+		t.Errorf("first read passed %d candidates", n)
+	}
+	if n := count(Filter(ctx, v, Map(prof))); n != 0 {
+		t.Errorf("a second read the same day passed %d candidates", n)
 	}
 }
