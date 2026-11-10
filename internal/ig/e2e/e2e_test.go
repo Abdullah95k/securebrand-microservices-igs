@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dto "github.com/prometheus/client_model/go"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
 	contracts "github.com/abdullah95k/securebrand-contracts"
@@ -551,5 +552,17 @@ func TestChaosEqualsTruth(t *testing.T) {
 	for _, n := range names {
 		truth, _ := s.World.Truth(n, since)
 		checkTruth(t, s, truth)
+	}
+}
+
+// checkHeaders: a record on a shared topic names its type and the contract
+// version.
+func checkHeaders(t *testing.T, r *kgo.Record, m proto.Message) {
+	t.Helper()
+	if got, want := kafka.HeaderValue(r, igapp.HeaderSBType), string(proto.MessageName(m)); got != want {
+		t.Errorf("%s: sb-type %q, want %q", r.Topic, got, want)
+	}
+	if got := kafka.HeaderValue(r, igapp.HeaderSBContract); got != contracts.Version {
+		t.Errorf("%s: sb-contract %q, want %q", r.Topic, got, contracts.Version)
 	}
 }

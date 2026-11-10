@@ -113,7 +113,7 @@ func (j *Janitor) retry(ctx context.Context, mediaID string) error {
 		return err
 	}
 	b := j.Producer.NewBatch()
-	if err := b.AddProto(ctx, topics.ContentMediaReady, ready.MediaId, ready); err != nil {
+	if err := b.AddProto(ctx, topics.ContentMediaReady, ready.MediaId, ready, normalize.Headers(ready)...); err != nil {
 		return err
 	}
 	return b.Wait(ctx)
@@ -146,7 +146,7 @@ func (j *Janitor) Delete(ctx context.Context, mediaID string, reason mediav1.Del
 	metrics.MediaDeleted.WithLabelValues(label).Inc()
 	ev := deletedEvent(mediaID, reason, time.Now())
 	b := j.Producer.NewBatch()
-	if err := b.AddProto(ctx, topics.ContentMediaDeleted, ev.MediaId, ev); err != nil {
+	if err := b.AddProto(ctx, topics.ContentMediaDeleted, ev.MediaId, ev, normalize.Headers(ev)...); err != nil {
 		return err
 	}
 	return b.Wait(ctx)

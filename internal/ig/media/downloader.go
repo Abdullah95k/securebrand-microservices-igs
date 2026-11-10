@@ -27,6 +27,7 @@ import (
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
 	igv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/ig/v1"
 	igstaskv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/igs/task/v1"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/normalize"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/metrics"
@@ -152,7 +153,7 @@ func (d *Downloader) Handle(ctx context.Context, rec *kgo.Record) error {
 		return err
 	}
 	b := d.Producer.NewBatch()
-	if err := b.AddProto(ctx, topics.ContentMediaReady, ready.MediaId, ready); err != nil {
+	if err := b.AddProto(ctx, topics.ContentMediaReady, ready.MediaId, ready, normalize.Headers(ready)...); err != nil {
 		return err
 	}
 	if err := b.Wait(ctx); err != nil {

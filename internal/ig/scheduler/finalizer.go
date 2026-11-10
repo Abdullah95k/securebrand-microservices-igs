@@ -23,6 +23,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/jobs"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/normalize"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/persist"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
@@ -221,6 +222,11 @@ func (f *Finalizer) Finalize(ctx context.Context, id string) error {
 	}
 	b := f.Producer.NewBatch()
 	if err := b.AddProto(ctx, topics.Job, id, ev); err != nil {
+		return err
+	}
+	// The contract's coverage of the same job (REQ-019 item 4.2).
+	cov := jobCoverage(id, kind, final, ref, userPK, created, now, c, ev.Completeness)
+	if err := b.AddProto(ctx, topics.CollectionCoverage, id, cov, normalize.Headers(cov)...); err != nil {
 		return err
 	}
 	if err := b.Wait(ctx); err != nil {

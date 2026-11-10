@@ -6,9 +6,6 @@ import (
 	"strings"
 
 	"github.com/twmb/franz-go/pkg/kgo"
-	"google.golang.org/protobuf/proto"
-
-	contracts "github.com/abdullah95k/securebrand-contracts"
 
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/clients"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/config"
@@ -27,8 +24,8 @@ const NormalizerGroup = "igs-ig-normalizer-c1"
 // Contract headers on every content record (registry/topics.yaml): the
 // message's full name, and the contract version.
 const (
-	HeaderSBType     = "sb-type"
-	HeaderSBContract = "sb-contract"
+	HeaderSBType     = normalize.HeaderSBType
+	HeaderSBContract = normalize.HeaderSBContract
 )
 
 // NewNormalizer builds igs-normalizer: it reads the ig.* entity topics and
@@ -53,9 +50,7 @@ func NewNormalizer(cfg *config.Config, producer *kafka.Producer, vol normalize.V
 		}
 		b := producer.NewBatch()
 		for _, o := range normalize.Filter(ctx, vol, outs) {
-			if err := b.AddProto(ctx, o.Topic, o.Key, o.Msg,
-				kgo.RecordHeader{Key: HeaderSBType, Value: []byte(proto.MessageName(o.Msg))},
-				kgo.RecordHeader{Key: HeaderSBContract, Value: []byte(contracts.Version)}); err != nil {
+			if err := b.AddProto(ctx, o.Topic, o.Key, o.Msg, normalize.Headers(o.Msg)...); err != nil {
 				return err
 			}
 		}
