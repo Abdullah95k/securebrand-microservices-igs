@@ -58,6 +58,10 @@ config:
     ttl: 72h
     required_consumers: ["sb-analysis"]
   ig:
+    # The platform's account requests (registry.account_request.v1): the
+    # owner turned them on (10 Nov 2026).
+    account_requests:
+      enabled: true
     exit_rps: 0.25
     rate_limit_rest: 10m
     checkpoint_rest: 30m
@@ -84,6 +88,13 @@ config:
       # (private) Argo CD application, as config.ig.registry_sync.
       # canary_pages[0], [1] and [2]. Real accounts never go in this file.
       canary_pages: []
+  crawler:
+    # A task parks for 5 minutes at a time while every exit of its tier
+    # rests, and each park counts toward max_total_attempts. 50 gave up
+    # after about 4 hours: in the pilot, 53,239 post tasks reached the DLQ
+    # waiting for exits at 0.1 rps (7-10 Nov). 300 waits about 25 hours.
+    # Real failures stay bounded by max_attempts (5 stalls).
+    max_total_attempts: 300
 
 hooks:
   # The platform creates igs's topics (infra/production/kafka.tf) and
