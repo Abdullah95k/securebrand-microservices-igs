@@ -340,3 +340,14 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **Account requests:** igs can now apply the platform's account requests (add, change tier, pause, resume, collect now). This is **off** until the owner turns it on, because it changes what igs collects.
   - **Next:** candidates for other platforms found through bio links. Highlight items as story posts still wait for the owner's check.
 
+- **2026-11-10 (the pilot's dead letters, and the owner's answers):**
+  - **What happened:** 53,239 crawl tasks reached `igs.task.dlq` between 7 and 10 Nov. Nearly all were post-page tasks that ran out of `max_total_attempts` while every exit of their tier rested: "every exit rests", with no request sent. The persister's DLQ is empty, so nothing that was read is lost.
+  - **The cause:** each 5-minute park while every exit rests counts toward `max_total_attempts`. At the default of 50, a task gave up after about 4 hours, and the post queue waited longer than that at 0.1 rps.
+  - **The owner's answers (relayed by the master, 21:24Z, "4a yes, 4b yes"):**
+    - production's `max_total_attempts` is now 300, about 25 hours of waiting (#121);
+    - the dead letters are replayed once that is pinned, with `igsctl dlq replay --max 5000` from the scheduler pod, in batches.
+  - **Still open for the owner:**
+    - registry-sync never counts a run as a success, because no canary has highlights: add a 4th canary, or stop requiring highlights;
+    - when to turn on account requests;
+    - the read-only check for highlight items as story posts.
+
