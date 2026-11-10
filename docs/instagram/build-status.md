@@ -346,8 +346,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **The owner's answers (relayed by the master, 21:24Z, "4a yes, 4b yes"):**
     - production's `max_total_attempts` is now 300, about 25 hours of waiting (#121);
     - the dead letters are replayed once that is pinned, with `igsctl dlq replay --max 5000` from the scheduler pod, in batches.
-  - **Still open for the owner:**
-    - registry-sync never counts a run as a success, because no canary has highlights: add a 4th canary, or stop requiring highlights;
-    - when to turn on account requests;
-    - the read-only check for highlight items as story posts.
+  - **The owner's later answers (21:33Z):**
+    - account requests: on (`ig.account_requests.enabled: true` in values-production.yaml, #121);
+    - registry-sync tests each query on every active account igs has, not only the 3 canaries (being built);
+    - media downloads and the hand-off: yes.
+  - **Still open:** the read-only check for highlight items as story posts.
 

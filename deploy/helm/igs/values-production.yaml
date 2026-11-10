@@ -58,6 +58,10 @@ config:
     ttl: 72h
     required_consumers: ["sb-analysis"]
   ig:
+    # The platform's account requests (registry.account_request.v1): the
+    # owner turned them on (10 Nov 2026).
+    account_requests:
+      enabled: true
     exit_rps: 0.25
     rate_limit_rest: 10m
     checkpoint_rest: 30m
