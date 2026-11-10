@@ -334,3 +334,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **Headers fix:** igs-media's hand-off records now carry the contract's headers. Media downloads are still off.
   - **Production:** the master and this session were both paused from 7 to 10 Nov, so nothing was pinned. igs stays on `94eeb74` with the normalizer at 0, and the pilot ran unattended with 0 restarts. The master pins `f2c40b8` (slices 1 to 3) once its watch is clean.
 
+- **2026-11-10 (REQ-019 slice 4, candidates, extras and requests):**
+  - **Candidates:** discovery's decisions go out as contract candidates, with their outcomes.
+  - **Account extras:** each account record now carries its latest story time and the Threads hint.
+  - **Account requests:** igs can now apply the platform's account requests (add, change tier, pause, resume, collect now). This is **off** until the owner turns it on, because it changes what igs collects.
+  - **Next:** candidates for other platforms found through bio links. Highlight items as story posts still wait for the owner's check.
+

@@ -80,8 +80,9 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 | 2.1 and 2.2 (slice 2) | #113 (merge dc79342) | See "Slice 2, as built" |
 | 3.1 and 3.3 (slice 3) | #115 (merge f2c40b8) | See "Slice 3, as built"; 3.2 waits for the owner's check |
 | 4.2 (slice 4) | #117 | See "Slice 4, as built" |
-| 4.4 (slice 4) | the extras PR | See "Slice 4, as built" |
-| 4.1, Instagram candidates (slice 4) | the candidates PR | See "Slice 4, as built"; cross-platform candidates from bio links follow |
+| 4.4 (slice 4) | #118 | See "Slice 4, as built" |
+| 4.3 (slice 4) | the requests PR | See "Slice 4, as built"; off until the owner turns it on |
+| 4.1, Instagram candidates (slice 4) | #118 | See "Slice 4, as built"; cross-platform candidates from bio links follow |
 
 **Slice 1, as built** (`internal/ig/normalize`, `internal/ig/app/normalizer.go`):
 - **1.1:** `go.mod` requires `securebrand-contracts v1.2.0`. igs's own `securebrand.content.v1` (proto, generated code, embed) is deleted.
@@ -166,6 +167,13 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
   - **Capped is never published.** The contract allows it only in tests and the canary, and production runs no caps (D-008).
   - **If publishing fails,** the decision is still stored and the failure is logged. The candidate goes out again when it is next decided.
   - **Not yet:** cross-platform candidates (an Instagram bio linking a Facebook page or a YouTube channel) and keyword IDs on the evidence.
+- **4.3, account requests** (`internal/ig/requests`): igs-scheduler's leader consumes `registry.account_request.v1` (group `igs-ig-account-requests`, one at a time). It skips other platforms' requests.
+  - **ADD:** registers the account (by ID, handle or URL) on the requested tier under the system client `registry`, with `backfill_days` as the first crawl's age.
+  - **UPDATE:** moves it to the requested tier (hot, warm, long tail; dormant goes to the long tail; unspecified is auto).
+  - **PAUSE and RESUME:** switch its schedule off or on.
+  - **COLLECT_NOW:** starts an on-demand job. The request ID is its idempotency key, so a redelivery is the same job.
+  - **Bad requests and store failures:** a request igs can't apply is logged and dropped. A store failure, or too many jobs running, is retried.
+  - **Off by default** (`ig.account_requests.enabled: false`). It adds and changes accounts, so the owner turns it on. When on, the group starts at the topic's earliest offset, so requests from the last 7 days are applied once.
 - **4.4, account extras:**
   - The profile parser now reads `latest_reel_media` (the newest story's time) and `show_text_post_app_badge` (Instagram's Threads hint) into igs's Profile, as `latest_story_at` and `threads_badge` (additive fields).
   - The normalizer publishes them as the registered extras `ig.latest_story_at` (RFC 3339) and `ig.threads_badge`, only when the answer has them.

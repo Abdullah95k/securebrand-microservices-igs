@@ -128,14 +128,11 @@ func profilesEnable(ctx context.Context, cfg *config.Config, args []string, enab
 		}
 		refs = append(refs, ref)
 	}
-	// Resuming runs a profile at its next slot, not at once.
-	tag, err := db.Exec(ctx, `UPDATE profile_schedule SET enabled = $2,
-			next_run_at = CASE WHEN $2 THEN greatest(next_run_at, now() + make_interval(secs => interval_seconds * random() * 0.1)) ELSE next_run_at END
-		WHERE profile_ref = ANY($1)`, refs, enabled)
+	changed, err := dispatch.SetEnabled(ctx, db, refs, enabled)
 	if err != nil {
 		return err
 	}
-	printJSON(map[string]any{"changed": tag.RowsAffected(), "not_registered": int64(len(refs)) - tag.RowsAffected(), "invalid": invalid,
+	printJSON(map[string]any{"changed": changed, "not_registered": int64(len(refs)) - changed, "invalid": invalid,
 		"at": time.Now().UTC()})
 	return nil
 }
