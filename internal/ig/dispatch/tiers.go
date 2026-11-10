@@ -70,3 +70,12 @@ func SetPlacement(ctx context.Context, db *pgxpool.Pool, refs []string, pl Place
 		WHERE profile_ref = ANY($1)`, refs, pl.Tier, int(pl.Interval.Seconds()), pl.Adaptive)
 	return err
 }
+
+// SetEnabled pauses or resumes the profiles refs name. Resuming runs a
+// profile at its next slot, not at once. It returns how many it changed.
+func SetEnabled(ctx context.Context, db *pgxpool.Pool, refs []string, enabled bool) (int64, error) {
+	tag, err := db.Exec(ctx, `UPDATE profile_schedule SET enabled = $2,
+			next_run_at = CASE WHEN $2 THEN greatest(next_run_at, now() + make_interval(secs => interval_seconds * random() * 0.1)) ELSE next_run_at END
+		WHERE profile_ref = ANY($1)`, refs, enabled)
+	return tag.RowsAffected(), err
+}

@@ -95,6 +95,11 @@ type IG struct {
 	Privacy IGPrivacy `koanf:"privacy"`
 	// Discovery finds profiles to register (M11).
 	Discovery IGDiscovery `koanf:"discovery"`
+	// AccountRequests: the platform's account registry asks igs to add,
+	// change, pause, resume or collect an account now
+	// (registry.account_request.v1, REQ-019 item 4.3). Off until the
+	// owner turns it on.
+	AccountRequests IGAccountRequests `koanf:"account_requests"`
 }
 
 // IGLimits are the defaults applied to jobs that do not override them.
@@ -335,4 +340,12 @@ func (c *Config) validateIG() []error {
 // BudgetOn reports whether a daily budget is set.
 func (g IG) BudgetOn() bool {
 	return g.Budget.Enabled && (g.Budget.RequestsPerDay > 0 || g.Budget.BytesPerDay > 0)
+}
+
+// IGAccountRequests configures the account request consumer.
+type IGAccountRequests struct {
+	Enabled bool `koanf:"enabled"`
+	// Client names the system client that owns the registrations and jobs
+	// requests make.
+	Client string `koanf:"client"`
 }

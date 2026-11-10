@@ -346,6 +346,11 @@ registry_sync:
 # postgres (schema ig), redis, kafka (ig.* and igs.* topics) and s3 sections.
 ig:
   base_url: "https://www.instagram.com"
+  # The platform's account requests (registry.account_request.v1): add,
+  # update, pause, resume, collect now. Off until the owner turns it on.
+  account_requests:
+    enabled: false
+    client: registry
   registry_seed: "ig/queries.seed.yaml"
   registry_refresh: 30s
   fingerprint_profile: chrome_152

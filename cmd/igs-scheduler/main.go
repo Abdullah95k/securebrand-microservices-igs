@@ -21,7 +21,9 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/requests"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/keywords"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/httpserver"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/platform/kafka"
@@ -115,6 +117,17 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 		}, func(ctx context.Context) error {
 			return keywords.Watch(ctx, db, discovery.KeywordsRefresh, discovery.UseKeywords)
 		})
+	}
+	if cfg.IG.AccountRequests.Enabled {
+		// The platform's account requests (REQ-019 item 4.3), applied by the
+		// leader alone, one at a time.
+		h := &requests.Handler{DB: db, Dispatch: disp, Cfg: cfg}
+		c, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: requests.Group,
+			Topics: []string{topics.RegistryAccountRequest}, MaxInflight: 1, DrainTimeout: 20 * time.Second}, h.Handle)
+		if err != nil {
+			return err
+		}
+		loops = append(loops, c.Run)
 	}
 	if cfg.IG.BudgetOn() {
 		budget := ratelimit.NewBudgetController(rdb, cfg.Kafka.TopicPrefix, cfg.IG.Budget)

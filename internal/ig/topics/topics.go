@@ -46,12 +46,15 @@ const (
 	// Discovery's checked candidates, with their outcomes
 	// (securebrand.discovery.v1).
 	DiscoveryCandidate = "discovery.candidate.v1"
+	// The platform's account requests, which igs consumes
+	// (securebrand.registry.v1).
+	RegistryAccountRequest = "registry.account_request.v1"
 )
 
 // Content lists the content topics igs publishes or reads (REQ-019
 // slices 1 to 3), in configs/ig/topics.yaml's order.
 var Content = []string{ContentPost, ContentComment, ContentAccount, ContentAccountSnapshot, ContentMetrics, ContentMedia,
-	ContentMediaReady, ContentMediaProcessed, ContentMediaDeleted, ContentPlaylist, ContentAudio, CollectionCoverage, DiscoveryCandidate}
+	ContentMediaReady, ContentMediaProcessed, ContentMediaDeleted, ContentPlaylist, ContentAudio, CollectionCoverage, DiscoveryCandidate, RegistryAccountRequest}
 
 // Internal work queues.
 const (
