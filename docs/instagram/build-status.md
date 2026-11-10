@@ -356,5 +356,11 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - The configured `canary_pages` only fill in when the store has too few.
     - A run still loads 3 pages, on the same tier and exits.
     - Over many runs, every account takes its turn.
+  - **#122 merged (`76158c6`):** registry-sync on the accounts igs has.
+  - **The resting-exits gauge overcounted (fixed):**
+    - On baaa000, the master saw `igs_exits_resting` at 8 of 10 on registry-sync and crawler-retry, while `igsctl health` counted 7.
+    - The cause: a pod's gauge dropped only when that pod next used the exit, and those pods are mostly idle.
+    - The fix: every rest sync (2 s) now moves ended rests out of the gauge, so `IgsIgExitsMostlyResting` reads true counts.
+    - The 7 of 10 was real: 9 rests in the hour, mostly 30-minute page walls, and resting exits send nothing, so the block rate stays at 0.
   - **Still open:** the read-only check for highlight items as story posts.
 

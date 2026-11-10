@@ -237,6 +237,20 @@ func (s *Set) Allow(key string) bool {
 	return allowed
 }
 
+// Sweep moves every open key whose cooldown ended to half-open, so
+// OnChange reports the end of a rest even for a key no one asked about
+// since: state otherwise changes only when a key is used.
+func (s *Set) Sweep() {
+	var ch []change
+	s.mu.Lock()
+	now := s.now()
+	for key, e := range s.entries {
+		s.advance(key, e, now, &ch)
+	}
+	s.mu.Unlock()
+	s.notify(ch)
+}
+
 // OpenUntil returns when key's cooldown ends, if key is open.
 func (s *Set) OpenUntil(key string) (time.Time, bool) {
 	var ch []change
