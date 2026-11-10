@@ -39,12 +39,14 @@ const (
 	ContentMediaReady     = "content.media.ready.v1"
 	ContentMediaProcessed = "content.media.processed.v1"
 	ContentMediaDeleted   = "content.media.deleted.v1"
+	ContentPlaylist       = "content.playlist.v1"
+	ContentAudio          = "content.audio.v1"
 )
 
 // Content lists the content topics igs publishes or reads (REQ-019
-// slices 1 and 2), in configs/ig/topics.yaml's order.
+// slices 1 to 3), in configs/ig/topics.yaml's order.
 var Content = []string{ContentPost, ContentComment, ContentAccount, ContentAccountSnapshot, ContentMetrics, ContentMedia,
-	ContentMediaReady, ContentMediaProcessed, ContentMediaDeleted}
+	ContentMediaReady, ContentMediaProcessed, ContentMediaDeleted, ContentPlaylist, ContentAudio}
 
 // Internal work queues.
 const (

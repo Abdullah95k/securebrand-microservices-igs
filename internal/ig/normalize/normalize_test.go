@@ -49,6 +49,17 @@ func conform(t *testing.T, outs []Out) {
 			err, want = conformance.Metrics(m, opt), topics.ContentMetrics
 		case *contentv1.Media:
 			err, want = conformance.Media(m, opt), topics.ContentMedia
+		case *contentv1.Playlist:
+			err, want = conformance.Playlist(m, opt), topics.ContentPlaylist
+		case *contentv1.Audio:
+			// The contract has no Audio check yet: its envelope, and a
+			// lossless round trip (as tks does).
+			err, want = conformance.Envelope(m.Envelope, "audio", opt).Err(), topics.ContentAudio
+			b, _ := proto.Marshal(m)
+			var back contentv1.Audio
+			if uerr := proto.Unmarshal(b, &back); uerr != nil || !proto.Equal(&back, m) {
+				t.Errorf("audio does not round-trip: %v", uerr)
+			}
 		default:
 			t.Fatalf("unexpected %T", o.Msg)
 		}
@@ -404,15 +415,15 @@ func TestSpans(t *testing.T) {
 	}
 }
 
-// Topics igs doesn't map yet (highlights: slice 3) give nothing, and a record
+// Topics that aren't content (jobs) give nothing, and a record
 // that doesn't decode is an error.
 func TestRecord(t *testing.T) {
 	b, _ := proto.Marshal(&igv1.Post{Obs: obs(), MediaPk: 5, OwnerPk: 42, TakenAt: timestamppb.New(at)})
 	if outs, err := Record(topics.Post, b); err != nil || len(outs) != 1 {
 		t.Fatalf("post: %v %v", outs, err)
 	}
-	if outs, err := Record(topics.Highlight, b); err != nil || outs != nil {
-		t.Errorf("highlight: %v %v", outs, err)
+	if outs, err := Record(topics.Job, b); err != nil || outs != nil {
+		t.Errorf("job: %v %v", outs, err)
 	}
 	if _, err := Record(topics.Post, []byte{0xff}); err == nil {
 		t.Error("garbage decoded")
@@ -474,5 +485,41 @@ func TestMediaToContent(t *testing.T) {
 	}
 	if _, ok := NativeMediaID("tt:media:" + id); ok {
 		t.Error("another platform's media ID taken for igs's")
+	}
+}
+
+// Highlights become a Playlist of type highlight (REQ-019 slice 3), with
+// their count but no items until the story posts are published.
+func TestHighlightToPlaylist(t *testing.T) {
+	outs := Map(&igv1.Highlight{Obs: obs(), HighlightId: 1790, UserPk: 42, Title: "Trips #iraq", ItemCount: 3,
+		Items: []*igv1.HighlightItem{{ItemPk: 1}, {ItemPk: 2}, {ItemPk: 3}}})
+	conform(t, outs)
+	p, o := one[*contentv1.Playlist](t, outs)
+	checkEnvelope(t, p.Envelope, "playlist", "ig:playlist:1790")
+	if o.Key != "ig:playlist:1790" || p.AccountId != "ig:account:42" || p.Type != contentv1.PlaylistType_PLAYLIST_TYPE_HIGHLIGHT ||
+		p.Title.GetText() != "Trips #iraq" || p.ItemCount.GetValue() != 3 || len(p.Items) != 0 ||
+		p.Url != "https://www.instagram.com/stories/highlights/1790/" {
+		t.Errorf("playlist: key %s %+v", o.Key, p)
+	}
+	if outs := Map(&igv1.Highlight{Obs: obs(), UserPk: 42}); len(outs) != 0 {
+		t.Errorf("a highlight without an ID published %v", outs)
+	}
+}
+
+// A post's sound is published as Audio, keyed by its ID; the post points
+// at it with the same contract ID.
+func TestPostAudio(t *testing.T) {
+	outs := Map(&igv1.Post{Obs: obs(), MediaPk: 5, OwnerPk: 42, TakenAt: timestamppb.New(at),
+		Music: &igv1.Music{Title: "Song", Artist: "Band", AudioId: "900", OriginalAudio: true}})
+	conform(t, outs)
+	a, o := one[*contentv1.Audio](t, outs)
+	p, _ := one[*contentv1.Post](t, outs)
+	checkEnvelope(t, a.Envelope, "audio", "ig:audio:900")
+	if o.Key != "ig:audio:900" || p.Audio.GetAudioId() != a.Envelope.Id || a.Title != "Song" || a.Artist != "Band" ||
+		!a.GetOriginal() || a.Url != "https://www.instagram.com/reels/audio/900/" {
+		t.Errorf("audio: key %s %+v", o.Key, a)
+	}
+	if outs := Map(&igv1.Post{Obs: obs(), MediaPk: 5, OwnerPk: 42, Music: &igv1.Music{Title: "untitled"}}); len(outs) != 1 {
+		t.Errorf("a sound without an ID published %d events", len(outs)-1)
 	}
 }

@@ -288,7 +288,7 @@ Important settings and their defaults (`ig:` section):
 | api | none | `igs.task.profile.*`, `igs.task.post.*` | |
 | scheduler | none | `igs.task.profile.*`, `igs.task.post.*`, `ig.job.v1`, `ig.erasure.v1`, `ig.comment.v1` (deletions its re-reads find) | Describe every `igs-*` group and the topics they read (the lag gauges), and the end offsets of the six entity topics against `igs-ig-persister` (the job finalizer) |
 | persister | The six entity topics: `ig.profile.v1`, `ig.post.v1`, `ig.post_metrics.v1`, `ig.comment.v1`, `ig.media.v1`, `ig.highlight.v1` (`igs-ig-persister`) | `igs.persist.dlq` | |
-| normalizer | The six entity topics (`igs-ig-normalizer-c1`; the earlier `igs-ig-normalizer` is no longer used) | `content.account.v1`, `content.account_snapshot.v1`, `content.post.v1`, `content.comment.v1`, `content.metrics.v1`, `content.media.v1` | |
+| normalizer | The six entity topics (`igs-ig-normalizer-c1`; the earlier `igs-ig-normalizer` is no longer used) | `content.account.v1`, `content.account_snapshot.v1`, `content.post.v1`, `content.comment.v1`, `content.metrics.v1`, `content.media.v1`, `content.playlist.v1`, `content.audio.v1` | |
 | media-downloader | `igs.task.media` (`igs-ig-media-downloader`) | `content.media.ready.v1` | |
 | media-janitor | `content.media.processed.v1` (`igs-ig-media-janitor`) | `content.media.ready.v1` (re-announced), `content.media.deleted.v1` | |
 | registry-sync | none | none | No Kafka user needed |

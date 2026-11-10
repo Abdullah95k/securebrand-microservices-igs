@@ -48,6 +48,8 @@ const (
 	KindComment         = "comment"
 	KindMetrics         = "metrics"
 	KindMedia           = "media"
+	KindPlaylist        = "playlist"
+	KindAudio           = "audio"
 )
 
 // Out is one content event to publish.
@@ -77,6 +79,8 @@ func Record(topic string, value []byte) ([]Out, error) {
 		msg = &igv1.Comment{}
 	case topics.Media:
 		msg = &igv1.Media{}
+	case topics.Highlight:
+		msg = &igv1.Highlight{}
 	default:
 		return nil, nil
 	}
@@ -99,6 +103,8 @@ func Map(m proto.Message) []Out {
 		return comment(v)
 	case *igv1.Media:
 		return media(v)
+	case *igv1.Highlight:
+		return playlist(v)
 	}
 	return nil
 }
@@ -521,7 +527,7 @@ func post(p *igv1.Post) []Out {
 		// audio has one.
 		c.Audio = &contentv1.AudioRef{Title: m.Title, Artist: m.Artist, Original: proto.Bool(m.OriginalAudio)}
 		if m.AudioId != "" {
-			c.Audio.AudioId = ID("audio", m.AudioId)
+			c.Audio.AudioId = ID(KindAudio, m.AudioId)
 		}
 	}
 	if typ != contentv1.PostType_POST_TYPE_POST {
@@ -558,7 +564,7 @@ func post(p *igv1.Post) []Out {
 		"ig.media_type": float64(p.MediaType), "ig.usertag_positions": positions,
 		"ig.discovered_via": discoveredVia(p.DiscoveredVia)})
 	seal(env, c)
-	return []Out{{Topic: topics.ContentPost, Key: env.Id, Msg: c}}
+	return append([]Out{{Topic: topics.ContentPost, Key: env.Id, Msg: c}}, audio(p.Obs, p.Music)...)
 }
 
 func discoveredVia(d igv1.DiscoveredVia) string {

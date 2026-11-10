@@ -77,7 +77,8 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
 |---|---|---|
 | Plan and re-estimate | this file | v1.2.0 read on 7 Nov; the contract's Go module resolves at v1.2.0 |
 | 1.1 to 1.11 (slice 1) | #112 (merge 0c7e102) | See below |
-| 2.1 and 2.2 (slice 2) | the slice 2 PR | See "Slice 2, as built" |
+| 2.1 and 2.2 (slice 2) | #113 (merge dc79342) | See "Slice 2, as built" |
+| 3.1 and 3.3 (slice 3) | the slice 3 PR | See "Slice 3, as built"; 3.2 waits for the owner's check |
 
 **Slice 1, as built** (`internal/ig/normalize`, `internal/ig/app/normalizer.go`):
 - **1.1:** `go.mod` requires `securebrand-contracts v1.2.0`. igs's own `securebrand.content.v1` (proto, generated code, embed) is deleted.
@@ -131,4 +132,18 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
   - End to end: `TestContentEventsMatchStore` now also checks `content.media.v1`.
 
 **Fix after slice 2:** a post's `audio.audio_id` was Instagram's bare audio ID. The contract wants a contract ID, `ig:audio:<native id>` (`post.proto`, AudioRef), so it now is. Conformance doesn't check this field. The fix landed before slice 1 was pinned in production, so the store never held the bare form.
+
+**Slice 3, as built** (`internal/ig/normalize/playlist.go`). The master confirmed on 7 Nov, 21:41Z, that Playlist and Audio may be published now: in `registry/topics.yaml` they aren't reserved, and the README's wording is out of date.
+- **3.1, `content.playlist.v1`:**
+  - One Playlist of type highlight per highlight, keyed `ig:playlist:<id>`, with its account, title (with spans), item count, URL and status.
+  - The items are story posts. They're left out until 3.2 publishes them, so the playlist never points at posts that don't exist.
+  - The cover is left out until it has a media record. Extras accept only registered keys.
+- **3.3, `content.audio.v1`:**
+  - One Audio per post sound that has an ID, keyed `ig:audio:<id>`, with title, artist, original or not, URL and status.
+  - The post's `audio.audio_id` is that same ID.
+  - The contract has no Audio check yet, so the tests check its envelope with `conformance.Envelope` plus a lossless round trip, as tks does.
+- **3.2, highlight items as story posts:** waits for the owner's one real read-only check.
+- **Evidence:**
+  - `TestHighlightToPlaylist`, `TestPostAudio`, and the conformance helper covering both types.
+  - End to end: `TestContentEventsMatchStore` checks every record on `content.playlist.v1` and `content.audio.v1`, and expects playlists. fakeig gives reels no sound, so Audio is covered by the unit tests.
 

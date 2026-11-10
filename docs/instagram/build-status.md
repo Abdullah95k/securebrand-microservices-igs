@@ -6,7 +6,7 @@ Each build session updates this file at the end of its work. The plan and rules 
 - **Fix 13, the 48-hour pilot:** the owner started it (7 Nov, 12:45 Iraq time; D-036). The first 50 accounts went in at 20:07 Iraq time, pinned to `30e2532`. At 22:09 the other 298 were held: Instagram walled page loads on 9 of the 10 exits (see the log below). It no longer waits for the soak: the owner decided to test on the real site only (D-045). igs's proxies are 10 of 10, and PostgreSQL has room at 200 connections (D-037). The plan, the owner's commands and the platform's changes are in [`igs-pilot.md`](../runbooks/igs-pilot.md).
 - **Per-component PostgreSQL roles:** built (D-037 gave PostgreSQL 200 connections). Five components (API, crawler, persister, media, registry-sync) can each run as their own PostgreSQL user, with only the privileges their code uses; the tests run each component that way. The platform creates the users (Terraform) and switches each component after the pilot. The list and the steps are in [`igs-operations.md`](../master/igs-operations.md), "Credentials per component". Kafka users and Spaces keys per component follow in a platform PR.
 - **For the owner to decide:** erasure removes a person's media but keeps their raw responses (kept under "keep all data"): should erasure also delete raw objects?
-- **REQ-019, the shared contract v1.2.0:** the owner said to start it (7 Nov, about 23:10 Iraq time). Slice 1 is merged (#112, `0c7e102`): accounts, account snapshots, posts, comments and metrics in the contract's form. The master pins it after the pilot's +1 h watch. Slice 2 (media and the media hand-off) is built; slices 3 and 4 follow. Plan and progress: [`igs-contract-adoption.md`](../master/igs-contract-adoption.md).
+- **REQ-019, the shared contract v1.2.0:** the owner said to start it (7 Nov, about 23:10 Iraq time). Slice 1 is merged (#112, `0c7e102`): accounts, account snapshots, posts, comments and metrics in the contract's form. The master pins it after the pilot's +1 h watch. Slices 2 (media, #113) and 3 (highlights as playlists, reel sounds as audio) are built. Highlight items as story posts wait for the owner's check; slice 4 follows. Plan and progress: [`igs-contract-adoption.md`](../master/igs-contract-adoption.md).
 
 Earlier state: legal signed off (C4, 2026-11-03); Phase 0 (C3) ran on ISP, GO except complete grids 88.9% against 90% (the owner chose more exits over a re-run); every build milestone (M0 to M12) is done; go-live follows [`igs-go-live.md`](../runbooks/igs-go-live.md). Left open on purpose: U2 (a cheap post-detail query) and C1 (the owner's grid-click and tagged-tab recordings).
 
@@ -322,4 +322,10 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **Deadline:** every stored file now has one, as the contract requires: 72 h by default, never under 24 h. Before, it was none.
   - **Consumer name:** the analysis consumer is named `sb-analysis`.
   - **In production:** media downloads stay off, so the hand-off doesn't act there yet. The platform's values should set `media.ttl: 72h` and `required_consumers: ["sb-analysis"]` before media is turned on.
+
+- **2026-11-07 (REQ-019 slice 3, highlights and sounds):**
+  - **Highlights:** each one is published as a Playlist of type highlight (`content.playlist.v1`).
+  - **Reel sounds:** each one with an ID is published as Audio (`content.audio.v1`).
+  - **Audio ID fix:** a post's `audio_id` is now a contract ID (`ig:audio:<id>`, #114). It was fixed before slice 1 reached production.
+  - **Waiting for the owner:** highlight items as story posts need one real read-only check that logged-out Instagram serves them.
 

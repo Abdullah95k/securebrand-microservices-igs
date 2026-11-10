@@ -550,7 +550,8 @@ The leader scheduler publishes the consumer groups' lag every 30 s, so no Kafka 
 | `ig.post_metrics.v1` | `content.metrics.v1`, target the post |
 | `ig.comment.v1` | `content.comment.v1` and `content.metrics.v1` (target the comment). A deletion is a partial `DELETED` event. Redacted comments publish nothing |
 | `ig.media.v1` | `content.media.v1`: type and role (photo, video, reel, thumbnail, cover, profile picture, comment attachments), owner (the post, a carousel child's post, the comment or the account), size, duration, alt text and the signed CDN URL with its expiry. Re-signed URLs don't change the content hash. Highlight media waits for slice 3 |
-| `ig.highlight.v1` | nothing yet (REQ-019 slice 3) |
+| `ig.highlight.v1` | `content.playlist.v1`: one Playlist of type highlight per highlight, with its title, count and URL. The items (story posts) wait for the owner's real check (slice 3.2) |
+| `ig.post.v1`'s sound | `content.audio.v1`: one Audio per sound with an ID (title, artist, original or not, URL), keyed `ig:audio:<id>`; the post's `audio.audio_id` names it |
 
 - **On the wire:** plain Protobuf, one message type per topic, headers `sb-type` (the full message name) and `sb-contract` (`1.2.0`). Keys: the account ID (`ig:account:<pk>`) for accounts and snapshots; the post ID (`ig:post:<pk>`) for posts, comments and metrics.
 - **The envelope:** `platform` `ig`, `id` `ig:<kind>:<native id>`, `version` = `observed_at` in microseconds, `content_hash` (SHA-256 of the content without counts), `event_id` (SHA-256 of `id|observed_at µs|content_hash`), and provenance (collector, version, parser version `<query>:<n>`, the query and its doc_id, job IDs, logged-out scraping, the crawl mode, `raw_ref`).
