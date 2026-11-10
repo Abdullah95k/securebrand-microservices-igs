@@ -166,7 +166,13 @@ The data the owner wants in ClickHouse first. About **4 to 5 days**.
   - **Relevance:** the score, whether it passed the threshold, and the country signals as matched rules.
   - **Capped is never published.** The contract allows it only in tests and the canary, and production runs no caps (D-008).
   - **If publishing fails,** the decision is still stored and the failure is logged. The candidate goes out again when it is next decided.
-  - **Not yet:** cross-platform candidates (an Instagram bio linking a Facebook page or a YouTube channel) and keyword IDs on the evidence.
+  - **Cross-platform candidates** (`internal/ig/normalize/xplat.go`): igs-normalizer publishes every profile link to Facebook, TikTok or YouTube as a pending candidate for that platform's collector. That covers bio links, the website field and the linked Facebook page.
+    - Source `PROFILE_LINK`, source platform `ig`.
+    - Evidence: the Instagram account and how it linked (`bio_link`, `website_field` or `linked_account`).
+    - Key: `<platform>:id:<id>` when the ID is known (the linked Facebook page), else `<platform>:url:<link>`.
+    - Platforms without a collector (X, Threads and the others) and Instagram's own links aren't published.
+    - The volume rule's memory passes each link at most once a day.
+  - **Not yet:** keyword IDs on the evidence.
 - **4.3, account requests** (`internal/ig/requests`): igs-scheduler's leader consumes `registry.account_request.v1` (group `igs-ig-account-requests`, one at a time). It skips other platforms' requests.
   - **ADD:** registers the account (by ID, handle or URL) on the requested tier under the system client `registry`, with `backfill_days` as the first crawl's age.
   - **UPDATE:** moves it to the requested tier (hot, warm, long tail; dormant goes to the long tail; unspecified is auto).
