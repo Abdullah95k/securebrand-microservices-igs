@@ -75,9 +75,19 @@ config:
         default: [isp]
     privacy:
       pii_mode: full
+    schedule:
+      tiers:
+        # Accounts posting less than weekly are visited once a day, not
+        # every 3 hours (owner's D-055, 11 Nov 2026). Placed by the tierer
+        # daily from the last 14 days' posts; a quiet account that starts
+        # posting moves back up at its next check.
+        quiet_posts_per_week: 1
     discovery:
       enabled: true
       threshold: 4
+      # New admissions need 10 followers or more (owner's D-055). Checked
+      # only when a candidate is vetted: no scheduled account is dropped.
+      min_followers: 10
       # About 2 per exit (10 exits): vets wait for discovery's share of
       # each exit (exit_share), so more in flight only hold crawler slots
       # and identities without vetting faster.

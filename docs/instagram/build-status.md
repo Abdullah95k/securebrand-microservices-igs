@@ -394,6 +394,11 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - The only rate limit left was registry-sync's own highlights probe, which put rests at 2.03 against the bar of 2.
     - Registry-sync now skips the query kinds the crawlers don't read (highlights, reels or comments when switched off). It lists them as skipped, not unchecked, so the run can still count as a success.
   - **Crawler-post back at 1 (about 12:05Z, platform #96, on `1846b07`).**
+  - **The owner's D-055 (22:00Z):**
+    1. Accounts posting less than weekly are visited once a day: a new `quiet` tier (`ig.schedule.tiers.quiet_posts_per_week: 1` in production).
+    2. Discovery needs 10 followers or more for new admissions (`ig.discovery.min_followers: 10`). Nothing already scheduled is dropped.
+    3. An account outside Iraq is in scope when at least 10% of its comments come from Iraqi accounts (to be built).
+    4. A read-only probe of hashtag pages and of location pages for places in Iraq (to be built; no discovery change until its results).
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 

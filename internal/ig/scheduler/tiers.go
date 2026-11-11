@@ -42,8 +42,9 @@ func (t *Tierer) Tick(ctx context.Context) error {
 					WHERE i.owner_pk = d.user_pk AND i.taken_at > now() - $3::int * interval '1 second')::float8 / $4 AS ppd
 				FROM d
 			), p AS (
-				SELECT profile_ref, ppd, CASE WHEN ppd >= $5 THEN $6 ELSE $7 END AS tier,
-					CASE WHEN ppd >= $5 THEN $8::int ELSE $9::int END AS secs
+				SELECT profile_ref, ppd,
+					CASE WHEN ppd >= $5 THEN $6 WHEN $10::float8 > 0 AND ppd * 7 < $10::float8 THEN $11 ELSE $7 END AS tier,
+					CASE WHEN ppd >= $5 THEN $8::int WHEN $10::float8 > 0 AND ppd * 7 < $10::float8 THEN $12::int ELSE $9::int END AS secs
 				FROM r
 			)
 			UPDATE profile_schedule s SET posts_per_day = p.ppd, tier = p.tier, interval_seconds = p.secs, tier_changed_at = now(),
@@ -51,7 +52,8 @@ func (t *Tierer) Tick(ctx context.Context) error {
 			FROM p WHERE s.profile_ref = p.profile_ref`,
 			int(tc.AutoEvery.Seconds()), TierBatch, int(tc.AutoWindow.Seconds()), days, tc.WarmPostsPerDay,
 			dispatch.TierWarm, dispatch.TierLongTail, int(sc.TierInterval(dispatch.TierWarm).Seconds()),
-			int(sc.TierInterval(dispatch.TierLongTail).Seconds()))
+			int(sc.TierInterval(dispatch.TierLongTail).Seconds()), tc.QuietPostsPerWeek, dispatch.TierQuiet,
+			int(sc.TierInterval(dispatch.TierQuiet).Seconds()))
 		if err != nil {
 			return err
 		}
@@ -73,7 +75,7 @@ func (t *Tierer) Tick(ctx context.Context) error {
 		}
 		counts[tier] = float64(n)
 	}
-	for _, tier := range []string{dispatch.TierHot, dispatch.TierWarm, dispatch.TierLongTail, dispatch.TierCustom} {
+	for _, tier := range []string{dispatch.TierHot, dispatch.TierWarm, dispatch.TierLongTail, dispatch.TierQuiet, dispatch.TierCustom} {
 		metrics.ProfilesByTier.WithLabelValues(tier).Set(counts[tier])
 	}
 	return rows.Err()

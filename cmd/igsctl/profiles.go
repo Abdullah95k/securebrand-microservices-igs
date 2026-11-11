@@ -52,7 +52,7 @@ func profilesImport(ctx context.Context, cfg *config.Config, args []string) erro
 	fs := flag.NewFlagSet("profiles import", flag.ExitOnError)
 	file := fs.String("file", "", "file of usernames or profile links, one a line (- for standard input)")
 	client := fs.String("client", "igsctl", "API client (key prefix) the profiles are registered under; created revoked if missing")
-	tier := fs.String("tier", "auto", "hot, warm, long_tail, or auto (placed by posting rate)")
+	tier := fs.String("tier", "auto", "hot, warm, long_tail, quiet, or auto (placed by posting rate)")
 	every := fs.Duration("interval", 0, "a custom time between scheduled runs, instead of a tier")
 	paused := fs.Bool("paused", false, "register without scheduling runs (resume with igsctl profiles resume)")
 	noBackfill := fs.Bool("no-backfill", false, "do not start backfills")
@@ -143,7 +143,7 @@ func profilesEnable(ctx context.Context, cfg *config.Config, args []string, enab
 func profilesTier(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("profiles tier", flag.ExitOnError)
 	file := fs.String("file", "", "file of usernames or profile links, one a line (- for standard input)")
-	tier := fs.String("tier", "", "hot, warm, long_tail or auto")
+	tier := fs.String("tier", "", "hot, warm, long_tail, quiet or auto")
 	every := fs.Duration("interval", 0, "a custom time between scheduled runs, instead of a tier")
 	_ = fs.Parse(args)
 	if *tier == "" && *every == 0 {

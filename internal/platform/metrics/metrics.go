@@ -104,7 +104,7 @@ var (
 	Jobs               = counterVec("jobs_total", "Jobs reaching a terminal state.", "status", "lane")
 	ScheduleLag        = gaugeVec("schedule_lag_seconds", "Age of the oldest due profile in the schedule.", "tier")
 	// ProfilesByTier counts the enabled profiles on the schedule per tier
-	// (hot, warm, long_tail, custom).
+	// (hot, warm, long_tail, quiet, custom).
 	ProfilesByTier = gaugeVec("profiles_scheduled", "Enabled profiles on the schedule, by tier.", "tier")
 	// Normalized counts ig.* records mapped to content.* by
 	// igs-normalizer (outcome ok or undecodable).
