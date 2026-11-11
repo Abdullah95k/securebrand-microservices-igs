@@ -259,6 +259,26 @@ func (w *World) makeComment(at time.Time, nth, k int) Comment {
 	return cm
 }
 
+// explorePosts are up to n posts for a hashtag or location page: each
+// profile's newest, then the next, in turn. The caller holds w.mu (the
+// page handler's read lock).
+func (w *World) explorePosts(n int) []*Post {
+	var out []*Post
+	for j := 0; len(out) < n; j++ {
+		added := false
+		for _, p := range w.profiles {
+			if j < len(p.Posts) && len(out) < n {
+				out = append(out, p.Posts[j])
+				added = true
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	return out
+}
+
 // Profiles returns every profile (not those added with AddProfile).
 func (w *World) Profiles() []*Profile { return w.profiles }
 

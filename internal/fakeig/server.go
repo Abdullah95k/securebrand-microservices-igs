@@ -44,6 +44,12 @@ const (
 	TaggedWalled = "walled" // the page sends logged-out visitors to /accounts/login/
 )
 
+// Hashtag and location page answers (Faults.Explore).
+const (
+	ExploreOpen   = "open"   // the page embeds the first posts of the world's profiles
+	ExploreWalled = "walled" // the page sends logged-out visitors to /accounts/login/
+)
+
 // GridPageSize and CommentPageSize are the recorded page sizes.
 const (
 	GridPageSize    = 12
@@ -116,6 +122,10 @@ type Faults struct {
 	// user's pk or id): the posts of other accounts that tag the profile.
 	// Empty serves neither, as before.
 	TaggedTab string
+	// Explore serves /explore/tags/<tag>/ and /explore/locations/<id>/:
+	// ExploreOpen embeds up to 9 posts (from the profiles, in turn),
+	// ExploreWalled redirects to /accounts/login/. Empty serves neither.
+	Explore string
 }
 
 // Options configure a server.
@@ -318,6 +328,20 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		}
 		data = map[string]any{"xig_user_by_username": map[string]any{"pk": str(p.PK), "id": p.ID,
 			"polaris_clips_connection": s.reelsPage(p, 0, 12, "")}}
+	case len(parts) >= 3 && parts[0] == "explore" && (parts[1] == "tags" || parts[1] == "locations") && s.opts.Faults.Explore != "":
+		if s.opts.Faults.Explore == ExploreWalled {
+			http.Redirect(w, r, "/accounts/login/?next="+r.URL.Path, http.StatusFound)
+			return
+		}
+		edges := []any{}
+		for _, post := range s.World.explorePosts(9) {
+			edges = append(edges, map[string]any{"node": mediaJSON(post, false, s.cdn())})
+		}
+		key := "xig_hashtag"
+		if parts[1] == "locations" {
+			key = "xig_location"
+		}
+		data = map[string]any{key: map[string]any{"name": parts[2], "top": map[string]any{"edges": edges}}}
 	case len(parts) == 2 && parts[1] == "tagged" && s.opts.Faults.TaggedTab != "":
 		p := s.World.Profile(parts[0])
 		if p == nil {

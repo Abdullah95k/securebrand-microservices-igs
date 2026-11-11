@@ -403,7 +403,11 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
        - At least 30 distinct commenters are needed.
        - The share is kept as the signal `iraqi_commenters`. It isn't part of the score.
        - Results are counted in `igs_discovery_audience_checks_total{result}`.
-    4. A read-only probe of hashtag pages and of location pages for places in Iraq (to be built; no discovery change until its results).
+    4. A read-only probe of hashtag pages and of location pages for places in Iraq. No discovery change until its results.
+       - `igs-spike explore`, run in the cluster as a one-off chart Job (`exploreProbe.enabled`).
+       - It runs logged out, on one exit, with 16 page loads (20 at most) at one every 40 s. It reads pages only, with no GraphQL queries.
+       - It reports counts only: pages loaded, login walls and redirects, and distinct posts and accounts seen. Nothing is stored or published.
+       - A rate limit or checkpoint ends it.
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 

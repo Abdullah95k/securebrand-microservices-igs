@@ -262,6 +262,55 @@ It reuses the probe's files: `phase0/proxies.yaml` and `phase0/ig-profiles.txt`.
 
 `phase0/out-tagged/report.json` and `raw/` hold Instagram's answers, with personal data. Keep them off git, like the probe's output.
 
+## Hashtag and location pages (D-055)
+
+**What it answers:** can igs find Iraqi accounts from hashtag pages and from the pages of places in Iraq, without logging in? The owner asked for this measurement before any discovery change (D-055, point 4). For each page it records:
+
+- whether the page loads for a visitor who isn't logged in;
+- whether it shows a login wall or sends the visitor to the login page;
+- how many posts it shows, and how many distinct accounts posted them. These are the accounts discovery could take in.
+
+**What it doesn't do:**
+
+- it reads pages only, with no GraphQL queries;
+- it keeps counts only: no hashtag, place, post or account is named in its output;
+- it stores and publishes nothing, and changes nothing in discovery;
+- a rate limit or a checkpoint ends the run at once.
+
+**The pages:**
+
+- 16 page loads by default and 20 at most (`--max-pages`), half hashtags and half locations, in turn, on one exit;
+- the hashtags are Iraq's places from the keyword list (`iraq`, `العراق`, `krg`, `كردستان`, then the governorates), unless `--hashtags` names others;
+- the locations are the most used places in Iraq among the posts igs stored (`--locations-from-db`), or the ids given with `--locations`.
+
+1. Rehearse (no traffic to Instagram):
+
+   ```bash
+   go run ./cmd/igs-spike explore --dry-run
+   ```
+
+2. **In the cluster**, the platform runs it as a one-off Job through the chart: set `exploreProbe.enabled: true` in its values (with `exploreProbe.credentialsSecret` set to the crawler's credentials Secret, if components have their own). The Job:
+   - uses the crawler's proxies file and config, on the `isp` tier;
+   - loads one page every 40 s (`exploreProbe.rps: 0.025`), so it takes about 11 minutes;
+   - logs the summary. Read it with:
+
+   ```bash
+   kubectl -n igs logs job/igs-explore-probe-1
+   ```
+
+   Set `exploreProbe.enabled` back to `false` afterwards; that removes the Job. To run it again, bump `exploreProbe.run`.
+
+3. Send back the lines under `SUMMARY (counts only, safe to send back)`. Per kind (`hashtag`, `location`) they give:
+
+   | Field | What it counts |
+   |---|---|
+   | `pages` | page loads |
+   | `loaded` | pages served to the logged-out visitor |
+   | `login_redirect`, `login_wall` | pages that sent the visitor to log in, or showed a login wall |
+   | `other` | other answers (errors, not found) |
+   | `with_posts` | loaded pages that showed posts |
+   | `posts`, `accounts` | distinct posts, and the distinct accounts that posted them |
+
 ## Speed tests (one switch at a time)
 
 Three switches may make comment collection faster. Each is a guess about
