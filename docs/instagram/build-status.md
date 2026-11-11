@@ -393,5 +393,7 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - In the next 30 minutes the crawlers had no rate limits at all.
     - The only rate limit left was registry-sync's own highlights probe, which put rests at 2.03 against the bar of 2.
     - Registry-sync now skips the query kinds the crawlers don't read (highlights, reels or comments when switched off). It lists them as skipped, not unchecked, so the run can still count as a success.
+  - **Crawler-post back at 1 (about 12:05Z, platform #96, on `1846b07`).**
+  - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 
