@@ -226,6 +226,15 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
      - a Gulf account naming Dubai and a global English star are not added.
 4. **Decision.**
    - Public and at the threshold or above: registered for the 3-hourly schedule under the API client `discovery`, and backfilled.
+   - **Iraqi commenters** (owner's D-055, `ig.discovery.audience`; production `share: 0.1`): a second way in, for an account outside Iraq that addresses Iraqis.
+     - **Who is checked:** only public candidates below the threshold with 10,000 followers or more (`min_followers`). Their vet reads 2–3 more pages. Smaller accounts are never read for this.
+     - **The window:** the newest top-level comments on the 2 newest posts that have comments (`posts`), 100 comments at most (`max_comments`). Pinned posts are skipped, and there are 3 comment reads at most.
+     - **Who counts:** each commenter counts once. The account's own comments don't count.
+     - **Who is Iraqi:** an account igs schedules, a registered candidate, or a commenter whose comment is in Iraqi dialect or names Iraq or an Iraqi place.
+     - **The decision:** with 30 or more distinct commenters (`min_commenters`) and an Iraqi share of 10% or more, the account is registered. With fewer than 30, there's no decision: it stays `below` and is vetted again if seen after `revet_after`.
+     - **Score and cap:** the share is kept with the signals as `iraqi_commenters` (0 to 1). It isn't part of the score, and the world-star cap doesn't apply to it.
+     - **What is kept:** the vet keeps who commented and whether each was Iraqi, but not the comments' text. The test needs `privacy.pii_mode: full`.
+     - **Metric:** `igs_discovery_audience_checks_total{result}`, where result is `in_scope`, `below_share`, `too_few` or `none`.
    - With a daily cap (`max_new_per_day`, below) that is used up for the day: `capped`. Capped candidates are registered on the next days, highest score first, before any new one.
    - Otherwise: `below`, `private` or `gone` (no such account). These are vetted again if seen again after `revet_after` (30 days).
    - Every vet is kept: the latest read on the candidate (shown as `read` in the API), and each one with its score, signals and decision in `ig.discovery_vets`. Erasure requests delete a person's rows.
@@ -256,6 +265,7 @@ Operations:
 - **Metrics:**
   - `igs_discovery_sightings_total{source}`;
   - `igs_discovery_vets_total{outcome}`;
+  - `igs_discovery_audience_checks_total{result}`: the Iraqi-commenter test's results (above);
   - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet;
   - `igs_discovery_held{reason}`, 1 while vets wait for regular collection (below);
   - `igs_exit_share_requests_total{class="discovery"}` and `igs_exit_share_wait_seconds_total{class="discovery"}`: vets' requests, and the time they waited for discovery's share of their exit (below).

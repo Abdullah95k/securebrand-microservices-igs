@@ -243,6 +243,25 @@ type IGDiscovery struct {
 	// the rest (D-027). 0 = no cap. Applies while ig.exit_rps paces the
 	// exits.
 	ExitShare float64 `koanf:"exit_share"`
+	// Audience is a second way in, for an account that addresses Iraqis
+	// without saying so itself (owner's D-055).
+	Audience IGDiscoveryAudience `koanf:"audience"`
+}
+
+// IGDiscoveryAudience: a public candidate below the threshold with
+// MinFollowers or more has its vet read the newest top-level comments on
+// up to Posts of its newest posts that have comments, MaxComments at
+// most (Posts+1 comment reads at most). It is registered when Share or
+// more of the MinCommenters or more distinct commenters are Iraqi: an
+// account igs schedules, a registered candidate, or a comment in Iraqi
+// dialect or naming Iraq. Share 0 turns it off; it needs
+// privacy.pii_mode full (commenters are named).
+type IGDiscoveryAudience struct {
+	Share         float64 `koanf:"share"`
+	MinCommenters int     `koanf:"min_commenters"`
+	MinFollowers  int64   `koanf:"min_followers"`
+	Posts         int     `koanf:"posts"`
+	MaxComments   int     `koanf:"max_comments"`
 }
 
 // IGPrivacy keeps igs's person keys apart from fbs's (ADR 0005 §1).
@@ -284,6 +303,11 @@ func (c *Config) validateIG() []error {
 		}
 		if d.ExitShare < 0 || d.ExitShare > 1 {
 			errs = append(errs, errors.New("ig.discovery.exit_share must be in [0, 1]"))
+		}
+		if a := g.Discovery.Audience; a.Share < 0 || a.Share > 1 {
+			errs = append(errs, errors.New("ig.discovery.audience.share must be in [0, 1]"))
+		} else if a.Share > 0 && (a.MinCommenters < 1 || a.Posts < 1 || a.MaxComments < 1) {
+			errs = append(errs, errors.New("ig.discovery.audience: min_commenters, posts and max_comments must be 1 or more"))
 		}
 	}
 	if g.ExitPageLoadsPerDay < 0 {

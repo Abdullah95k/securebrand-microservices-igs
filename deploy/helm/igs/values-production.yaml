@@ -93,6 +93,12 @@ config:
       # and identities without vetting faster.
       vet_in_flight: 20
       max_new_per_day: 0         # no cap in production (owner, 6 Nov 2026)
+      # An account outside Iraq is in scope when 10% or more of its
+      # commenters are Iraqi (owner's D-055). Checked only for candidates
+      # below the threshold with 10,000 followers or more: 2-3 more
+      # requests each, within discovery's exit share.
+      audience:
+        share: 0.1
     registry_sync:
       # Three real public accounts: the platform sets them in its own
       # (private) Argo CD application, as config.ig.registry_sync.

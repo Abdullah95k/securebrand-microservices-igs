@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -132,9 +134,13 @@ func (v *Vetter) rescore(ctx context.Context) error {
 		}
 		sig := Score(vet, x.s)
 		score := sig.Sum()
+		relevant, _, err := v.relevant(ctx, vet, sig, score)
+		if err != nil {
+			return err
+		}
 		sb, _ := json.Marshal(sig)
 		status := StatusBelow
-		if vet.Found && !vet.Private && score >= d.Threshold && vet.Followers >= d.MinFollowers {
+		if vet.Found && !vet.Private && relevant && vet.Followers >= d.MinFollowers {
 			ok, err := v.room(ctx)
 			if err != nil {
 				return err
@@ -156,6 +162,71 @@ func (v *Vetter) rescore(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// relevant reports whether a candidate is in scope: at the threshold, or,
+// public and below it, with an Iraqi audience in its comments (D-055,
+// ig.discovery.audience): share or more of min_commenters or more
+// distinct commenters are Iraqi. The share goes with the signals
+// (SignalIraqiCommenters) whenever commenters were read. The world-star
+// cap does not apply to this test.
+// The test's result ("" when it did not apply) is for
+// igs_discovery_audience_checks_total.
+func (v *Vetter) relevant(ctx context.Context, vet Vet, sig Signals, score float64) (bool, string, error) {
+	if score >= v.Cfg.IG.Discovery.Threshold {
+		return true, "", nil
+	}
+	a := v.Cfg.IG.Discovery.Audience
+	if a.Share <= 0 || !vet.Found || vet.Private || vet.Audience == nil || vet.Followers < a.MinFollowers {
+		return false, "", nil
+	}
+	if len(vet.Audience.Commenters) == 0 {
+		return false, "none", nil
+	}
+	var pks []int64
+	var refs, names []string
+	for _, c := range vet.Audience.Commenters {
+		if c.PK != 0 {
+			pks = append(pks, c.PK)
+		}
+		if c.Username != "" {
+			u := strings.ToLower(c.Username)
+			names = append(names, u)
+			refs = append(refs, "u:"+u)
+		}
+	}
+	knownPK, knownName := map[int64]bool{}, map[string]bool{}
+	rows, err := v.DB.Query(ctx, `SELECT coalesce(user_pk, 0), profile_ref FROM profile_schedule WHERE user_pk = ANY($1) OR profile_ref = ANY($2)
+		UNION ALL SELECT coalesce(user_pk, 0), 'u:' || username FROM discovery_candidates WHERE status = 'registered' AND username = ANY($3)`,
+		pks, refs, names)
+	if err != nil {
+		return false, "", err
+	}
+	for rows.Next() {
+		var pk int64
+		var ref string
+		if err := rows.Scan(&pk, &ref); err != nil {
+			rows.Close()
+			return false, "", err
+		}
+		if pk != 0 {
+			knownPK[pk] = true
+		}
+		knownName[strings.TrimPrefix(ref, "u:")] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return false, "", err
+	}
+	share, n := vet.Audience.IraqiShare(func(pk int64, u string) bool { return (pk != 0 && knownPK[pk]) || (u != "" && knownName[u]) })
+	sig[SignalIraqiCommenters] = math.Round(share*100) / 100
+	switch {
+	case n < a.MinCommenters:
+		return false, "too_few", nil
+	case share < a.Share:
+		return false, "below_share", nil
+	}
+	return true, "in_scope", nil
 }
 
 // decide scores the candidates whose vet came back and registers those at
@@ -223,13 +294,20 @@ func (v *Vetter) decide(ctx context.Context) error {
 		}
 		sig := Score(vet, x.s)
 		score := sig.Sum()
+		relevant, check, err := v.relevant(ctx, vet, sig, score)
+		if err != nil {
+			return err
+		}
+		if check != "" {
+			metrics.DiscoveryAudience.WithLabelValues(check).Inc()
+		}
 		status := StatusBelow
 		switch {
 		case !vet.Found:
 			status = StatusGone
 		case vet.Private:
 			status = StatusPrivate
-		case score >= d.Threshold && vet.Followers >= d.MinFollowers:
+		case relevant && vet.Followers >= d.MinFollowers:
 			ok, err := v.room(ctx)
 			if err != nil {
 				return err
@@ -262,7 +340,7 @@ func (v *Vetter) decide(ctx context.Context) error {
 			WHERE username = $1`, x.username, status, score, sb, pk, x.s.Sources); err != nil {
 			return err
 		}
-		if err := v.publish(ctx, x.username, pk, &vet, x.s, x.origins, status, score, score >= d.Threshold, x.seen); err != nil {
+		if err := v.publish(ctx, x.username, pk, &vet, x.s, x.origins, status, score, relevant, x.seen); err != nil {
 			return err
 		}
 		slog.Info("discovery: candidate decided", plog.Account(pk, "u:"+x.username), "status", status, "score", score)

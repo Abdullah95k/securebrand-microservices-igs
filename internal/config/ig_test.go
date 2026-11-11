@@ -35,6 +35,9 @@ func TestIGDefaults(t *testing.T) {
 		t.Fatalf("discovery: hold_when_behind %v, hold_resting_share %v, max_new_per_day %d, exit_share %v", d.HoldWhenBehind,
 			d.HoldRestingShare, d.MaxNewPerDay, d.ExitShare)
 	}
+	if a := g.Discovery.Audience; a.Share != 0 || a.MinCommenters != 30 || a.MinFollowers != 10000 || a.Posts != 2 || a.MaxComments != 100 {
+		t.Fatalf("discovery.audience %+v: want off, 30 commenters, 10000 followers, 2 posts, 100 comments", a)
+	}
 	if g.IdentityMaxRequestsMin != 500 || g.IdentityMaxRequestsMax != 750 || g.PageWallRest != 30*time.Minute {
 		t.Fatalf("identities: %d..%d rest %s", g.IdentityMaxRequestsMin, g.IdentityMaxRequestsMax, g.PageWallRest)
 	}
@@ -88,6 +91,11 @@ func TestIGValidate(t *testing.T) {
 		{"reels full pass", func(c *Config) { c.IG.Schedule.ReelsFullEvery = 0 }, "ig.schedule.reels_window"},
 		{"resting share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.HoldRestingShare = 1.5 }, "ig.discovery.hold_resting_share"},
 		{"exit share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.ExitShare = -0.1 }, "ig.discovery.exit_share"},
+		{"audience share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.Audience.Share = 1.5 }, "ig.discovery.audience.share"},
+		{"audience sample", func(c *Config) {
+			c.IG.Discovery.Enabled = true
+			c.IG.Discovery.Audience.Share, c.IG.Discovery.Audience.MinCommenters = 0.1, 0
+		}, "ig.discovery.audience: min_commenters"},
 		{"identities", func(c *Config) { c.IG.IdentityMaxRequestsMax = 10 }, "ig.identity_max_requests_min"},
 		{"video", func(c *Config) { c.IG.Limits.VideoPolicy = "4k" }, "ig.limits.video_policy"},
 		{"pii", func(c *Config) { c.IG.Privacy.PIIMode = "none" }, "ig.privacy.pii_mode"},
