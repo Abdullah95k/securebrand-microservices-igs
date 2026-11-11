@@ -69,9 +69,12 @@ spec:
       ports:
         - {protocol: TCP, port: 443}
     {{- end }}
-{{- if and $eg.proxies $eg.proxyComponents }}
+{{- $pc := $eg.proxyComponents | default list }}
+{{- if .Values.exploreProbe.enabled }}{{ $pc = append $pc "explore-probe" | uniq }}{{ end }}
+{{- if and $eg.proxies $pc }}
 ---
-# The proxy gateway, for the components that crawl through it.
+# The proxy gateway, for the components that crawl through it (and the
+# explore probe's Job while it is enabled).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -85,7 +88,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: {{- toYaml $eg.proxyComponents | nindent 10 }}
+        values: {{- toYaml $pc | nindent 10 }}
   policyTypes: [Egress]
   egress:
     {{- range $eg.proxies }}

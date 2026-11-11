@@ -68,12 +68,12 @@ def mounts_proxies(spec, secret):
                for v in spec.get("volumes", []))
 
 
-def check_production(helm):
+def check_production(helm, *extra):
     errs = []
     values = os.path.join(CHART, "values-production.yaml")
     with open(values) as f:
         secret = yaml.safe_load(f)["secretFiles"]["existingSecret"]
-    docs = render(helm, "igs", "-f", values)
+    docs = render(helm, "igs", "-f", values, *extra)
     pols = egress_policies(docs)
     every, proxies = pols.get("igs-egress"), pols.get("igs-egress-proxies")
     if not every or not proxies:
@@ -97,7 +97,7 @@ def check_production(helm):
         labels = (tpl.get("metadata") or {}).get("labels") or {}
         sel_every = selects(every["spec"]["podSelector"], labels)
         sel_proxies = selects(proxies["spec"]["podSelector"], labels)
-        if d["kind"] == "Job":
+        if d["kind"] == "Job" and not mounts_proxies(tpl["spec"], secret):
             if sel_every or sel_proxies:
                 errs.append(f"production hook {name}: restricted by an egress policy")
             continue
@@ -125,13 +125,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--helm", default="helm")
     a = ap.parse_args()
-    errs = check_production(a.helm) + check_none(a.helm)
+    # The explore probe's Job (D-055) mounts the proxies: while enabled it
+    # must reach the gateway like the crawlers.
+    probe = check_production(a.helm, "--set", "exploreProbe.enabled=true")
+    if not any(d["kind"] == "Job" and d["metadata"]["name"].startswith("igs-explore-probe")
+               for d in render(a.helm, "igs", "-f", os.path.join(CHART, "values-production.yaml"), "--set", "exploreProbe.enabled=true")):
+        probe.append("production: exploreProbe.enabled renders no explore-probe Job")
+    errs = check_production(a.helm) + [f"with the explore probe: {e}" for e in probe] + check_none(a.helm)
     for e in errs:
         print(e, file=sys.stderr)
     if errs:
         sys.exit(1)
     print("chart egress: production's pods reach DNS, the VPC, the managed ports and HTTPS, and only the "
-          "components that mount the proxies reach the gateway; hooks, the defaults and the soak are unrestricted")
+          "components that mount the proxies (the explore probe's Job too) reach the gateway; hooks, the defaults and the soak are unrestricted")
 
 
 if __name__ == "__main__":

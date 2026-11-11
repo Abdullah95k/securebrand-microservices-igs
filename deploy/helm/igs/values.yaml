@@ -452,6 +452,7 @@ networkPolicy:
     https: []
     # The proxy gateway: [{cidr, ports: [{port, endPort}]}], for the
     # components in proxyComponents only (the crawlers' Chromium goes
-    # through it too).
+    # through it too), and the explore probe's Job while exploreProbe is
+    # enabled.
     proxies: []
     proxyComponents: [crawler-profile, crawler-post, crawler-retry, registry-sync]
