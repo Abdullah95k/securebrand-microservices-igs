@@ -68,6 +68,12 @@ func (e Endpoint) Exit() string {
 	return e.Tier + "#h" + hex.EncodeToString(h[:4])
 }
 
+// RestReasons are the reasons igs_exit_rests_total counts. A static
+// exit's series start at 0 when its pool is built: a counter series that
+// appears at 1 is invisible to increase(), which would miss every exit's
+// first rest after a restart.
+var RestReasons = []string{detect.RateLimited.String(), detect.Checkpoint.String(), "page_wall", "page_load_limit", "probe_failed"}
+
 // ExitLabel is an exit's value for metric labels: its name for a static
 // exit (isp#3), and one value per tier for a gateway's sessions (res#s),
 // whose ids would make a series each.
@@ -225,6 +231,12 @@ func New(cfg config.Proxy) (*Pool, error) {
 			sl := &staticList{name: t.Name, endpoints: t.Endpoints, country: t.Country, buckets: staticBuckets(t.Name, t.Endpoints)}
 			p.tiers[t.Name] = sl
 			metrics.Exits.WithLabelValues(t.Name).Set(float64(len(t.Endpoints)))
+			for i, e := range t.Endpoints {
+				exit := ExitLabel(Endpoint{Tier: t.Name, URL: e, Index: i + 1}.Exit())
+				for _, r := range RestReasons {
+					metrics.ExitRests.WithLabelValues(t.Name, r, exit).Add(0)
+				}
+			}
 		case "gateway":
 			if t.Gateway == "" {
 				return nil, fmt.Errorf("proxy: tier %s has no gateway", t.Name)
