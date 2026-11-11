@@ -452,6 +452,9 @@ ig:
     include_comments: true
     include_media: false         # D5: metadata always, files once the analysis service exists
     include_reels: true          # the reels tab: each reel's views
+    # Off also stops highlights for tasks already queued (their jobs copied
+    # the value when they were created). A profile read without them keeps
+    # an empty highlights hash, so switching back on reads them next visit.
     include_highlights: true
     video_policy: sd
   schedule:
