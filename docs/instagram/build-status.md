@@ -411,6 +411,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
        - It runs logged out, on one exit, with 16 page loads (20 at most) at one every 40 s. It reads pages only, with no GraphQL queries.
        - It reports counts only: pages loaded, login walls and redirects, and distinct posts and accounts seen. Nothing is stored or published.
        - A rate limit or checkpoint ends it.
+       - **The first run** (platform #121, on `eb760a3`): all 16 pages failed on transport. Instagram was never reached.
+         - The cause: the egress policy lets only the crawlers and registry-sync reach the proxy gateway, and the probe's Job wasn't among them.
+         - The fix: the Job is added to that policy while `exploreProbe.enabled` is set. `scripts/chart-egress.py` now checks this.
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 
