@@ -49,7 +49,7 @@ The scheduler's pod has the proxy tiers when the `proxies` Secret exists, so its
 | Identity churn | `igs_identity_retired_total{tier,reason}` | mostly `max_requests` (identities retire after 500 to 750 requests by design) |
 | Identity pool | `igs_identities{tier,state}`; `igs_identity_shortfall_total{tier,reason}` | `waiting` 0; shortfalls flat ([Identity pool](#identity-pool)) |
 | Page loads per exit | `increase(igs_exit_page_loads_total[1d])` by `exit` | even across exits; under `ig.exit_page_loads_per_day` when set |
-| Exits | `igs_exits_resting{tier}` against `igs_exits{tier}`; `igs_exit_rests_total{tier,reason}`; `igs_identity_hops_total{stage,class}` | few exits resting; rests and failovers flat |
+| Exits | `igs_exits_resting{tier}` against `igs_exits{tier}`; `igs_exit_rests_total{tier,reason,exit}`; `igs_identity_hops_total{stage,class}` | few exits resting; rests and failovers flat |
 | Parked tasks | `igs_tasks_total{outcome="parked"}` | 0: a task parks only while every exit rests |
 | Daily budget | `igs_budget_projected{kind}` against `igs_budget_limit{kind}`; `igs_budget_backfill_paused` | under the limit; 0 |
 | Discovery | `igs_discovery_vets_total{outcome}`, `igs_discovery_candidates{status}` | vets flowing; `failed` rare |
@@ -338,7 +338,8 @@ What to check:
 5. If Instagram answers with a code or page the rules do not know, responses show as `soft_error`. Add the marker under `ig.detect` (appended to the built-in rules) and roll the crawlers.
 6. **Most exits resting with a block rate of 0** is normal after a burst of rests. A resting exit sends nothing, so the block rate only covers the exits still in use.
    - After a rest, one probe goes out. A blocked probe rests the exit again for twice as long, at most `ig.proxy.breaker.max_cooldown` (30 min).
-   - `igs_exit_rests_total` counts first rests only. A failed probe shows in the logs instead: `proxy: exit` with `from=probing to=resting`, and `to="in use"` when the exit is back.
+   - `igs_exit_rests_total` counts each rest by `reason` and `exit` (`isp#3`; a gateway's sessions share `res#s`). A failed probe counts as `reason="probe_failed"`. The logs show the same: `proxy: exit` with `from=probing to=resting`, and `to="in use"` when the exit is back.
+   - To see how many exits page walls fell on in the last hour: `count(sum by (exit) (increase(igs_exit_rests_total{reason="page_wall"}[1h])) > 0)`.
    - The true count is `igsctl health`'s "proxy exits resting", which reads the shared rests in Valkey.
 
 To pin the ceiling by hand during an incident, set the key the crawlers read. They pick it up within 5 s; the key starts with `igs:` and then the topic prefix:

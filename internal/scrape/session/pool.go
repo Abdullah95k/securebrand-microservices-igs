@@ -287,7 +287,7 @@ func (p *Pool) RestExit(id *Identity, d time.Duration, reason string) {
 		return
 	}
 	p.proxies.Rest(id.Endpoint, d)
-	metrics.ExitRests.WithLabelValues(id.Endpoint.Tier, reason).Inc()
+	metrics.ExitRests.WithLabelValues(id.Endpoint.Tier, reason, proxy.ExitLabel(id.Endpoint.Exit())).Inc()
 	slog.Info("session: exit rests", "exit", id.Endpoint.Exit(), "for", d, "reason", reason)
 }
 

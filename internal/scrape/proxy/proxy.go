@@ -68,6 +68,16 @@ func (e Endpoint) Exit() string {
 	return e.Tier + "#h" + hex.EncodeToString(h[:4])
 }
 
+// ExitLabel is an exit's value for metric labels: its name for a static
+// exit (isp#3), and one value per tier for a gateway's sessions (res#s),
+// whose ids would make a series each.
+func ExitLabel(exit string) string {
+	if t, rest, ok := strings.Cut(exit, "#"); ok && strings.HasPrefix(rest, "s") {
+		return t + "#s"
+	}
+	return exit
+}
+
 // ExitTier is the tier of an exit name.
 func ExitTier(exit string) string {
 	t, _, _ := strings.Cut(exit, "#")
@@ -346,6 +356,7 @@ func (p *Pool) Observe(ep Endpoint, c detect.Class) {
 		if before == breaker.HalfOpen && p.rests.State(x) == breaker.Open {
 			// A failed probe rests the exit again, for longer: for every
 			// process.
+			metrics.ExitRests.WithLabelValues(ExitTier(x), "probe_failed", ExitLabel(x)).Inc()
 			p.publish(x)
 		}
 	}

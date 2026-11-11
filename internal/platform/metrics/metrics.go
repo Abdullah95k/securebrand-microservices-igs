@@ -79,7 +79,7 @@ var (
 	IdentityHops    = counterVec("identity_hops_total", "Blocked identities a task replaced with one on another exit and carried on, by stage and block class.", "stage", "class")
 	Exits           = gaugeVec("exits", "Proxy exits configured, by static tier.", "tier")
 	ExitsResting    = gaugeVec("exits_resting", "Proxy exits resting after a rate limit, checkpoint or login page, by tier.", "tier")
-	ExitRests       = counterVec("exit_rests_total", "Times an exit was rested, by tier and reason (rate_limited, checkpoint, page_wall).", "tier", "reason")
+	ExitRests       = counterVec("exit_rests_total", "Times an exit was rested, by tier, reason (rate_limited, checkpoint, page_wall, page_load_limit; probe_failed: a probe after a rest was blocked, so the exit rests again) and exit (tier#n).", "tier", "reason", "exit")
 	Bootstraps      = counterVec("bootstrap_total", "Identity bootstraps.", "method", "outcome")
 
 	// Tasks.

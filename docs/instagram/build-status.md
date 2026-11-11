@@ -362,5 +362,11 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - The cause: a pod's gauge dropped only when that pod next used the exit, and those pods are mostly idle.
     - The fix: every rest sync (2 s) now moves ended rests out of the gauge, so `IgsIgExitsMostlyResting` reads true counts.
     - The 7 of 10 was real: 9 rests in the hour, mostly 30-minute page walls, and resting exits send nothing, so the block rate stays at 0.
+  - **#123 merged (`3de3ba9`):** the resting-exits gauge fix. After it synced, the per-pod gauge read 7 on every pod, the same as `igsctl health`.
+- **2026-11-11 (pilot paused on page walls):**
+  - At 00:07Z there had been 8.17 page-wall rests in the hour, so the master paused, using the rule I had suggested: page walls on 8 or more exits within an hour.
+  - **The pilot pause covered only the 51 listed profiles.** 234 profiles were on the schedule; the other 183 are most likely discovery's auto-adds.
+  - **A profile pause can't stop the traffic:** tasks already queued still go out. I told the master that the stop is crawler-profile, crawler-post, crawler-retry and registry-sync at 0 replicas, and that resuming is the owner's call, step by step, not before 05:00Z.
+  - **The rule couldn't be checked per exit:** `igs_exit_rests_total` had no exit label. It now has one (exit names like `isp#3`, no addresses), and failed probes count as `probe_failed`.
   - **Still open:** the read-only check for highlight items as story posts.
 

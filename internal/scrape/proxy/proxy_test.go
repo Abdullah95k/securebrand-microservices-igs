@@ -313,3 +313,48 @@ func TestEndedRestLeavesTheGauge(t *testing.T) {
 		t.Fatalf("after its rest ended the exit still counts as resting: %v, want %v", got, before)
 	}
 }
+
+func counterValue(c prometheus.Counter) float64 {
+	var m dto.Metric
+	if err := c.Write(&m); err != nil {
+		panic(err)
+	}
+	return m.GetCounter().GetValue()
+}
+
+// A probe blocked after a rest rests the exit again and counts as a rest
+// of its own (probe_failed), labelled with the exit's name; a gateway's
+// sessions share one label value per tier.
+func TestFailedProbeCountsAsARest(t *testing.T) {
+	p, err := New(config.Proxy{Tiers: []config.ProxyTier{{Name: "probe", Kind: "static_list",
+		Endpoints: []string{"http://probe.example:10001"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p.rests.SetClock(func() time.Time { return clk })
+	a, _ := p.Next("probe")
+	c := metrics.ExitRests.WithLabelValues("probe", "probe_failed", a.Exit())
+	before := counterValue(c)
+	p.Rest(a, 10*time.Minute)
+	clk = clk.Add(10 * time.Minute)
+	if ep, err := p.Next("probe"); err != nil || ep.Exit() != a.Exit() {
+		t.Fatalf("the probe: %v %v", ep, err)
+	}
+	p.Observe(a, detect.RateLimited)
+	if got := counterValue(c); got != before+1 {
+		t.Fatalf("probe_failed %v, want %v", got, before+1)
+	}
+	p.Observe(a, detect.RateLimited) // resting again: not a probe
+	if got := counterValue(c); got != before+1 {
+		t.Fatalf("a request while resting counted: %v", got)
+	}
+	if a.Exit() != "probe#1" {
+		t.Fatalf("exit name %q", a.Exit())
+	}
+	for in, want := range map[string]string{"isp#3": "isp#3", "res#sab12": "res#s", "isp#h0a1b2c3d": "isp#h0a1b2c3d", "": ""} {
+		if got := ExitLabel(in); got != want {
+			t.Errorf("ExitLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
