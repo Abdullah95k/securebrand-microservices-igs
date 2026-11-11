@@ -131,7 +131,7 @@ The build session writes `docs/master/igs-pilot-report.md` from what the master 
 | Measure | How |
 |---|---|
 | Posts and comments per hour | `sum by (entity) (increase(igs_persist_rows_total[1h]))` |
-| Blocked requests and resting exits over time | `igs:ig_block_ratio:rate5m`, `igs_exits_resting`, `sum by (reason) (increase(igs_exit_rests_total[1h]))` |
+| Blocked requests and resting exits over time | `igs:ig_block_ratio:rate5m`, `igs_exits_resting`, `sum by (reason) (increase(igs_exit_rests_total[1h]))`, and by `exit` for how many exits each reason fell on |
 | Page loads per exit per day | `sum by (exit) (increase(igs_exit_page_loads_total[1d]))` |
 | Proxy data per account per day | `sum(increase(igs_proxy_bytes_total[1d]))` divided by the profiles on the schedule (`igsctl health`) |
 | Peak memory and CPU per pod | `max_over_time(container_memory_working_set_bytes{namespace="igs"}[48h])`, `rate(container_cpu_usage_seconds_total{namespace="igs"}[5m])` |
