@@ -339,7 +339,7 @@ What to check:
 6. **Most exits resting with a block rate of 0** is normal after a burst of rests. A resting exit sends nothing, so the block rate only covers the exits still in use.
    - After a rest, one probe goes out. A blocked probe rests the exit again for twice as long, at most `ig.proxy.breaker.max_cooldown` (30 min).
    - `igs_exit_rests_total` counts each rest by `reason` and `exit` (`isp#3`; a gateway's sessions share `res#s`). A failed probe counts as `reason="probe_failed"`. The logs show the same: `proxy: exit` with `from=probing to=resting`, and `to="in use"` when the exit is back.
-   - To see how many exits page walls fell on in the last hour: `count(sum by (exit) (increase(igs_exit_rests_total{reason="page_wall"}[1h])) > 0)`.
+   - To see how many exits page walls fell on in the last hour: `count(sum by (exit) (increase(igs_exit_rests_total{reason="page_wall"}[1h])) > 0)`. Every static exit's series starts at 0 when a crawler starts, so `increase()` counts the first rest after a restart too.
    - The true count is `igsctl health`'s "proxy exits resting", which reads the shared rests in Valkey.
 
 To pin the ceiling by hand during an incident, set the key the crawlers read. They pick it up within 5 s; the key starts with `igs:` and then the topic prefix:

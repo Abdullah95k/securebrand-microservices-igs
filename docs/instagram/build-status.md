@@ -382,5 +382,8 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - The weekly `go-vulns` check found a new vulnerability in Go's own HTTP server: a crafted HTTP/1 request can crash it (a race in `MaxBytesReader`'s header handling).
     - igs's API and every component's ops server run that code.
     - `go.mod` moves from 1.27.3 to 1.27.4, which fixes it. The images build with `golang:1.27-alpine`, which takes the go.mod version.
+  - **Rest counts after a restart:** at 05:40Z, crawler-profile showed 8 exits resting, but `increase()` found only 5 rests.
+    - The cause: since #124, each exit's series appeared at its first rest already at 1, and `increase()` doesn't count that first step. So every exit's first rest after a restart was missed.
+    - The fix: every static exit's series now starts at 0 when the pool is built.
   - **Still open:** the read-only check for highlight items as story posts.
 

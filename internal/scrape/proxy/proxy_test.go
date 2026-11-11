@@ -358,3 +358,45 @@ func TestFailedProbeCountsAsARest(t *testing.T) {
 		}
 	}
 }
+
+// A static exit's rest series exist at 0 from the start, so increase()
+// counts the first rest after a restart (pilot, 11 Nov 2026: a fresh pod
+// showed 5 rests for 8 resting exits).
+func TestExitRestSeriesStartAtZero(t *testing.T) {
+	if _, err := New(config.Proxy{Tiers: []config.ProxyTier{{Name: "zero", Kind: "static_list",
+		Endpoints: []string{"http://zero.example:10001", "http://zero.example:10002"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	mfs, err := metrics.Registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, mf := range mfs {
+		if mf.GetName() != "igs_exit_rests_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			l := map[string]string{}
+			for _, lp := range m.GetLabel() {
+				l[lp.GetName()] = lp.GetValue()
+			}
+			if l["tier"] == "zero" {
+				if v := m.GetCounter().GetValue(); v != 0 {
+					t.Errorf("%v starts at %v", l, v)
+				}
+				seen[l["exit"]+"/"+l["reason"]] = true
+			}
+		}
+	}
+	for _, exit := range []string{"zero#1", "zero#2"} {
+		for _, r := range RestReasons {
+			if !seen[exit+"/"+r] {
+				t.Errorf("no series for %s %s", exit, r)
+			}
+		}
+	}
+	if len(seen) != 2*len(RestReasons) {
+		t.Errorf("%d series, want %d", len(seen), 2*len(RestReasons))
+	}
+}
