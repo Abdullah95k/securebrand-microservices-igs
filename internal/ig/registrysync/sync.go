@@ -123,6 +123,8 @@ type Report struct {
 	Failing []string `json:"failing,omitempty"`
 	// Unchecked are queries no canary page gave a verdict on.
 	Unchecked []string `json:"unchecked,omitempty"`
+	// Skipped are queries of kinds the crawlers don't read (Sync.Skip).
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // Checked reports whether the run gave every query a verdict. Failing
@@ -150,6 +152,14 @@ type Sync struct {
 	// and returns the GraphQL requests the page made; it is used when the
 	// bundles do not declare some registry query's friendly name.
 	Render func(ctx context.Context, id *session.Identity, rawURL string) ([]browser.Exchange, error)
+
+	// Skip names the query kinds (parsers) the crawlers don't read, by
+	// ig.limits.include_* (highlights, reels, comments): they are neither
+	// probed nor counted unchecked, and the report lists them as skipped.
+	// A probe of a query Instagram refuses rests its exit like any other
+	// (pilot, 11 Nov 2026: with highlights off, registry-sync's one
+	// highlights probe was the only rate limit left).
+	Skip map[string]bool
 
 	scanner *docids.Scanner
 	now     func() time.Time
@@ -563,7 +573,7 @@ func (s *Sync) check(ctx context.Context, pages []*canary, entries []*entry) map
 	byKind := map[string][]string{}
 	for name, list := range groups {
 		t := template(list)
-		if t == nil {
+		if t == nil || s.Skip[t.Parser] {
 			continue
 		}
 		byKind[t.Parser] = append(byKind[t.Parser], name)
@@ -913,6 +923,10 @@ func (s *Sync) decide(ctx context.Context, entries []*entry, verdicts map[string
 	}
 	for _, name := range names {
 		list := groups[name]
+		if t := template(list); t != nil && s.Skip[t.Parser] {
+			rep.Skipped = append(rep.Skipped, name)
+			continue
+		}
 		var active *entry
 		for _, e := range list {
 			if e.Status == registry.StatusActive {

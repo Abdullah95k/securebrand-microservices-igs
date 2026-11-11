@@ -24,6 +24,10 @@ Every `ig.registry_sync.interval` (30 minutes):
      fill what the store can't, for example on a new install with an empty
      store. They are never repeated.
 
+   A query kind the crawlers don't read (`ig.limits.include_highlights`,
+   `include_reels` or `include_comments` off) is not probed. The report
+   lists it under `skipped`, and the run can still count as a success.
+
    A run loads `store_canaries` or the length of `canary_pages`, whichever
    is larger, so choosing from the store adds no page loads. igs checks the
    highlights query only on a canary that has highlights. Without one,

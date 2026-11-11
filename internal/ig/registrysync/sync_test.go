@@ -167,3 +167,29 @@ func TestRenderSuppliesDocIDs(t *testing.T) {
 		t.Fatalf("promoted %v, status %s, failing %v", rep.Promoted, rep.Status, rep.Failing)
 	}
 }
+
+// A kind the crawlers don't read (ig.limits.include_highlights off) is
+// neither probed nor unchecked: no highlights request goes out, the
+// report lists the query as skipped, and the run counts as checked.
+func TestSkippedKindsAreNotProbed(t *testing.T) {
+	s, env := setup(t, true)
+	s.Skip = map[string]bool{"highlights": true}
+	rep, err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("sync: %v (%+v)", err, rep)
+	}
+	if n := env.Fake.QueryCount(fakeig.OpHighlights); n != 0 {
+		t.Errorf("%d highlights requests with highlights skipped", n)
+	}
+	for _, c := range rep.Checks {
+		if c.Query == "highlights" {
+			t.Errorf("highlights checked: %+v", c)
+		}
+	}
+	if len(rep.Skipped) != 1 || rep.Skipped[0] != "highlights" || len(rep.Unchecked) != 0 || len(rep.Failing) != 0 {
+		t.Fatalf("skipped %v, unchecked %v, failing %v", rep.Skipped, rep.Unchecked, rep.Failing)
+	}
+	if !rep.Checked() || rep.Status != StatusOK {
+		t.Fatalf("a run with a skipped kind counts as checked: status %s", rep.Status)
+	}
+}
