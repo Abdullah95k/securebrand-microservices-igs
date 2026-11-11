@@ -36,6 +36,10 @@ const (
 	// StatusCapped: at the threshold, waiting for room under
 	// ig.discovery.max_new_per_day.
 	StatusCapped = "capped"
+	// StatusSmall: in scope but under ig.discovery.min_followers, kept to
+	// be vetted again (follower_rechecks); StatusRecheck: due for that.
+	StatusSmall   = "small"
+	StatusRecheck = "recheck"
 )
 
 // maxVetAttempts: a candidate whose vet job ended three times without a
@@ -59,6 +63,9 @@ type Vetter struct {
 	Candidates CandidatePublisher
 	// held is the last hold reason, for logging its changes.
 	held string
+	// reclassified: the candidates decided below only for the follower
+	// floor were moved to small (once a process).
+	reclassified bool
 }
 
 // Tick runs one round.
@@ -69,10 +76,13 @@ func (v *Vetter) Tick(ctx context.Context) error {
 	d := v.Cfg.IG.Discovery
 	if d.RevetAfter > 0 {
 		if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = 'new'
-			WHERE status IN ('below','private','gone') AND decided_at < now() - $1::int * interval '1 second'
-				AND last_seen_at > decided_at`, int(d.RevetAfter.Seconds())); err != nil {
+			WHERE (status IN ('below','private','gone') OR (status = 'small' AND $2)) AND decided_at < now() - $1::int * interval '1 second'
+				AND last_seen_at > decided_at`, int(d.RevetAfter.Seconds()), len(d.FollowerRechecks) == 0); err != nil {
 			return fmt.Errorf("discovery: revet: %w", err)
 		}
+	}
+	if err := v.dueRechecks(ctx); err != nil {
+		return fmt.Errorf("discovery: rechecks: %w", err)
 	}
 	if err := v.rescore(ctx); err != nil {
 		return fmt.Errorf("discovery: rescore: %w", err)
@@ -140,6 +150,9 @@ func (v *Vetter) rescore(ctx context.Context) error {
 		}
 		sb, _ := json.Marshal(sig)
 		status := StatusBelow
+		if vet.Found && !vet.Private && relevant && vet.Followers < d.MinFollowers {
+			status = StatusSmall
+		}
 		if vet.Found && !vet.Private && relevant && vet.Followers >= d.MinFollowers {
 			ok, err := v.room(ctx)
 			if err != nil {
@@ -162,6 +175,48 @@ func (v *Vetter) rescore(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// recheckSlots is how many vets re-vets of small candidates may hold at
+// once: share of vetInFlight, at least one when share > 0.
+func recheckSlots(vetInFlight int, share float64) int {
+	if share <= 0 || vetInFlight <= 0 {
+		return 0
+	}
+	return max(1, int(math.Floor(float64(vetInFlight)*share)))
+}
+
+// dueRechecks queues for a re-vet the small candidates whose wait is over
+// (ig.discovery.follower_rechecks): the n-th wait after their n-th small
+// decision, the last repeating, or the first once they are seen again.
+// Once a process, it first moves to small the candidates decided below
+// only for the follower floor (the floor went live before this status).
+func (v *Vetter) dueRechecks(ctx context.Context) error {
+	d := v.Cfg.IG.Discovery
+	if !v.reclassified {
+		if d.MinFollowers > 0 {
+			if _, err := v.DB.Exec(ctx, `UPDATE discovery_candidates SET status = 'small'
+				WHERE status = 'below' AND score >= $1 AND vet IS NOT NULL AND coalesce((vet->>'found')::boolean, false)
+					AND NOT coalesce((vet->>'private')::boolean, false) AND coalesce((vet->>'followers')::bigint, 0) < $2`,
+				d.Threshold, d.MinFollowers); err != nil {
+				return err
+			}
+		}
+		v.reclassified = true
+	}
+	if len(d.FollowerRechecks) == 0 {
+		return nil
+	}
+	waits := make([]int, len(d.FollowerRechecks))
+	for i, w := range d.FollowerRechecks {
+		waits[i] = int(w.Seconds())
+	}
+	_, err := v.DB.Exec(ctx, `UPDATE discovery_candidates c SET status = 'recheck'
+		WHERE c.status = 'small' AND c.decided_at < now() - $1::int * interval '1 second'
+			AND (c.last_seen_at > c.decided_at OR c.decided_at < now() - ($2::int[])[least(greatest(
+				(SELECT count(*) FROM discovery_vets x WHERE x.username = c.username AND x.status = 'small'), 1), cardinality($2::int[]))::int]
+				* interval '1 second')`, waits[0], waits)
+	return err
 }
 
 // relevant reports whether a candidate is in scope: at the threshold, or,
@@ -307,7 +362,9 @@ func (v *Vetter) decide(ctx context.Context) error {
 			status = StatusGone
 		case vet.Private:
 			status = StatusPrivate
-		case relevant && vet.Followers >= d.MinFollowers:
+		case relevant && vet.Followers < d.MinFollowers:
+			status = StatusSmall
+		case relevant:
 			ok, err := v.room(ctx)
 			if err != nil {
 				return err
@@ -361,21 +418,45 @@ func (v *Vetter) start(ctx context.Context) error {
 	if free <= 0 {
 		return nil
 	}
-	rows, err := v.DB.Query(ctx, `SELECT username, coalesce(user_pk, 0) FROM discovery_candidates
-		WHERE status = 'new' AND priority >= $1 ORDER BY priority DESC LIMIT $2`, d.MinPriority, free)
-	if err != nil {
-		return err
-	}
 	type cand struct {
 		username string
 		pk       int64
+		recheck  bool
 	}
-	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (cand, error) {
-		var c cand
-		return c, r.Scan(&c.username, &c.pk)
-	})
-	if err != nil {
-		return err
+	pick := func(sql string, args ...any) ([]cand, error) {
+		rows, err := v.DB.Query(ctx, sql, args...)
+		if err != nil {
+			return nil, err
+		}
+		return pgx.CollectRows(rows, func(r pgx.CollectableRow) (cand, error) {
+			var c cand
+			return c, r.Scan(&c.username, &c.pk, &c.recheck)
+		})
+	}
+	// Re-vets of small candidates first, within their share of the slots
+	// (those already running count against it), oldest decision first.
+	var list []cand
+	if slots := recheckSlots(d.VetInFlight, d.RecheckShare); slots > 0 {
+		var running int
+		if err := v.DB.QueryRow(ctx, `SELECT count(*) FROM discovery_candidates c WHERE c.status = 'vetting'
+				AND EXISTS (SELECT 1 FROM discovery_vets x WHERE x.username = c.username AND x.status = 'small')`).Scan(&running); err != nil {
+			return err
+		}
+		if n := min(free, slots-running); n > 0 {
+			var err error
+			if list, err = pick(`SELECT username, coalesce(user_pk, 0), true FROM discovery_candidates
+				WHERE status = 'recheck' ORDER BY decided_at LIMIT $1`, n); err != nil {
+				return err
+			}
+		}
+	}
+	if n := free - len(list); n > 0 {
+		news, err := pick(`SELECT username, coalesce(user_pk, 0), false FROM discovery_candidates
+			WHERE status = 'new' AND priority >= $1 ORDER BY priority DESC LIMIT $2`, d.MinPriority, n)
+		if err != nil {
+			return err
+		}
+		list = append(list, news...)
 	}
 	lim, err := dispatch.Limits(v.Cfg, dispatch.CrawlOptions{})
 	if err != nil {
@@ -406,6 +487,9 @@ func (v *Vetter) start(ctx context.Context) error {
 		if err != nil {
 			slog.Warn("discovery: vet not started", plog.Account(c.pk, "u:"+c.username), "err", err)
 			continue
+		}
+		if c.recheck {
+			metrics.DiscoveryRechecks.Inc()
 		}
 		// The previous read is in discovery_vets; the candidate's vet column
 		// clears so the new read can be told apart.
@@ -535,8 +619,8 @@ func (v *Vetter) gauges(ctx context.Context) error {
 		counts[s] = float64(n)
 	}
 	rows.Close()
-	for _, s := range []string{StatusNew, StatusVetting, StatusRegistered, StatusCapped, StatusBelow, StatusPrivate, StatusGone, StatusFailed,
-		StatusRejected} {
+	for _, s := range []string{StatusNew, StatusVetting, StatusRegistered, StatusCapped, StatusBelow, StatusSmall, StatusRecheck, StatusPrivate,
+		StatusGone, StatusFailed, StatusRejected} {
 		metrics.DiscoveryQueue.WithLabelValues(s).Set(counts[s])
 	}
 	return rows.Err()

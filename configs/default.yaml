@@ -523,6 +523,13 @@ ig:
     interval: 30s
     revet_after: 720h
     min_followers: 0
+    # A candidate in scope but under min_followers is kept as "small" and
+    # vetted again after each wait in turn (the last repeats), or after the
+    # first wait when seen again, so an account that grows past the floor
+    # is found (owner, 11 Nov 2026). Those re-vets use at most
+    # recheck_share of vet_in_flight (at least one slot).
+    follower_rechecks: [168h, 336h, 720h]
+    recheck_share: 0.1
     flush_every: 10s
     # Profiles registered per UTC day (03:00 Iraq time); 0 = no cap. Over
     # it, candidates wait as "capped", registered on the next days. No cap

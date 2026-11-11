@@ -35,6 +35,10 @@ func TestIGDefaults(t *testing.T) {
 		t.Fatalf("discovery: hold_when_behind %v, hold_resting_share %v, max_new_per_day %d, exit_share %v", d.HoldWhenBehind,
 			d.HoldRestingShare, d.MaxNewPerDay, d.ExitShare)
 	}
+	if d := g.Discovery; len(d.FollowerRechecks) != 3 || d.FollowerRechecks[0] != 168*time.Hour || d.FollowerRechecks[2] != 720*time.Hour ||
+		d.RecheckShare != 0.1 {
+		t.Fatalf("discovery: follower_rechecks %v, recheck_share %v", d.FollowerRechecks, d.RecheckShare)
+	}
 	if a := g.Discovery.Audience; a.Share != 0 || a.MinCommenters != 30 || a.MinFollowers != 10000 || a.Posts != 2 || a.MaxComments != 100 {
 		t.Fatalf("discovery.audience %+v: want off, 30 commenters, 10000 followers, 2 posts, 100 comments", a)
 	}
@@ -91,6 +95,9 @@ func TestIGValidate(t *testing.T) {
 		{"reels full pass", func(c *Config) { c.IG.Schedule.ReelsFullEvery = 0 }, "ig.schedule.reels_window"},
 		{"resting share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.HoldRestingShare = 1.5 }, "ig.discovery.hold_resting_share"},
 		{"exit share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.ExitShare = -0.1 }, "ig.discovery.exit_share"},
+		{"recheck share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.RecheckShare = 2 }, "ig.discovery.recheck_share"},
+		{"recheck wait", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.FollowerRechecks = []time.Duration{0} },
+			"ig.discovery.follower_rechecks"},
 		{"audience share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.Audience.Share = 1.5 }, "ig.discovery.audience.share"},
 		{"audience sample", func(c *Config) {
 			c.IG.Discovery.Enabled = true

@@ -236,6 +236,13 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
      - **What is kept:** the vet keeps who commented and whether each was Iraqi, but not the comments' text. The test needs `privacy.pii_mode: full`.
      - **Metric:** `igs_discovery_audience_checks_total{result}`, where result is `in_scope`, `below_share`, `too_few` or `none`.
    - With a daily cap (`max_new_per_day`, below) that is used up for the day: `capped`. Capped candidates are registered on the next days, highest score first, before any new one.
+   - **In scope but under the follower floor** (`min_followers`, 10 in production): `small`, not dropped (owner, 11 Nov 2026: an account found small must be found again once it grows past 10).
+     - It is vetted again after 7 days, then 14, then every 30 days (`follower_rechecks`). If it is seen again on any route, it is vetted again 7 days after its last decision.
+     - While due, its status is `recheck`.
+     - Those re-vets use at most 10% of `vet_in_flight` (`recheck_share`, at least one slot), so new candidates keep the rest.
+     - Once past the floor, the re-vet registers it.
+     - It is published with the outcome `DORMANT` and reason `few_followers`.
+     - Candidates decided `below` only for the floor before this status existed move to `small` when the scheduler starts.
    - Otherwise: `below`, `private` or `gone` (no such account). These are vetted again if seen again after `revet_after` (30 days).
    - Every vet is kept: the latest read on the candidate (shown as `read` in the API), and each one with its score, signals and decision in `ig.discovery_vets`. Erasure requests delete a person's rows.
    - A `below` candidate whose audience grows is scored again from its stored read, with no new read of Instagram (`igs_discovery_vets_total{outcome="rescored_registered"}`).
@@ -266,6 +273,7 @@ Operations:
   - `igs_discovery_sightings_total{source}`;
   - `igs_discovery_vets_total{outcome}`;
   - `igs_discovery_audience_checks_total{result}`: the Iraqi-commenter test's results (above);
+  - `igs_discovery_rechecks_total`: re-vets started for `small` candidates;
   - `igs_discovery_candidates{status}`, where `new` counts the accounts due a vet;
   - `igs_discovery_held{reason}`, 1 while vets wait for regular collection (below);
   - `igs_exit_share_requests_total{class="discovery"}` and `igs_exit_share_wait_seconds_total{class="discovery"}`: vets' requests, and the time they waited for discovery's share of their exit (below).

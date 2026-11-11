@@ -93,6 +93,18 @@ func (w *World) SetLikes(pk, likes int64) error {
 	return nil
 }
 
+// SetFollowers changes an account's follower count.
+func (w *World) SetFollowers(username string, n int64) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	p := w.byName[username]
+	if p == nil {
+		return errors.New("fakeig: no profile")
+	}
+	p.Followers = n
+	return nil
+}
+
 // DeletePost removes a post: it leaves the grid and its page answers 404.
 func (w *World) DeletePost(pk int64) error {
 	w.mu.Lock()

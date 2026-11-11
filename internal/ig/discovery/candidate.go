@@ -32,7 +32,9 @@ var outcomes = map[string]struct {
 	StatusRejected:   {discoveryv1.Outcome_OUTCOME_NOT_RELEVANT, "not_relevant", 0},
 	StatusPrivate:    {discoveryv1.Outcome_OUTCOME_SECOND_LIST, "private", contentv1.CollectionScope_COLLECTION_SCOPE_PROFILE_ONLY},
 	StatusGone:       {discoveryv1.Outcome_OUTCOME_UNAVAILABLE, "gone", 0},
-	StatusFailed:     {discoveryv1.Outcome_OUTCOME_UNAVAILABLE, "unreadable", 0},
+	// In scope but under the follower floor: kept and checked again.
+	StatusSmall:  {discoveryv1.Outcome_OUTCOME_DORMANT, "few_followers", 0},
+	StatusFailed: {discoveryv1.Outcome_OUTCOME_UNAVAILABLE, "unreadable", 0},
 }
 
 // CandidateEvent is an Instagram candidate igs checked, with its outcome.

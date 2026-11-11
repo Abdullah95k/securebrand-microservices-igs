@@ -397,6 +397,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **The owner's D-055 (22:00Z):**
     1. Accounts posting less than weekly are visited once a day: a new `quiet` tier (`ig.schedule.tiers.quiet_posts_per_week: 1` in production). Merged in #130 (`0d620d2`).
     2. Discovery needs 10 followers or more for new admissions (`ig.discovery.min_followers: 10`). Nothing already scheduled is dropped. Also #130.
+       - The owner added (22:10Z): don't miss an account first found under 10 followers that grows past it.
+       - Such a candidate is now kept as `small`. It is vetted again after 7, 14, then every 30 days, or 7 days after its last decision when seen again.
+       - Those re-vets use at most 10% of the vet slots (`follower_rechecks`, `recheck_share`). They are counted in `igs_discovery_rechecks_total`.
     3. An account outside Iraq is in scope when at least 10% of its commenters are Iraqi (`ig.discovery.audience`, production `share: 0.1`).
        - Only public candidates below the threshold with 10,000 followers or more are checked, at 2–3 more requests each.
        - The window is the newest top-level comments on their 2 newest posts with comments, 100 at most.
