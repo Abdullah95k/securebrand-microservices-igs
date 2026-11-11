@@ -21,19 +21,35 @@ Counts only. No account names anywhere in this document.
 
 ## 1. Size of the scope
 
-**On the list now (M, 11 Nov):** 234 profiles on the schedule.
-- 51 from the pilot list.
-- About 183 added by discovery since 7 Nov. Discovery was held most of that time, because the exits were resting.
+**On the list now (M, 11 Nov 21:21Z, `igs_discovery_candidates`):**
+- 534 accounts registered by discovery, plus the 51 pilot accounts. That's about 585 on the schedule.
+- 396,153 candidates are waiting to be vetted, at priority 2 or above.
+- Vetted so far: 534 registered, 671 below the threshold, 795 private, 974 failed, and 40 in progress.
+- **Acceptance over 7 days: 17.3%** of all vets, or 27% of the vets that reached a decision (failed vets left out).
+- **Sightings in the last day:** commenters 93,014, tags 1,078, co-authors 767, mentions 140.
 
-**Estimate of the target (G).** "Account" here means a public account that publishes for an audience: businesses, media, creators and public figures. Personal accounts are excluded: there are millions of them and they don't fit the purpose.
+**What the measured numbers say:**
 
-| | Low | High | How |
-|---|---|---|---|
-| (1) Iraqi accounts | 20,000 | 300,000 | Instagram's users in Iraq are in the low tens of millions (G, public ad-reach figures, not checked here). Accounts with 10,000 followers or more are about 0.1% of users (low). Those with 1,000 or more are about 1 to 2% (high) |
-| (2) Accounts elsewhere with an Iraqi audience | 5,000 | 100,000 | Arab regional media, celebrities and brands with Arabic content. The low figure counts only those Iraqi accounts link to; the high figure counts any with a measurable Iraqi share of commenters |
-| **Total** | **about 25,000** | **about 400,000** | |
+1. **The pool is mostly commenters, so mostly personal accounts.** Discovery has no follower floor (`ig.discovery.min_followers: 0`). A public personal account whose bio or captions read as Iraqi passes at threshold 4.
+   - Without a floor, the list grows toward Iraq's public Instagram users.
+   - With a floor, it stays with accounts that publish for an audience: businesses, media, creators and public figures.
+   - **The floor is the scope decision for the owner.**
+2. **The current pool alone gives about 20,000 to 70,000 accounts** (D).
+   - That's 396,153 × 17.3% = about 68,600, if acceptance holds.
+   - It's likely lower, because vets go highest priority first, so acceptance falls further down the pool (G: 5 to 17%).
+3. **The pool keeps growing.** It reached about 400,000 in about 4 days from a few hundred tracked accounts. That's about 100,000 new candidates a day (D), and it grows with the list.
+4. **Vetting is the bottleneck.** At 10% of 10 exits at 0.05 requests a second, igs vets about 1,500 to 2,000 accounts a day (D). The current pool would take about 200 days.
+   - 32% of vets failed. That's mostly exits resting or refusals (G), worth a look.
+   - Lifted by more IPs, or a larger discovery share (`exit_share`, D-027).
 
-The high figure isn't a ceiling. With a follower floor of 500, (1) alone could pass a million.
+**Estimate of the target:**
+
+| Scope | Count | How |
+|---|---|---|
+| Today | About 585 | M |
+| **Low:** accounts that publish for an audience, with a floor of about 1,000 followers | **About 50,000** | D/G: the current pool's yield (20,000 to 70,000), less the share under the floor, plus (2), accounts elsewhere with an Iraqi audience (5,000 to 20,000) |
+| **High:** no floor, the list a year out at today's growth | **About 400,000** | G: about 100,000 candidates a day at 5 to 17% acceptance, bounded by vet speed and IPs |
+| **Ceiling:** no floor, every public Iraqi account | **About 1 to 5 million** | G: Iraq's Instagram users, in the low tens of millions (public ad-reach figures, not checked here); 20 to 40% public; most identifiable as Iraqi |
 
 **To tighten these numbers from metrics igs already exports** (no SQL needed):
 - `igs_discovery_candidates{status}`: candidates by outcome. `new` counts only those due a vet, at `min_priority` 2 or above.
@@ -106,23 +122,35 @@ Re-reads publish items again, with a new `event_id` and the same `content_hash`.
 
 IP price: **$3 an IP a month, unlimited data** (the owner's figure, O-5, 5 Nov). The provider's real price and stock are still to be confirmed. Per-GB residential pricing is shown for comparison only.
 
-| | Today | Low | High |
-|---|---|---|---|
-| Accounts | 234 | 25,000 | 400,000 |
-| Requests a day | About 16,000 steady (D), more during catch-up | About 1.75 million (about 20 a second) | About 28 million (about 325 a second) |
-| **IPs** | 3 to 5 needed; 10 today | **250 to 500** | **4,000 to 8,000** |
-| IP cost a month, at $3 an IP | $30 (10 held) | $750 to $1,500 | $12,000 to $24,000 |
-| Or per GB (residential) | – | 1.5 to 3.3 TB a month | 24 to 53 TB a month |
-| Crawler pods | 1 profile, 1 post, 1 retry | 4 to 8 | 40 to 80 |
-| Other pods | As now: 2 each for persister, normalizer, API and scheduler, plus registry-sync and media | As now; persister and normalizer at 2 to 4 | Persister and normalizer at 6 to 12 |
-| Nodes (4 vCPU, 8 GB) | igs's share of today's cluster | 3 to 4 | 15 to 30 (G) |
-| PostgreSQL growth | 5 to 50 MB a day | 0.5 to 5 GB a day; backfill 40 to 75 GB once | 8 to 80 GB a day; backfill 0.6 to 1.2 TB once. Needs partition tiering by year one (G) |
-| S3 raw (30-day window) | 15 to 30 GB held | 1.5 to 3 TB held | 24 to 48 TB held |
-| Posts a day | About 250 to 500 | 25,000 to 50,000 | 400,000 to 800,000 |
-| Comments a day | About 2,000 to 50,000 | 250,000 to 5 million | 4 million to 80 million |
-| **At D-053's 10% sample** | 25 to 50 posts; 200 to 5,000 comments | 2,500 to 5,000 posts; 25,000 to 500,000 comments | 40,000 to 80,000 posts; 0.4 to 8 million comments |
+Assumptions:
+- An account that publishes for an audience costs about 70 requests a day at the 3-hour interval.
+- A quiet account (posting less than weekly) visited once a day costs about 10 (D).
+- A list without a follower floor is mostly quiet personal accounts: about 80% (G).
+- One IP carries about 4,300 requests a day (M).
 
-**The biggest lever on every row** is the interval for quiet accounts. Visiting accounts that post less than weekly once a day instead of every 3 hours cuts their requests about 8 times. With most of a large list quiet (G), IPs at the high tier fall to roughly 1,500 to 3,000, so $4,500 to $9,000 a month. That's a configuration change (tiers), for the owner's approval.
+| | Today | Low | High | Ceiling, per million |
+|---|---|---|---|---|
+| Accounts | About 585 | About 50,000, floor of about 1,000 followers | About 400,000, no floor | 1 million, no floor (1 to 5 million in all) |
+| Visits | Every 3 h | Every 3 h; quiet accounts daily | Every 3 h; quiet accounts daily | Mostly daily |
+| Requests a day | About 41,000 | 2.0 to 3.5 million | About 8.8 million (28 million with every account at 3 h) | 10 to 25 million |
+| **IPs** | **About 10: today's 10 are nearly full** | **300 to 1,000** | **1,500 to 3,000** (4,000 to 8,000 at 3 h for all) | **2,500 to 6,000** |
+| IP cost a month, at $3 an IP | $30 | $900 to $3,000 | $4,500 to $9,000 ($12,000 to $24,000 at 3 h for all) | $7,500 to $18,000 |
+| Crawler pods | 1 profile, 1 post, 1 retry | 8 to 16 | 20 to 40 | 25 to 60 |
+| Persister and normalizer | 2 each | 2 to 4 each | 4 to 8 each | 6 to 12 each |
+| Nodes (4 vCPU, 8 GB) | igs's share of today's cluster | 4 to 6 | 10 to 20 | 12 to 30 (G) |
+| PostgreSQL growth a day | 10 to 120 MB | 1 to 10 GB; backfill 75 to 150 GB once | 3 to 26 GB; backfill 0.4 to 1 TB once | 2 to 20 GB; backfill 0.5 to 1.5 TB once. Partition tiering needed from the high tier (G) |
+| S3 raw held (30-day window) | 35 to 75 GB | 3 to 6 TB | 7 to 15 TB | 6 to 15 TB |
+| Posts a day | 600 to 1,200 | 50,000 to 100,000 | 110,000 to 320,000 | 100,000 to 500,000 |
+| Comments a day | 6,000 to 120,000 | 0.5 to 10 million | 0.8 to 18 million | 0.5 to 10 million |
+| **At D-053's 10% sample** | 60 to 120 posts; 600 to 12,000 comments | 5,000 to 10,000 posts; 50,000 to 1 million comments | 11,000 to 32,000 posts; 80,000 to 1.8 million comments | 10,000 to 50,000 posts; 50,000 to 1 million comments |
+
+A personal account posts 0.1 to 0.5 times a day and draws 0 to 5 comments (G). An audience account posts 1 or 2 times a day and draws 10 to 200 comments (D, Phase 0). Analysis volume follows the audience accounts, whatever the floor.
+
+**The two levers, both for the owner:**
+- **A follower floor** (`ig.discovery.min_followers`). It sets the scope: low, high or ceiling.
+- **Daily visits for quiet accounts** (scheduler tiers). It cuts a mostly quiet list's IPs about 3 times.
+
+**Today's IPs are nearly full.** About 585 accounts at 70 requests a day is about 41,000 requests, against 10 IPs × about 4,300 (M). The list grows by about 300 to 500 accounts a day at today's vet speed (D: 1,500 to 2,000 vets a day at 17 to 27% acceptance). So new IPs, daily visits for quiet accounts, or a floor are needed within days, not weeks.
 
 ---
 
