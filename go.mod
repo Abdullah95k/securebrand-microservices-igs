@@ -1,6 +1,6 @@
 module github.com/abdullah95k/securebrand-microservices-igs
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/abdullah95k/securebrand-contracts v1.2.0
