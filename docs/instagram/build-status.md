@@ -378,5 +378,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - **Login walls (D-051):** a wall Instagram lets a logged-out visitor close may be closed, and reading goes on. igs already reads past them: it reads Instagram's responses directly, and the "Log in to see more" overlay is drawn over content that has already arrived. `page_wall` is only the server's redirect of a fresh page load to `/accounts/login`, which isn't closable, so it stays a rest. No change was needed.
     - **The old group `igs-ig-normalizer`:** deleted by the owner's go, at 05:04Z, as igs's own Kafka user, once the group had no members. Nothing names it any more: the normalizer's group is the constant `igs-ig-normalizer-c1`.
   - **Resumed (step 1):** at 05:03Z, on `b6e370e`.
+  - **Go 1.27.4 (GO-2026-6859):**
+    - The weekly `go-vulns` check found a new vulnerability in Go's own HTTP server: a crafted HTTP/1 request can crash it (a race in `MaxBytesReader`'s header handling).
+    - igs's API and every component's ops server run that code.
+    - `go.mod` moves from 1.27.3 to 1.27.4, which fixes it. The images build with `golang:1.27-alpine`, which takes the go.mod version.
   - **Still open:** the read-only check for highlight items as story posts.
 
