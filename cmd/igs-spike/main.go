@@ -53,6 +53,8 @@ func main() {
 		os.Exit(runProbe(os.Args[2:]))
 	case "tagged":
 		os.Exit(runTagged(os.Args[2:]))
+	case "explore":
+		os.Exit(runExplore(os.Args[2:]))
 	case "fixtures":
 		os.Exit(runFixtures(os.Args[2:]))
 	case "phase0":
@@ -69,6 +71,8 @@ func usage() {
        igs-spike probe --dry-run
        igs-spike tagged --profiles FILE --config FILE --tier isp [--out-dir DIR]
        igs-spike tagged --dry-run
+       igs-spike explore --config FILE --tier isp [--hashtags a,b] [--locations ID,ID | --locations-from-db] [--max-pages 16]
+       igs-spike explore --dry-run
        igs-spike fixtures --out testdata/ig --salt S FILE[=CASE]...
        igs-spike phase0 --profiles FILE --config FILE --tiers isp[,residential] [--out-dir DIR] [--from STEP]
 
@@ -83,6 +87,14 @@ serves the tab's page, whether the page carries tagged posts, and which
 operation (found in the page's script bundles) pages through them. It
 writes report.json and raw/ to --out-dir; the summary it prints names no
 account and is what to send back. 5 to 10 profiles are enough.
+
+explore loads a few hashtag pages (Iraq's places, from the keyword list)
+and location pages for places in Iraq, logged out, on one exit, 20 pages
+at most (owner's D-055). It reports, as counts only, whether each page
+loaded, showed a login wall or sent the visitor to log in, and how many
+posts and distinct accounts it showed. Nothing is stored or published; a
+rate limit or checkpoint ends the run. --locations-from-db takes the most
+used locations in Iraq from the posts igs stored (ig.postgres).
 
 fixtures turns raw responses (the probe's raw/ files, or a HAR's bodies)
 into parser fixtures with no personal data: usernames, names, people's ids

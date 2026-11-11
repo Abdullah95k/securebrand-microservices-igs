@@ -211,6 +211,27 @@ api:
     host: igs.example.com
     tls: []
 
+# exploreProbe is the read-only probe of hashtag and location pages
+# (owner's D-055): while enabled, a one-off Job runs igs-spike explore,
+# logged out, on one exit of `tier`, maxPages page loads (20 at most, half
+# hashtags, half locations) at rps, and logs a summary of counts only
+# (pages loaded, login walls and redirects, posts and distinct accounts
+# seen). Nothing is stored or published. Hashtags default to Iraq's places
+# from the keyword list; locationsFromDB takes the most used locations in
+# Iraq from the posts igs stored (read only, with credentialsSecret's
+# database role: the crawler's). Bump `run` to run it again; set enabled
+# back to false once the log is read.
+exploreProbe:
+  enabled: false
+  run: "1"
+  tier: isp
+  maxPages: 16
+  rps: 0.025                  # one page every 40 s: the exit keeps its crawler traffic too
+  hashtags: []
+  locations: []
+  locationsFromDB: true
+  credentialsSecret: ""
+
 # paused holds every component at 0 replicas (KEDA too) and runs no
 # install hooks: set it before restoring a backup and unset it after
 # (docs/runbooks/igs-backups.md).

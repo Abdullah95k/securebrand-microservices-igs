@@ -1,0 +1,47 @@
+{{- /*
+The read-only probe of hashtag and location pages (owner's D-055): a
+one-off Job, rendered only while exploreProbe.enabled. It runs
+igs-spike explore on one exit of one tier, 20 page loads at most, logged
+out, and prints a summary of counts only. Nothing is stored or published.
+Set enabled back to false once its log is read; the Job is removed with it.
+*/ -}}
+{{- $p := .Values.exploreProbe -}}
+{{- if and $p.enabled (not .Values.paused) }}
+{{- $root := . -}}
+{{- $pod := dict "root" $root "proxies" "required" }}
+{{- $args := list "explore" "--tier" $p.tier "--max-pages" (toString $p.maxPages) "--rps" (toString $p.rps) "--out-dir" "/tmp/out-explore" -}}
+{{- if $p.hashtags }}{{ $args = concat $args (list "--hashtags" (join "," $p.hashtags)) }}{{ end -}}
+{{- if $p.locations }}{{ $args = concat $args (list "--locations" (join "," $p.locations)) }}{{ end -}}
+{{- if $p.locationsFromDB }}{{ $args = append $args "--locations-from-db" }}{{ end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "igs.fullname" $root }}-explore-probe-{{ $p.run }}
+  labels:
+    {{- include "igs.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: explore-probe
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels: {{- include "igs.selector" (dict "root" $root "name" "explore-probe") | nindent 8 }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      securityContext: {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: explore-probe
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag | default $root.Chart.AppVersion }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/usr/local/bin/igs-spike"]
+          args: {{- toYaml $args | nindent 12 }}
+          env: {{- include "igs.env" $pod | nindent 12 }}
+          {{- include "igs.envFrom" (dict "root" $root "credentials" ($p.credentialsSecret | default "")) | nindent 10 }}
+          securityContext: {{- toYaml $root.Values.securityContext | nindent 12 }}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
+          volumeMounts: {{- include "igs.volumeMounts" $pod | nindent 12 }}
+      volumes: {{- include "igs.volumes" $pod | nindent 8 }}
+{{- end }}
