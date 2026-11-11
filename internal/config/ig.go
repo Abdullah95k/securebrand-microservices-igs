@@ -224,6 +224,15 @@ type IGDiscovery struct {
 	RevetAfter time.Duration `koanf:"revet_after"`
 	// MinFollowers below which a candidate is not registered.
 	MinFollowers int64 `koanf:"min_followers"`
+	// FollowerRechecks: a candidate in scope but under MinFollowers is
+	// kept as "small" and vetted again after each wait in turn, the last
+	// repeating; seen again, after the first wait (owner, 11 Nov 2026: not
+	// to miss an account that grows past the floor). Empty: only the
+	// RevetAfter rule.
+	FollowerRechecks []time.Duration `koanf:"follower_rechecks"`
+	// RecheckShare is the share of VetInFlight those re-vets may use (at
+	// least one slot), so new candidates keep the rest.
+	RecheckShare float64 `koanf:"recheck_share"`
 	// FlushEvery is how often crawlers write their sightings.
 	FlushEvery time.Duration `koanf:"flush_every"`
 	// MaxNewPerDay caps the profiles discovery registers per UTC day (03:00
@@ -303,6 +312,15 @@ func (c *Config) validateIG() []error {
 		}
 		if d.ExitShare < 0 || d.ExitShare > 1 {
 			errs = append(errs, errors.New("ig.discovery.exit_share must be in [0, 1]"))
+		}
+		for _, w := range d.FollowerRechecks {
+			if w <= 0 {
+				errs = append(errs, errors.New("ig.discovery.follower_rechecks must be > 0"))
+				break
+			}
+		}
+		if d.RecheckShare < 0 || d.RecheckShare > 1 {
+			errs = append(errs, errors.New("ig.discovery.recheck_share must be in [0, 1]"))
 		}
 		if a := g.Discovery.Audience; a.Share < 0 || a.Share > 1 {
 			errs = append(errs, errors.New("ig.discovery.audience.share must be in [0, 1]"))

@@ -152,6 +152,9 @@ var (
 	// candidates (D-055, ig.discovery.audience): in_scope (the Iraqi share
 	// reached), below_share, too_few (fewer commenters than
 	// min_commenters) and none (no commenter read).
+	// DiscoveryRechecks counts re-vets started for candidates kept as
+	// small (under ig.discovery.min_followers).
+	DiscoveryRechecks = counter("discovery_rechecks_total", "Re-vets started for discovery candidates kept for having too few followers (small).")
 	DiscoveryAudience = counterVec("discovery_audience_checks_total", "Discovery's Iraqi-commenter test on decided candidates, by result (in_scope, below_share, too_few, none).", "result")
 	DiscoveryQueue     = gaugeVec("discovery_candidates", "Discovery candidates by status (new counts those at ig.discovery.min_priority or above).", "status")
 	DiscoveryHeld      = gaugeVec("discovery_held", "1 while discovery starts no vets, by reason (schedule_behind, exits_resting, rests_unknown).", "reason")
