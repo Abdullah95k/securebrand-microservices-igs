@@ -15,6 +15,9 @@ const (
 	TierHot      = "hot"
 	TierWarm     = "warm"
 	TierLongTail = "long_tail"
+	// TierQuiet holds adaptive profiles posting less than
+	// ig.schedule.tiers.quiet_posts_per_week (D-055).
+	TierQuiet = "quiet"
 	// TierCustom is a profile given its own interval.
 	TierCustom = "custom"
 	// TierAuto asks for placement by posting rate (adaptive).
@@ -51,13 +54,13 @@ func Place(cfg *config.Config, tier string, interval time.Duration) (Placement, 
 			return Placement{}, fmt.Errorf("tier custom needs an interval")
 		}
 		return Placement{Tier: TierLongTail, Interval: sc.TierInterval(TierLongTail), Adaptive: sc.Tiers.Auto}, nil
-	case TierHot, TierWarm, TierLongTail:
+	case TierHot, TierWarm, TierLongTail, TierQuiet:
 		if interval > 0 {
 			return Placement{}, fmt.Errorf("give a tier or an interval, not both")
 		}
 		return Placement{Tier: tier, Interval: sc.TierInterval(tier)}, nil
 	}
-	return Placement{}, fmt.Errorf("tier %q must be hot, warm, long_tail or auto", tier)
+	return Placement{}, fmt.Errorf("tier %q must be hot, warm, long_tail, quiet or auto", tier)
 }
 
 // SetPlacement moves the profiles to pl: a pin, a custom interval, or back

@@ -484,6 +484,10 @@ ig:
       hot: 10m
       warm: 1h
       long_tail: 3h
+      # Adaptive profiles posting fewer than quiet_posts_per_week over
+      # auto_window are visited every quiet (owner's D-055). 0: no quiet tier.
+      quiet: 24h
+      quiet_posts_per_week: 0
       auto: true
       warm_posts_per_day: 2
       auto_window: 336h

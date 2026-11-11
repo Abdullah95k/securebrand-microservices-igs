@@ -468,7 +468,7 @@ components:
         ig.schedule.min_interval, at most 30 days). Not both.
       properties:
         enabled: {type: boolean}
-        tier: {type: string, enum: [hot, warm, long_tail, auto]}
+        tier: {type: string, enum: [hot, warm, long_tail, quiet, auto]}
         interval_hours: {type: integer, minimum: 1, maximum: 720}
         interval_minutes: {type: integer, minimum: 1, maximum: 43200}
     Register:
@@ -552,7 +552,7 @@ components:
         user_pk: {type: integer, format: int64}
         enabled: {type: boolean}
         interval_seconds: {type: integer}
-        tier: {type: string, enum: [hot, warm, long_tail, custom]}
+        tier: {type: string, enum: [hot, warm, long_tail, quiet, custom]}
         adaptive: {type: boolean, description: Placed by its posting rate (not pinned)}
         next_run_at: {type: string, format: date-time}
         next_profile_read_at: {type: string, format: date-time}

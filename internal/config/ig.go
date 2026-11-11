@@ -168,21 +168,32 @@ type IGTiers struct {
 	Warm time.Duration `koanf:"warm"`
 	// LongTail defaults to ig.schedule.interval.
 	LongTail time.Duration `koanf:"long_tail"`
+	// Quiet is the interval of adaptive profiles posting fewer than
+	// QuietPostsPerWeek over AutoWindow (owner's D-055: once a day for
+	// accounts posting less than weekly). QuietPostsPerWeek 0: no quiet tier.
+	Quiet             time.Duration `koanf:"quiet"`
+	QuietPostsPerWeek float64       `koanf:"quiet_posts_per_week"`
 	// Auto places profiles that are not pinned: warm at WarmPostsPerDay or
-	// more over AutoWindow, else long tail, checked every AutoEvery.
+	// more over AutoWindow, quiet below QuietPostsPerWeek, else long tail,
+	// checked every AutoEvery.
 	Auto            bool          `koanf:"auto"`
 	WarmPostsPerDay float64       `koanf:"warm_posts_per_day"`
 	AutoWindow      time.Duration `koanf:"auto_window"`
 	AutoEvery       time.Duration `koanf:"auto_every"`
 }
 
-// TierInterval returns tier's interval (hot, warm or long_tail).
+// TierInterval returns tier's interval (hot, warm, long_tail or quiet).
 func (s IGSchedule) TierInterval(tier string) time.Duration {
 	switch tier {
 	case "hot":
 		return s.Tiers.Hot
 	case "warm":
 		return s.Tiers.Warm
+	case "quiet":
+		if s.Tiers.Quiet > 0 {
+			return s.Tiers.Quiet
+		}
+		return 24 * time.Hour
 	}
 	if s.Tiers.LongTail > 0 {
 		return s.Tiers.LongTail
@@ -303,6 +314,9 @@ func (c *Config) validateIG() []error {
 		(t.LongTail != 0 && t.LongTail < t.Warm) || t.WarmPostsPerDay < 0 || (t.Auto && (t.AutoWindow < 24*time.Hour || t.AutoEvery <= 0)) {
 		errs = append(errs, errors.New("ig.schedule: min_interval must be > 0, tiers hot >= min_interval, warm >= hot, long_tail >= warm; "+
 			"with auto, auto_window >= 24h and auto_every > 0"))
+	}
+	if t := g.Schedule.Tiers; t.QuietPostsPerWeek < 0 || (t.QuietPostsPerWeek > 0 && g.Schedule.TierInterval("quiet") < g.Schedule.TierInterval("long_tail")) {
+		errs = append(errs, errors.New("ig.schedule.tiers: quiet_posts_per_week must not be negative, and quiet must not be shorter than long_tail"))
 	}
 	if g.Schedule.PostRecheckAfter < 0 || g.Schedule.PostRecheckPerRun < 0 {
 		errs = append(errs, errors.New("ig.schedule.post_recheck_after and post_recheck_per_run must not be negative"))

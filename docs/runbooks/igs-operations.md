@@ -644,6 +644,7 @@ The planner runs each scheduled profile at its tier's interval, and its profile 
 | hot | 10 min | Pinned: client brands, their competitors, trending accounts |
 | warm | 1 h | Not pinned and posting 2 or more times a day over 14 days |
 | long_tail | 3 h | Not pinned, everyone else; the default |
+| quiet | 24 h | Not pinned and posting fewer than `quiet_posts_per_week` over 14 days (production: 1, the owner's D-055); 0 turns the tier off |
 | custom | its own | A profile given its own interval (at least `min_interval`, 5 min) |
 
 - A profile not pinned is placed by its posting rate as soon as its backfill gives its user pk, then checked daily (`auto_every`). Re-registering it keeps its placement.
