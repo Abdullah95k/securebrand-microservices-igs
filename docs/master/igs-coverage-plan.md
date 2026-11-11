@@ -35,7 +35,12 @@ Counts only. No account names anywhere in this document.
 
 The high figure isn't a ceiling. With a follower floor of 500, (1) alone could pass a million.
 
-**To tighten these numbers from igs's own store** (read-only, schema `ig`, counts only):
+**To tighten these numbers from metrics igs already exports** (no SQL needed):
+- `igs_discovery_candidates{status}`: candidates by outcome. `new` counts only those due a vet, at `min_priority` 2 or above.
+- The acceptance rate: `sum(increase(igs_discovery_vets_total{outcome="registered"}[7d])) / sum(increase(igs_discovery_vets_total[7d]))`.
+- `igs_discovery_sightings_total{source}`: how fast each network source meets accounts.
+
+**The same counts from igs's store,** for anyone allowed to read it (read-only, schema `ig`, counts only):
 
 ```sql
 SELECT status, count(*) FROM ig.discovery_candidates GROUP BY 1;
@@ -99,14 +104,14 @@ Re-reads publish items again, with a new `event_id` and the same `content_hash`.
 
 ## 4. Three tiers
 
-IP price: static ISP IPs at about $1 to $5 a month each (the readiness review's assumption; the owner's contract decides). At the high tier, per-GB residential pricing may be cheaper, shown separately. Nothing here is a quote.
+IP price: **$3 an IP a month, unlimited data** (the owner's figure, O-5, 5 Nov). The provider's real price and stock are still to be confirmed. Per-GB residential pricing is shown for comparison only.
 
 | | Today | Low | High |
 |---|---|---|---|
 | Accounts | 234 | 25,000 | 400,000 |
 | Requests a day | About 16,000 steady (D), more during catch-up | About 1.75 million (about 20 a second) | About 28 million (about 325 a second) |
 | **IPs** | 3 to 5 needed; 10 today | **250 to 500** | **4,000 to 8,000** |
-| IP cost a month (ISP) | 10 × today's price | $250 to $2,500 | $4,000 to $40,000 |
+| IP cost a month, at $3 an IP | $30 (10 held) | $750 to $1,500 | $12,000 to $24,000 |
 | Or per GB (residential) | – | 1.5 to 3.3 TB a month | 24 to 53 TB a month |
 | Crawler pods | 1 profile, 1 post, 1 retry | 4 to 8 | 40 to 80 |
 | Other pods | As now: 2 each for persister, normalizer, API and scheduler, plus registry-sync and media | As now; persister and normalizer at 2 to 4 | Persister and normalizer at 6 to 12 |
@@ -117,7 +122,7 @@ IP price: static ISP IPs at about $1 to $5 a month each (the readiness review's 
 | Comments a day | About 2,000 to 50,000 | 250,000 to 5 million | 4 million to 80 million |
 | **At D-053's 10% sample** | 25 to 50 posts; 200 to 5,000 comments | 2,500 to 5,000 posts; 25,000 to 500,000 comments | 40,000 to 80,000 posts; 0.4 to 8 million comments |
 
-**The biggest lever on every row** is the interval for quiet accounts. Visiting accounts that post less than weekly once a day instead of every 3 hours cuts their requests about 8 times. With most of a large list quiet (G), IPs at the high tier fall to roughly 1,500 to 3,000. That's a configuration change (tiers), for the owner's approval.
+**The biggest lever on every row** is the interval for quiet accounts. Visiting accounts that post less than weekly once a day instead of every 3 hours cuts their requests about 8 times. With most of a large list quiet (G), IPs at the high tier fall to roughly 1,500 to 3,000, so $4,500 to $9,000 a month. That's a configuration change (tiers), for the owner's approval.
 
 ---
 
