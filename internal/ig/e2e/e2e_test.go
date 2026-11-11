@@ -296,6 +296,26 @@ func TestHighlightsSurviveRateLimits(t *testing.T) {
 	}
 }
 
+// With ig.limits.include_highlights off, a queued task whose job asked for
+// highlights reads none: the switch takes effect for work already queued,
+// and the profile is still read.
+func TestHighlightsSwitchedOffForQueuedTasks(t *testing.T) {
+	sp := spec()
+	sp.Profiles = 1
+	s := Start(t, Options{Spec: sp, Config: func(c *config.Config) { c.IG.Limits.IncludeHighlights = false }})
+	lim := s.Limits()
+	lim.IncludeHighlights = true // as the job was created before the switch
+	p := s.World.Profiles()[0]
+	s.Wait(t, 2*time.Minute, s.Crawl(t, p.Username, full, lim, nil))
+	if n := s.Fake.QueryCount(fakeig.OpHighlights); n != 0 {
+		t.Errorf("%d highlights queries with highlights switched off", n)
+	}
+	var profiles int
+	if err := s.DB.QueryRow(context.Background(), `SELECT count(*) FROM profiles WHERE lower(username) = lower($1)`, p.Username).Scan(&profiles); err != nil || profiles != 1 {
+		t.Fatalf("profile stored: %d %v", profiles, err)
+	}
+}
+
 // A profile task that parked while every exit rested still fails over when
 // its highlights query is then rate-limited: parks are no failed tries.
 // (They used to count: two parks, and a single block made the highlights

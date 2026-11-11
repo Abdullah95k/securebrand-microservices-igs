@@ -385,5 +385,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
   - **Rest counts after a restart:** at 05:40Z, crawler-profile showed 8 exits resting, but `increase()` found only 5 rests.
     - The cause: since #124, each exit's series appeared at its first rest already at 1, and `increase()` doesn't count that first step. So every exit's first rest after a restart was missed.
     - The fix: every static exit's series now starts at 0 when the pool is built.
+  - **Highlights rested the exits (06:25Z, crawler-profile alone at exit_rps 0.05):**
+    - Every rate limit in the window (15 of 15) came from highlights. Profile, grid and reels got through on the same exits.
+    - Highlights are read inside each profile task. A refused highlights request fails over to other exits (`block_hops`), and the task retries about 4 times, so highlights alone rested every exit.
+    - `ig.limits.include_highlights: false` now also applies to tasks already queued; before, it was only copied into new jobs. Turning highlights off is the owner's decision.
   - **Still open:** the read-only check for highlight items as story posts.
 

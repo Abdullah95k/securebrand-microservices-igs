@@ -260,7 +260,12 @@ func (s *ProfileStage) profile(ctx context.Context, t *igstaskv1.Task, id *sessi
 		return done(map[string]int64{"profiles_suppressed": 1}), true
 	}
 	b := d.Producer.NewBatch()
-	if t.Limits.GetIncludeHighlights() && len(res.Highlights) > 0 && !bytes.Equal(res.HighlightsHash, sc.HighlightsHash) {
+	// ig.limits.include_highlights also switches highlights off for tasks
+	// already queued, which carry the value their job was created with
+	// (pilot, 11 Nov 2026: Instagram rate-limited every highlights request,
+	// and each one rested its exit).
+	if t.Limits.GetIncludeHighlights() && d.Cfg.IG.Limits.IncludeHighlights && len(res.Highlights) > 0 &&
+		!bytes.Equal(res.HighlightsHash, sc.HighlightsHash) {
 		if cls, err := s.highlights(ctx, t, id, b, res, c, page); err != nil {
 			slog.Debug("profile: highlights", "profile", p.UserPk, "err", err)
 			c["highlights_failed"]++
