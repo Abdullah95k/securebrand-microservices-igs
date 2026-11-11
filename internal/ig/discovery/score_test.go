@@ -165,3 +165,41 @@ func TestInIraq(t *testing.T) {
 		}
 	}
 }
+
+func TestIraqiText(t *testing.T) {
+	for text, want := range map[string]bool{
+		"شلونكم حبايبي":          true,  // Iraqi dialect
+		"I love Iraq":            true,  // Iraq named
+		"🇮🇶🇮🇶":                   true,  // the flag
+		"great post, love it":    false, // nothing Iraqi
+		"ما شاء الله تبارك الله": false, // Arabic, not Iraqi
+		"": false,
+	} {
+		if got := IraqiText(text); got != want {
+			t.Errorf("IraqiText(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+// The Iraqi share counts each commenter once: by its comments' words, or
+// as an account igs already knows.
+func TestAudienceIraqiShare(t *testing.T) {
+	a := &Audience{Commenters: []Commenter{{PK: 1, Username: "a", IraqText: true}, {PK: 2, Username: "b"}, {PK: 0, Username: "Known"},
+		{PK: 4, Username: "d"}, {PK: 5, Username: "e"}}}
+	share, n := a.IraqiShare(func(pk int64, u string) bool { return pk == 4 || u == "known" })
+	if n != 5 || share != 0.6 {
+		t.Fatalf("share %v of %d, want 0.6 of 5", share, n)
+	}
+	var none *Audience
+	if share, n := none.IraqiShare(func(int64, string) bool { return true }); share != 0 || n != 0 {
+		t.Fatalf("no audience: %v of %d", share, n)
+	}
+}
+
+// The commenter share is kept with the signals but is not part of the
+// score: it is a second test.
+func TestSumLeavesOutIraqiCommenters(t *testing.T) {
+	if got := (Signals{"iraq_named": 3, SignalIraqiCommenters: 0.5}).Sum(); got != 3 {
+		t.Fatalf("Sum = %v, want 3", got)
+	}
+}

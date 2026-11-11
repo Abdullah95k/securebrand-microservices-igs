@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/abdullah95k/securebrand-microservices-igs/gen/go/securebrand/common/v1"
@@ -429,8 +430,105 @@ func (s *ProfileStage) vet(ctx context.Context, t *igstaskv1.Task, id *session.I
 				v.Captions = append(v.Captions, truncate(it.Caption, 500))
 			}
 		}
+		if s.wantsAudience(ctx, sc, v) {
+			if o := s.readAudience(ctx, t, id, &v, g.Items, c, lane, page); o != nil {
+				return *o
+			}
+		}
 	}
 	return s.saveVet(ctx, t, sc, v, c)
+}
+
+// wantsAudience reports whether a public candidate's vet also reads its
+// commenters (D-055, ig.discovery.audience): only one with the follower
+// count that its own words and sightings leave below the threshold.
+func (s *ProfileStage) wantsAudience(ctx context.Context, sc *igstaskv1.ProfileScope, v discovery.Vet) bool {
+	d := s.D.Cfg.IG.Discovery
+	if d.Audience.Share <= 0 || v.Followers < d.Audience.MinFollowers || s.D.Cfg.IG.Privacy.PIIMode != "full" || s.D.DB == nil {
+		return false
+	}
+	var sg discovery.Sightings
+	err := s.D.DB.QueryRow(ctx, `SELECT tags, coauthors, mentions, comments, iraq_context, sources FROM discovery_candidates
+		WHERE username = lower($1)`, sc.Username).Scan(&sg.Tags, &sg.Coauthors, &sg.Mentions, &sg.Comments, &sg.IraqContext, &sg.Sources)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("vet: sightings", "err", err)
+		return false
+	}
+	return discovery.Score(v, sg).Sum() < d.Threshold
+}
+
+// readAudience reads the newest top-level comments on the candidate's
+// newest posts (pinned ones skipped) until audience.posts posts with
+// comments or audience.max_comments comments were read, posts + 1 comment
+// reads at most. A login wall or an unreadable page ends the read with
+// what it has; an exit's failure ends the vet, to try again.
+func (s *ProfileStage) readAudience(ctx context.Context, t *igstaskv1.Task, id *session.Identity, v *discovery.Vet,
+	items []parse.GridItem, c map[string]int64, lane, page string) *Outcome {
+	d := s.D
+	a := d.Cfg.IG.Discovery.Audience
+	au := &discovery.Audience{}
+	at := map[string]int{}
+	reads := 0
+	for _, it := range items {
+		if au.Posts >= a.Posts || au.Comments >= a.MaxComments || reads > a.Posts {
+			break
+		}
+		if it.Pinned || it.MediaPK == 0 {
+			continue
+		}
+		vars := map[string]any{"media_pk": itoa(it.MediaPK), "first": min(CommentPageSize, a.MaxComments-au.Comments)}
+		resp, err := d.GQL.Do(ctx, id, graphql.Request{Query: "comments", Vars: vars, PageID: v.UserPK, Lane: lane, Referer: page})
+		reads++
+		c["requests"]++
+		c["audience_reads"]++
+		if err != nil {
+			c["transport_errors"]++
+			o := retry(t, "", "30s", err.Error(), c)
+			return &o
+		}
+		c["wire_bytes"] += resp.BytesIn + resp.BytesOut
+		if resp.Class == detect.LoginWall {
+			break
+		}
+		if resp.Class != detect.OK {
+			o := classOutcome(t, resp.Class, resp.Reason, "", c)
+			return &o
+		}
+		res, rep := parse.Comments(resp.Parts, parse.CommentContext{MediaPK: it.MediaPK, OwnerPK: v.UserPK})
+		if !rep.OK() {
+			break
+		}
+		n := 0
+		for _, cm := range res.Comments {
+			if au.Comments >= a.MaxComments {
+				break
+			}
+			if cm.Author == nil || cm.IsOp || cm.Depth > 0 || cm.ParentCommentPk != nil {
+				continue
+			}
+			key := strings.ToLower(cm.Author.Username)
+			if cm.Author.UserPk != 0 {
+				key = itoa(cm.Author.UserPk)
+			}
+			if key == "" {
+				continue
+			}
+			n++
+			au.Comments++
+			iraqi := discovery.IraqiText(cm.Text)
+			if i, ok := at[key]; ok {
+				au.Commenters[i].IraqText = au.Commenters[i].IraqText || iraqi
+				continue
+			}
+			at[key] = len(au.Commenters)
+			au.Commenters = append(au.Commenters, discovery.Commenter{PK: cm.Author.UserPk, Username: strings.ToLower(cm.Author.Username), IraqText: iraqi})
+		}
+		if n > 0 {
+			au.Posts++
+		}
+	}
+	v.Audience = au
+	return nil
 }
 
 // saveVet records what a vet read for the vetter.

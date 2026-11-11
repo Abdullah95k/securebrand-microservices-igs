@@ -539,6 +539,20 @@ ig:
     # Vets send at most this share of each proxy exit's rate (ig.exit_rps),
     # fleet-wide, so regular collection keeps the rest (D-027); 0: no cap.
     exit_share: 0.1
+    # A second way in, for an account that addresses Iraqis without saying
+    # so itself (D-055): a public candidate below the threshold with
+    # min_followers or more has its vet read the newest top-level comments
+    # on its newest `posts` posts with comments (max_comments at most, posts + 1
+    # comment reads at most). Registered when share or more of its
+    # min_commenters or more distinct commenters are Iraqi: scheduled by
+    # igs, a registered candidate, or writing in Iraqi dialect or naming
+    # Iraq. share 0 = off. Needs privacy.pii_mode full.
+    audience:
+      share: 0
+      min_commenters: 30
+      min_followers: 10000
+      posts: 2
+      max_comments: 100
   privacy:
     pii_mode: full               # full | pseudonymized
     author_hmac_key: "dev-only-change-me-ig"

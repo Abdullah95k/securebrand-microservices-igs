@@ -148,6 +148,11 @@ var (
 	// Profile discovery (M11).
 	DiscoverySightings = counterVec("discovery_sightings_total", "Accounts met in the posts read, by source (tags, coauthors, mentions, commenters).", "source")
 	DiscoveryVets      = counterVec("discovery_vets_total", "Discovery candidates vetted, by outcome (registered, below, private, gone, failed, already_registered).", "outcome")
+	// DiscoveryAudience counts the commenter test's results on decided
+	// candidates (D-055, ig.discovery.audience): in_scope (the Iraqi share
+	// reached), below_share, too_few (fewer commenters than
+	// min_commenters) and none (no commenter read).
+	DiscoveryAudience = counterVec("discovery_audience_checks_total", "Discovery's Iraqi-commenter test on decided candidates, by result (in_scope, below_share, too_few, none).", "result")
 	DiscoveryQueue     = gaugeVec("discovery_candidates", "Discovery candidates by status (new counts those at ig.discovery.min_priority or above).", "status")
 	DiscoveryHeld      = gaugeVec("discovery_held", "1 while discovery starts no vets, by reason (schedule_behind, exits_resting, rests_unknown).", "reason")
 

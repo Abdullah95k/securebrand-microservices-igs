@@ -269,6 +269,14 @@ type ProfileSpec struct {
 	Followers               int64
 	// Captions of its posts, newest first (none for a private account).
 	Captions []string
+	// Comments on its posts, by post (newest first), each list newest
+	// first.
+	Comments [][]CommentSpec
+}
+
+// CommentSpec is one comment on an added account's post.
+type CommentSpec struct {
+	Username, Text string
 }
 
 // AddProfile adds an account outside Profiles(): one the profiles tag,
@@ -285,6 +293,12 @@ func (w *World) AddProfile(ps ProfileSpec) *Profile {
 			taken := Epoch.Add(-time.Duration(j) * 24 * time.Hour)
 			post := &Post{PK: MediaPK(taken, w.r.Int64N(1<<23)), MediaType: 1, ProductType: "feed", Caption: c, TakenAt: taken, Owner: p}
 			post.Code = shortcode(post.PK)
+			if j < len(ps.Comments) {
+				for k, cs := range ps.Comments[j] {
+					post.Comments = append(post.Comments, Comment{PK: w.pk(), Text: cs.Text, CreatedAt: taken.Add(time.Duration(len(ps.Comments[j])-k) * time.Minute),
+						UserPK: w.userPK(cs.Username), Username: cs.Username})
+				}
+			}
 			p.Posts = append(p.Posts, post)
 			w.posts[post.PK] = post
 		}

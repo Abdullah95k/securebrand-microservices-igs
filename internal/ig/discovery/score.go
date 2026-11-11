@@ -63,6 +63,50 @@ type Vet struct {
 	Business  bool     `json:"business,omitempty"`
 	// Captions of the newest posts (the grid's first page).
 	Captions []string `json:"captions,omitempty"`
+	// Audience is who commented on its newest posts, read only for a
+	// candidate below the threshold with ig.discovery.audience's follower
+	// count (D-055).
+	Audience *Audience `json:"audience,omitempty"`
+}
+
+// Audience is the commenters a vet read: distinct accounts, the owner's
+// own comments and replies left out. The comments' text is not kept,
+// only whether it was Iraqi (IraqiText).
+type Audience struct {
+	Posts      int         `json:"posts"`
+	Comments   int         `json:"comments"`
+	Commenters []Commenter `json:"commenters,omitempty"`
+}
+
+// Commenter is one distinct commenter.
+type Commenter struct {
+	PK       int64  `json:"pk,omitempty"`
+	Username string `json:"username,omitempty"`
+	// IraqText: one of its comments is in Iraqi dialect or names Iraq.
+	IraqText bool `json:"iraq_text,omitempty"`
+}
+
+// IraqiText reports whether a comment is in Iraqi dialect or names Iraq
+// (any script, 🇮🇶, or an Iraqi place), as Score reads a profile's words.
+func IraqiText(text string) bool {
+	t := scan(text)
+	return t.iraq || t.dialect > 0 || len(t.cities) > 0
+}
+
+// IraqiShare is the share of a's commenters that are Iraqi: IraqText, or
+// known (scheduled by igs, or a registered candidate) by pk or lower-case
+// username. n is the number of commenters.
+func (a *Audience) IraqiShare(known func(pk int64, username string) bool) (share float64, n int) {
+	if a == nil || len(a.Commenters) == 0 {
+		return 0, 0
+	}
+	iraqi := 0
+	for _, c := range a.Commenters {
+		if c.IraqText || known(c.PK, strings.ToLower(c.Username)) {
+			iraqi++
+		}
+	}
+	return float64(iraqi) / float64(len(a.Commenters)), len(a.Commenters)
 }
 
 // Sightings is how often, and how, the crawl met a candidate.
@@ -98,11 +142,18 @@ const (
 // profile was or was not registered.
 type Signals map[string]float64
 
+// SignalIraqiCommenters is the Iraqi share of a candidate's commenters
+// (0 to 1), kept with the signals when its vet read them (D-055). It is a
+// second test, not part of the score: Sum leaves it out.
+const SignalIraqiCommenters = "iraqi_commenters"
+
 // Sum is the score.
 func (s Signals) Sum() float64 {
 	var n float64
-	for _, v := range s {
-		n += v
+	for k, v := range s {
+		if k != SignalIraqiCommenters {
+			n += v
+		}
 	}
 	return math.Round(n*100) / 100
 }

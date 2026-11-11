@@ -395,9 +395,14 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - Registry-sync now skips the query kinds the crawlers don't read (highlights, reels or comments when switched off). It lists them as skipped, not unchecked, so the run can still count as a success.
   - **Crawler-post back at 1 (about 12:05Z, platform #96, on `1846b07`).**
   - **The owner's D-055 (22:00Z):**
-    1. Accounts posting less than weekly are visited once a day: a new `quiet` tier (`ig.schedule.tiers.quiet_posts_per_week: 1` in production).
-    2. Discovery needs 10 followers or more for new admissions (`ig.discovery.min_followers: 10`). Nothing already scheduled is dropped.
-    3. An account outside Iraq is in scope when at least 10% of its comments come from Iraqi accounts (to be built).
+    1. Accounts posting less than weekly are visited once a day: a new `quiet` tier (`ig.schedule.tiers.quiet_posts_per_week: 1` in production). Merged in #130 (`0d620d2`).
+    2. Discovery needs 10 followers or more for new admissions (`ig.discovery.min_followers: 10`). Nothing already scheduled is dropped. Also #130.
+    3. An account outside Iraq is in scope when at least 10% of its commenters are Iraqi (`ig.discovery.audience`, production `share: 0.1`).
+       - Only public candidates below the threshold with 10,000 followers or more are checked, at 2–3 more requests each.
+       - The window is the newest top-level comments on their 2 newest posts with comments, 100 at most.
+       - At least 30 distinct commenters are needed.
+       - The share is kept as the signal `iraqi_commenters`. It isn't part of the score.
+       - Results are counted in `igs_discovery_audience_checks_total{result}`.
     4. A read-only probe of hashtag pages and of location pages for places in Iraq (to be built; no discovery change until its results).
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
