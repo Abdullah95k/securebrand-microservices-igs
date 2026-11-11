@@ -389,5 +389,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - Every rate limit in the window (15 of 15) came from highlights. Profile, grid and reels got through on the same exits.
     - Highlights are read inside each profile task. A refused highlights request fails over to other exits (`block_hops`), and the task retries about 4 times, so highlights alone rested every exit.
     - `ig.limits.include_highlights: false` now also applies to tasks already queued; before, it was only copied into new jobs. Turning highlights off is the owner's decision.
+  - **The owner's decision D-052 (10:37Z): "Yes, switch off highlights for now."** It went live at about 10:50Z (platform #92).
+    - In the next 30 minutes the crawlers had no rate limits at all.
+    - The only rate limit left was registry-sync's own highlights probe, which put rests at 2.03 against the bar of 2.
+    - Registry-sync now skips the query kinds the crawlers don't read (highlights, reels or comments when switched off). It lists them as skipped, not unchecked, so the run can still count as a success.
   - **Still open:** the read-only check for highlight items as story posts.
 

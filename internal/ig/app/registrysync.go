@@ -93,6 +93,8 @@ func NewRegistrySync(ctx context.Context, cfg *config.Config, db *pgxpool.Pool, 
 		Loader:         &session.Loader{Rules: rules, AcceptLanguage: g.AcceptLanguage, Hooks: igclient.Hooks()},
 		AcceptLanguage: g.AcceptLanguage,
 		Fetch:          docids.HTTPFetcher(media.NewHTTPClient()),
+		Skip: map[string]bool{"highlights": !g.Limits.IncludeHighlights, "reels": !g.Limits.IncludeReels,
+			"comments": !g.Limits.IncludeComments},
 	}
 	if g.Browser.Enabled {
 		b, err := browser.NewBootstrapper(g.Browser, g.AcceptLanguage, igclient.Hooks())
