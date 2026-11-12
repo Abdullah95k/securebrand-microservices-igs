@@ -431,9 +431,7 @@ func (s *ProfileStage) vet(ctx context.Context, t *igstaskv1.Task, id *session.I
 			}
 		}
 		if s.wantsAudience(ctx, sc, v) {
-			if o := s.readAudience(ctx, t, id, &v, g.Items, c, lane, page); o != nil {
-				return *o
-			}
+			s.readAudience(ctx, id, &v, g.Items, c, lane, page)
 		}
 	}
 	return s.saveVet(ctx, t, sc, v, c)
@@ -460,10 +458,13 @@ func (s *ProfileStage) wantsAudience(ctx context.Context, sc *igstaskv1.ProfileS
 // readAudience reads the newest top-level comments on the candidate's
 // newest posts (pinned ones skipped) until audience.posts posts with
 // comments or audience.max_comments comments were read, posts + 1 comment
-// reads at most. A login wall or an unreadable page ends the read with
-// what it has; an exit's failure ends the vet, to try again.
-func (s *ProfileStage) readAudience(ctx context.Context, t *igstaskv1.Task, id *session.Identity, v *discovery.Vet,
-	items []parse.GridItem, c map[string]int64, lane, page string) *Outcome {
+// reads at most, each from the post's page as regular collection reads
+// them. It never fails the vet: a refused or unreadable read (a wall, a
+// rate limit, a transport error) ends the sample with what it has, and the
+// vetter decides on that (fewer than min_commenters: no decision). The
+// exit's rests still follow the answer, as for any request.
+func (s *ProfileStage) readAudience(ctx context.Context, id *session.Identity, v *discovery.Vet,
+	items []parse.GridItem, c map[string]int64, lane, page string) {
 	d := s.D
 	a := d.Cfg.IG.Discovery.Audience
 	au := &discovery.Audience{}
@@ -477,27 +478,30 @@ func (s *ProfileStage) readAudience(ctx context.Context, t *igstaskv1.Task, id *
 			continue
 		}
 		vars := map[string]any{"media_pk": itoa(it.MediaPK), "first": min(CommentPageSize, a.MaxComments-au.Comments)}
-		resp, err := d.GQL.Do(ctx, id, graphql.Request{Query: "comments", Vars: vars, PageID: v.UserPK, Lane: lane, Referer: page})
+		referer := page
+		if it.Shortcode != "" {
+			referer = permalink(d.base(), it.Shortcode, it.ProductType)
+		}
+		resp, err := d.GQL.Do(ctx, id, graphql.Request{Query: "comments", Vars: vars, PageID: v.UserPK, Lane: lane, Referer: referer})
 		reads++
 		c["requests"]++
 		c["audience_reads"]++
 		if err != nil {
 			c["transport_errors"]++
-			o := retry(t, "", "30s", err.Error(), c)
-			return &o
-		}
-		c["wire_bytes"] += resp.BytesIn + resp.BytesOut
-		if resp.Class == detect.LoginWall {
+			metrics.DiscoveryAudienceReads.WithLabelValues("transport").Inc()
 			break
 		}
+		c["wire_bytes"] += resp.BytesIn + resp.BytesOut
 		if resp.Class != detect.OK {
-			o := classOutcome(t, resp.Class, resp.Reason, "", c)
-			return &o
+			metrics.DiscoveryAudienceReads.WithLabelValues(resp.Class.String()).Inc()
+			break
 		}
 		res, rep := parse.Comments(resp.Parts, parse.CommentContext{MediaPK: it.MediaPK, OwnerPK: v.UserPK})
 		if !rep.OK() {
+			metrics.DiscoveryAudienceReads.WithLabelValues("drift").Inc()
 			break
 		}
+		metrics.DiscoveryAudienceReads.WithLabelValues("ok").Inc()
 		n := 0
 		for _, cm := range res.Comments {
 			if au.Comments >= a.MaxComments {
@@ -528,7 +532,6 @@ func (s *ProfileStage) readAudience(ctx context.Context, t *igstaskv1.Task, id *
 		}
 	}
 	v.Audience = au
-	return nil
 }
 
 // saveVet records what a vet read for the vetter.

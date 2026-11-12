@@ -235,6 +235,9 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
      - **Score and cap:** the share is kept with the signals as `iraqi_commenters` (0 to 1). It isn't part of the score, and the world-star cap doesn't apply to it.
      - **What is kept:** the vet keeps who commented and whether each was Iraqi, but not the comments' text. The test needs `privacy.pii_mode: full`.
      - **Metric:** `igs_discovery_audience_checks_total{result}`, where result is `in_scope`, `below_share`, `too_few` or `none`.
+     - **A refused comment read never fails the vet:** a rate limit, a wall or a transport error ends the sample with what it has, and the vetter decides on that.
+       - Comment reads are sent from the post's page, as regular collection sends them.
+       - `igs_discovery_audience_reads_total{result}` counts the reads: `ok`, or the answer that ended the sample.
    - With a daily cap (`max_new_per_day`, below) that is used up for the day: `capped`. Capped candidates are registered on the next days, highest score first, before any new one.
    - **In scope but under the follower floor** (`min_followers`, 10 in production): `small`, not dropped (owner, 11 Nov 2026: an account found small must be found again once it grows past 10).
      - It is vetted again after 7 days, then 14, then every 30 days (`follower_rechecks`). If it is seen again on any route, it is vetted again 7 days after its last decision.

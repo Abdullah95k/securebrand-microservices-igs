@@ -130,3 +130,40 @@ func TestDiscoveryIraqiCommenters(t *testing.T) {
 		t.Errorf("tagged_01_0 on the schedule %d times, want 1", n)
 	}
 }
+
+// A refused comment read never fails the vet (production, 12 Nov 2026:
+// vets fell from about 30 an hour to 3 once the commenter test went live).
+// With Instagram rate-limiting every comment read, the candidate is still
+// decided (below: no commenter sample) and its vet job completes.
+func TestDiscoveryAudienceRefusedStillDecides(t *testing.T) {
+	s := Start(t, Options{Spec: spec(), Faults: fakeig.Faults{RateLimitFirst: map[string]int{fakeig.OpComments: 1000}},
+		Config: func(c *config.Config) {
+			c.IG.Discovery = config.IGDiscovery{Enabled: true, Sources: []string{"tags"}, Threshold: 4, MinPriority: 2, VetInFlight: 10,
+				Interval: 200 * time.Millisecond, FlushEvery: 100 * time.Millisecond,
+				Audience: config.IGDiscoveryAudience{Share: 0.1, MinCommenters: 30, MinFollowers: 10000, Posts: 2, MaxComments: 100}}
+			c.IG.Limits.IncludeComments = false
+		}})
+	s.World.AddProfile(fakeig.ProfileSpec{Username: "tagged_01_0", FullName: "Style House", Bio: "Fashion and beauty, worldwide shipping",
+		Followers: 50000, Captions: []string{"new collection", "summer looks"},
+		Comments: [][]fakeig.CommentSpec{commenters("fan_a", 20, 10), commenters("fan_b", 20, 10)}})
+	s.StartScheduler()
+	ctx := context.Background()
+	key := s.Key(t, api.ScopeProfilesWrite)
+	if code := s.Do(t, key, "POST", "/v1/profiles", map[string]any{"profile": s.World.Profiles()[0].Username}, nil); code != http.StatusCreated {
+		t.Fatalf("register: %d", code)
+	}
+	var st string
+	for deadline := time.Now().Add(2 * time.Minute); st != "below"; time.Sleep(200 * time.Millisecond) {
+		_ = s.DB.QueryRow(ctx, `SELECT status FROM discovery_candidates WHERE username = 'tagged_01_0'`).Scan(&st)
+		if time.Now().After(deadline) {
+			t.Fatalf("tagged_01_0: %q, want below (decided without a commenter sample)", st)
+		}
+	}
+	if n := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'discovery' AND profile_ref = 'u:tagged_01_0' AND status = 'completed'`); n != 1 {
+		t.Errorf("%d completed vet jobs, want 1", n)
+	}
+	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE username = 'tagged_01_0' AND vet ? 'audience'
+		AND jsonb_array_length(coalesce(vet->'audience'->'commenters', '[]'::jsonb)) = 0`); n != 1 {
+		t.Errorf("the refused sample was not kept as an empty audience")
+	}
+}
