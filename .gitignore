@@ -20,3 +20,4 @@ __pycache__/
 # igs: the owner's HAR recordings, raw Instagram responses and probe output
 # stay local (docs/instagram/build-brief.md §7). Keep them under .local/.
 /.local/
+dump.rdb

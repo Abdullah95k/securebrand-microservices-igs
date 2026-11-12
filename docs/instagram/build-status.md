@@ -406,6 +406,9 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
        - At least 30 distinct commenters are needed.
        - The share is kept as the signal `iraqi_commenters`. It isn't part of the score.
        - Results are counted in `igs_discovery_audience_checks_total{result}`.
+       - **A regression, fixed 12 Nov:** a refused comment read failed the whole vet, which then retried from the start.
+         - In production, vets fell from about 30 an hour to 3, and candidates ended `failed`.
+         - Now a refused read ends the sample and the vet decides. Comment reads go from the post's page.
     4. A read-only probe of hashtag pages and of location pages for places in Iraq. No discovery change until its results.
        - `igs-spike explore`, run in the cluster as a one-off chart Job (`exploreProbe.enabled`).
        - It runs logged out, on one exit, with 16 page loads (20 at most) at one every 40 s. It reads pages only, with no GraphQL queries.
