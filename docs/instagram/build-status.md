@@ -413,7 +413,13 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
        - A rate limit or checkpoint ends it.
        - **The first run** (platform #121, on `eb760a3`): all 16 pages failed on transport. Instagram was never reached.
          - The cause: the egress policy lets only the crawlers and registry-sync reach the proxy gateway, and the probe's Job wasn't among them.
-         - The fix: the Job is added to that policy while `exploreProbe.enabled` is set. `scripts/chart-egress.py` now checks this.
+         - The fix: the Job is added to that policy while `exploreProbe.enabled` is set. `scripts/chart-egress.py` now checks this. Merged in #134 (`1024b58`).
+       - **The second run** (12 Nov, 02:45 Iraq time, `isp` tier, 16 page loads, not stopped early):
+         - Every page loaded logged out, with no login walls, redirects or rate limits.
+         - Hashtag pages: 8 of 8 loaded and showed posts, 90 distinct posts from 85 distinct accounts.
+         - Location pages: 8 of 8 loaded and showed posts, 132 distinct posts from 88 distinct accounts.
+         - That's about 11 accounts a page.
+       - **Next:** a discovery route from these pages, proposed to the owner (12 Nov) and not yet built.
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 
