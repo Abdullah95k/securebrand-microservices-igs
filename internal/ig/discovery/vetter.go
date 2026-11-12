@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +68,10 @@ type Vetter struct {
 	// reclassified: the candidates decided below only for the follower
 	// floor were moved to small (once a process).
 	reclassified bool
+	// pagesListed is when the discovery pages were last listed; pageTurn
+	// picks the next page's kind in turn.
+	pagesListed time.Time
+	pageTurn    int
 }
 
 // Tick runs one round.
@@ -98,6 +104,9 @@ func (v *Vetter) Tick(ctx context.Context) error {
 	if reason == "" {
 		if err := v.start(ctx); err != nil {
 			return fmt.Errorf("discovery: start vets: %w", err)
+		}
+		if err := v.pages(ctx); err != nil {
+			return fmt.Errorf("discovery: pages: %w", err)
 		}
 	}
 	return v.gauges(ctx)
@@ -175,6 +184,113 @@ func (v *Vetter) rescore(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// pages dispatches discovery's hashtag and location pages (D-055,
+// ig.discovery.pages), one at a time: at most per_day a day, evenly
+// spread, kinds in turn, the page due longest first. It runs only while
+// vets may start (the holds), and each load takes discovery's exit share.
+func (v *Vetter) pages(ctx context.Context) error {
+	p := v.Cfg.IG.Discovery.Pages
+	if p.PerDay <= 0 || len(p.Kinds) == 0 {
+		return nil
+	}
+	if time.Since(v.pagesListed) > time.Hour {
+		if err := v.listPages(ctx); err != nil {
+			return err
+		}
+		v.pagesListed = time.Now()
+	}
+	var last *time.Time
+	var today int
+	if err := v.DB.QueryRow(ctx, `SELECT max(dispatched_at), count(*) FILTER (WHERE dispatched_at > now() - interval '1 day')
+		FROM discovery_pages`).Scan(&last, &today); err != nil {
+		return err
+	}
+	if today >= p.PerDay || (last != nil && time.Since(*last) < 24*time.Hour/time.Duration(p.PerDay)) {
+		return nil
+	}
+	kind := p.Kinds[v.pageTurn%len(p.Kinds)]
+	v.pageTurn++
+	var k, key string
+	err := v.DB.QueryRow(ctx, `SELECT kind, key FROM discovery_pages WHERE due_at <= now() AND kind = ANY($1)
+		ORDER BY (kind = $2) DESC, due_at LIMIT 1`, p.Kinds, kind).Scan(&k, &key)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	lim, err := dispatch.Limits(v.Cfg, dispatch.CrawlOptions{})
+	if err != nil {
+		return err
+	}
+	if _, _, err := v.Dispatch.Create(ctx, dispatch.Request{Kind: dispatch.KindDiscovery, Lane: igstaskv1.Lane_LANE_P2, Limits: lim,
+		Explore: &dispatch.Explore{Kind: k, Key: key}, Params: map[string]any{"page": k}}); err != nil {
+		slog.Warn("discovery: page not started", "kind", k, "err", err)
+		return nil
+	}
+	// Not due again until its load reports (the crawler sets the next).
+	_, err = v.DB.Exec(ctx, `UPDATE discovery_pages SET dispatched_at = now(), due_at = now() + $3::int * interval '1 second'
+		WHERE kind = $1 AND key = $2`, k, key, int(max(p.Revisit, time.Hour).Seconds()))
+	return err
+}
+
+// listPages adds the pages discovery may load: Iraq's place names from the
+// keyword table (each group's first enabled one-word term in English and
+// in Arabic) and the configured hashtags, and the locations in Iraq most
+// used by the posts of the last 90 days. Pages already listed keep their
+// turn.
+func (v *Vetter) listPages(ctx context.Context) error {
+	p := v.Cfg.IG.Discovery.Pages
+	var kinds, keys []string
+	if slices.Contains(p.Kinds, "hashtag") {
+		rows, err := v.DB.Query(ctx, `SELECT DISTINCT ON (grp, language) lower(term) FROM discovery_keywords
+			WHERE enabled AND language IN ('en', 'ar') AND term !~ '[[:space:]''-]' ORDER BY grp, language, id`)
+		if err != nil {
+			return err
+		}
+		tags, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, h := range append(tags, p.Hashtags...) {
+			if h = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(h), "#")); h != "" {
+				kinds, keys = append(kinds, "hashtag"), append(keys, h)
+			}
+		}
+	}
+	if slices.Contains(p.Kinds, "location") && p.Locations > 0 {
+		rows, err := v.DB.Query(ctx, `SELECT location->>'pk', coalesce(location->>'name', ''), (location->>'lat')::float8, (location->>'lng')::float8
+			FROM posts WHERE location ? 'pk' AND taken_at > now() - interval '90 days'
+			GROUP BY 1, 2, 3, 4 ORDER BY count(*) DESC LIMIT $1`, 10*p.Locations)
+		if err != nil {
+			return err
+		}
+		n := 0
+		for rows.Next() {
+			var pk, name string
+			var lat, lng *float64
+			if err := rows.Scan(&pk, &name, &lat, &lng); err != nil {
+				rows.Close()
+				return err
+			}
+			if n < p.Locations && pk != "" && pk != "0" && InIraq(name, lat, lng) {
+				kinds, keys = append(kinds, "location"), append(keys, pk)
+				n++
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	_, err := v.DB.Exec(ctx, `INSERT INTO discovery_pages (kind, key) SELECT * FROM unnest($1::text[], $2::text[])
+		ON CONFLICT DO NOTHING`, kinds, keys)
+	return err
 }
 
 // recheckSlots is how many vets re-vets of small candidates may hold at

@@ -99,6 +99,11 @@ config:
       # requests each, within discovery's exit share.
       audience:
         share: 0.1
+      # Hashtag and location pages (owner's D-055): 100 logged-out page
+      # loads a day, within discovery's exit share and holds, about 10 per
+      # exit. Each page shows about 11 accounts (probe, 12 Nov 2026).
+      pages:
+        per_day: 100
     registry_sync:
       # Three real public accounts: the platform sets them in its own
       # (private) Argo CD application, as config.ig.registry_sync.

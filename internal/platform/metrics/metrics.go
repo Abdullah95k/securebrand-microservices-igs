@@ -152,6 +152,10 @@ var (
 	// candidates (D-055, ig.discovery.audience): in_scope (the Iraqi share
 	// reached), below_share, too_few (fewer commenters than
 	// min_commenters) and none (no commenter read).
+	// DiscoveryPages counts discovery's hashtag and location page loads
+	// (D-055) by kind and result: loaded, login, wall, limited,
+	// unavailable, other.
+	DiscoveryPages = counterVec("discovery_pages_total", "Discovery's hashtag and location page loads, by kind (location, hashtag) and result (loaded, login, wall, limited, unavailable, other).", "kind", "result")
 	// DiscoveryRechecks counts re-vets started for candidates kept as
 	// small (under ig.discovery.min_followers).
 	DiscoveryRechecks = counter("discovery_rechecks_total", "Re-vets started for discovery candidates kept for having too few followers (small).")

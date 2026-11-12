@@ -141,6 +141,7 @@ var grants = map[string]map[string][]string{
 		"crawl_cursors":        {"SELECT", "INSERT", "UPDATE"},
 		"discovery_candidates": {"SELECT", "INSERT", "UPDATE"},
 		"discovery_keywords":   {"SELECT"},
+		"discovery_pages":      {"SELECT", "UPDATE"},
 		"discovery_sources":    {"SELECT", "INSERT", "UPDATE"},
 		"post_index":           {"SELECT"},
 		"posts":                {"SELECT"},

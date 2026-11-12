@@ -255,6 +255,25 @@ type IGDiscovery struct {
 	// Audience is a second way in, for an account that addresses Iraqis
 	// without saying so itself (owner's D-055).
 	Audience IGDiscoveryAudience `koanf:"audience"`
+	// Pages is discovery from hashtag and location pages (owner's D-055).
+	Pages IGDiscoveryPages `koanf:"pages"`
+}
+
+// IGDiscoveryPages: PerDay logged-out page loads a day (0 = off), spread
+// over the day, one at a time, while vets may start (the holds) and within
+// their exit share. Kinds are location (the locations in Iraq most used by
+// stored posts, up to Locations of them) and hashtag (Iraq's place names
+// from the keyword list, one-word terms, plus Hashtags). A page waits
+// Revisit between loads, doubled for each load in a row that met no new
+// account (16 times at most). The accounts a page shows become candidates
+// seen in Iraq (iraq_context), with origin place or hashtag; nothing else
+// of the page is kept.
+type IGDiscoveryPages struct {
+	PerDay    int           `koanf:"per_day"`
+	Kinds     []string      `koanf:"kinds"`
+	Hashtags  []string      `koanf:"hashtags"`
+	Locations int           `koanf:"locations"`
+	Revisit   time.Duration `koanf:"revisit"`
 }
 
 // IGDiscoveryAudience: a public candidate below the threshold with
@@ -317,6 +336,14 @@ func (c *Config) validateIG() []error {
 			if w <= 0 {
 				errs = append(errs, errors.New("ig.discovery.follower_rechecks must be > 0"))
 				break
+			}
+		}
+		if p := d.Pages; p.PerDay < 0 || (p.PerDay > 0 && (p.Revisit <= 0 || p.Locations < 0)) {
+			errs = append(errs, errors.New("ig.discovery.pages: per_day must not be negative, and revisit must be > 0 when it is set"))
+		}
+		for _, k := range d.Pages.Kinds {
+			if k != "location" && k != "hashtag" {
+				errs = append(errs, fmt.Errorf("ig.discovery.pages.kinds: %q must be location or hashtag", k))
 			}
 		}
 		if d.RecheckShare < 0 || d.RecheckShare > 1 {

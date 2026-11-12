@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,18 +96,115 @@ type Report struct {
 
 type target struct{ kind, path string }
 
+// PagePath is the page of a hashtag (without #) or a location id, or ""
+// for an unknown kind or an empty key.
+func PagePath(kind, key string) string {
+	key = strings.TrimSpace(key)
+	switch {
+	case key == "":
+		return ""
+	case kind == KindHashtag:
+		if h := strings.TrimPrefix(key, "#"); h != "" {
+			return "/explore/tags/" + url.PathEscape(strings.ToLower(h)) + "/"
+		}
+	case kind == KindLocation:
+		return "/explore/locations/" + url.PathEscape(key) + "/"
+	}
+	return ""
+}
+
+// Owner is an account that posted one of a page's posts.
+type Owner struct {
+	PK       int64
+	Username string
+}
+
+// Owners are the distinct accounts that posted the posts in a page's
+// embedded data, with their usernames (an owner known only by id is left
+// out: discovery keys candidates by username).
+func Owners(html []byte) []Owner {
+	byKey := map[string]*Owner{}
+	var order []string
+	for _, m := range scriptJSON.FindAllSubmatch(html, -1) {
+		var v any
+		dec := json.NewDecoder(bytes.NewReader(m[1]))
+		dec.UseNumber()
+		if dec.Decode(&v) != nil {
+			continue
+		}
+		walkPosts(v, func(post map[string]any) {
+			var o Owner
+			for _, k := range []string{"user", "owner"} {
+				u, ok := post[k].(map[string]any)
+				if !ok {
+					continue
+				}
+				if o.Username == "" {
+					o.Username, _ = u["username"].(string)
+				}
+				if o.PK == 0 {
+					for _, f := range []string{"pk", "id"} {
+						if n, err := strconv.ParseInt(fmt.Sprint(u[f]), 10, 64); err == nil && u[f] != nil {
+							o.PK = n
+							break
+						}
+					}
+				}
+			}
+			if o.Username == "" {
+				return
+			}
+			k := strings.ToLower(o.Username)
+			if x := byKey[k]; x != nil {
+				if x.PK == 0 {
+					x.PK = o.PK
+				}
+				return
+			}
+			byKey[k] = &o
+			order = append(order, k)
+		})
+	}
+	out := make([]Owner, 0, len(order))
+	for _, k := range order {
+		out = append(out, *byKey[k])
+	}
+	return out
+}
+
+// walkPosts calls f for each post (an object with a code and a pk or id).
+func walkPosts(v any, f func(map[string]any)) {
+	switch x := v.(type) {
+	case map[string]any:
+		code, _ := x["code"].(string)
+		if code == "" {
+			code, _ = x["shortcode"].(string)
+		}
+		if code != "" && (x["pk"] != nil || x["id"] != nil) {
+			f(x)
+		}
+		for _, c := range x {
+			walkPosts(c, f)
+		}
+	case []any:
+		for _, c := range x {
+			walkPosts(c, f)
+		}
+	}
+}
+
 // targets alternates hashtag and location pages, max at most.
 func targets(o Options, max int) []target {
 	var out []target
 	for i := 0; len(out) < max && (i < len(o.Hashtags) || i < len(o.Locations)); i++ {
 		if i < len(o.Hashtags) {
-			if h := strings.TrimPrefix(strings.TrimSpace(o.Hashtags[i]), "#"); h != "" {
-				out = append(out, target{KindHashtag, "/explore/tags/" + url.PathEscape(strings.ToLower(h)) + "/"})
+			if p := PagePath(KindHashtag, o.Hashtags[i]); p != "" {
+				out = append(out, target{KindHashtag, p})
 			}
 		}
 		if len(out) < max && i < len(o.Locations) {
-			if l := strings.TrimSpace(o.Locations[i]); l != "" {
-				out = append(out, target{KindLocation, "/explore/locations/" + url.PathEscape(l) + "/"})
+			if p := PagePath(KindLocation, o.Locations[i]); p != "" {
+				out = append(out, target{KindLocation, p})
 			}
 		}
 	}
