@@ -419,7 +419,10 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
          - Hashtag pages: 8 of 8 loaded and showed posts, 90 distinct posts from 85 distinct accounts.
          - Location pages: 8 of 8 loaded and showed posts, 132 distinct posts from 88 distinct accounts.
          - That's about 11 accounts a page.
-       - **Next:** a discovery route from these pages, proposed to the owner (12 Nov) and not yet built.
+       - **The route** (built on the owner's go, 12 Nov): `ig.discovery.pages`, with production at `per_day: 100`.
+         - Iraqi locations from stored posts, and Iraq's place names as hashtags.
+         - One page load every 14.4 minutes, within discovery's exit share and holds.
+         - The accounts shown become candidates seen in Iraq (origin `place` or `hashtag`) and are vetted as usual. Nothing else of the page is kept.
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 

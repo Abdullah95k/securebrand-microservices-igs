@@ -63,6 +63,10 @@ func NewCollector(db *pgxpool.Pool, cfg config.IGDiscovery, piiFull bool) *Colle
 
 var usernameRe = regexp.MustCompile(`^[a-z0-9._]{1,30}$`)
 
+// ValidUsername reports whether u (lower case, no @) is an Instagram
+// username discovery can keep.
+func ValidUsername(u string) bool { return usernameRe.MatchString(u) }
+
 // add counts one sighting of username. Callers hold c.mu.
 func (c *Collector) add(username string, pk, ownerPK int64, iraq bool, source string, bump func(*Sightings)) {
 	u := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(username), "@"))

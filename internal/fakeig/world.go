@@ -12,6 +12,7 @@ import (
 	"hash/fnv"
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -260,13 +261,28 @@ func (w *World) makeComment(at time.Time, nth, k int) Comment {
 }
 
 // explorePosts are up to n posts for a hashtag or location page: each
-// profile's newest, then the next, in turn. The caller holds w.mu (the
-// page handler's read lock).
+// account's newest, then the next, in turn; the accounts added with
+// AddProfile (by username) when there are any, else Profiles(). The
+// caller holds w.mu (the page handler's read lock).
 func (w *World) explorePosts(n int) []*Post {
+	listed := map[*Profile]bool{}
+	for _, p := range w.profiles {
+		listed[p] = true
+	}
+	var accounts []*Profile
+	for _, p := range w.byName {
+		if !listed[p] && len(p.Posts) > 0 {
+			accounts = append(accounts, p)
+		}
+	}
+	slices.SortFunc(accounts, func(a, b *Profile) int { return strings.Compare(a.Username, b.Username) })
+	if len(accounts) == 0 {
+		accounts = w.profiles
+	}
 	var out []*Post
 	for j := 0; len(out) < n; j++ {
 		added := false
-		for _, p := range w.profiles {
+		for _, p := range accounts {
 			if j < len(p.Posts) && len(out) < n {
 				out = append(out, p.Posts[j])
 				added = true

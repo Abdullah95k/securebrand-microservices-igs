@@ -152,12 +152,16 @@ var (
 	// candidates (D-055, ig.discovery.audience): in_scope (the Iraqi share
 	// reached), below_share, too_few (fewer commenters than
 	// min_commenters) and none (no commenter read).
+	// DiscoveryPages counts discovery's hashtag and location page loads
+	// (D-055) by kind and result: loaded, login, wall, limited,
+	// unavailable, other.
+	DiscoveryPages = counterVec("discovery_pages_total", "Discovery's hashtag and location page loads, by kind (location, hashtag) and result (loaded, login, wall, limited, unavailable, other).", "kind", "result")
 	// DiscoveryRechecks counts re-vets started for candidates kept as
 	// small (under ig.discovery.min_followers).
 	DiscoveryRechecks = counter("discovery_rechecks_total", "Re-vets started for discovery candidates kept for having too few followers (small).")
 	DiscoveryAudience = counterVec("discovery_audience_checks_total", "Discovery's Iraqi-commenter test on decided candidates, by result (in_scope, below_share, too_few, none).", "result")
-	DiscoveryQueue     = gaugeVec("discovery_candidates", "Discovery candidates by status (new counts those at ig.discovery.min_priority or above).", "status")
-	DiscoveryHeld      = gaugeVec("discovery_held", "1 while discovery starts no vets, by reason (schedule_behind, exits_resting, rests_unknown).", "reason")
+	DiscoveryQueue    = gaugeVec("discovery_candidates", "Discovery candidates by status (new counts those at ig.discovery.min_priority or above).", "status")
+	DiscoveryHeld     = gaugeVec("discovery_held", "1 while discovery starts no vets, by reason (schedule_behind, exits_resting, rests_unknown).", "reason")
 
 	// Registry sync (igs-registry-sync).
 	RegistrySyncRuns        = counterVec("registry_sync_runs_total", "Registry sync runs by status (ok, degraded, error).", "status")

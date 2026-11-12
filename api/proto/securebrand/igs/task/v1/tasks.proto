@@ -85,6 +85,12 @@ message ProfileScope {
   // page, record what profile discovery scores in ig.discovery_candidates,
   // and publish nothing.
   bool vet = 12;
+  // A discovery page (D-055): with explore_kind set ("location" or
+  // "hashtag"), the task loads that page (explore_key: a location id or a
+  // hashtag) instead of a profile, records the accounts it shows as
+  // discovery sightings, and publishes nothing.
+  string explore_kind = 13;
+  string explore_key = 14;
 }
 
 message PostScope {

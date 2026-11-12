@@ -247,7 +247,25 @@ An erasure request (`POST /v1/erasure-requests`) still deletes a person's data, 
    - Every vet is kept: the latest read on the candidate (shown as `read` in the API), and each one with its score, signals and decision in `ig.discovery_vets`. Erasure requests delete a person's rows.
    - A `below` candidate whose audience grows is scored again from its stored read, with no new read of Instagram (`igs_discovery_vets_total{outcome="rescored_registered"}`).
 
-5. **Intake.** Accounts found elsewhere join as candidates, vetted and scored like the ones the crawl meets: the Google discovery tool, links on Facebook pages and YouTube channels, or a list by hand.
+5. **Hashtag and location pages** (owner's D-055, `ig.discovery.pages`; production `per_day: 100`): a route that doesn't need a registered account to lead to the candidate.
+   - **The pages:**
+     - locations in Iraq, the most used by the posts stored in the last 90 days (`locations`, 200);
+     - hashtags, Iraq's place names from the keyword table (each group's first one-word term in English and in Arabic), plus `hashtags`.
+     - The scheduler lists them hourly in `ig.discovery_pages`.
+   - **The pace:**
+     - `per_day` loads a day, one at a time, evenly spread (one every 14.4 minutes at 100), the kinds in turn, the page due longest first;
+     - only while vets may start (the holds below), and each load takes discovery's exit share. Each is 1 logged-out page load.
+   - **What a load keeps:**
+     - The accounts that posted what the page shows become candidates seen in Iraq (`iraq_context`, priority +2), with origin `place` or `hashtag`. Nothing else of the page is kept or published.
+     - They are vetted like any other candidate: the score, the Iraqi-commenter test, the follower floor and `small`.
+   - **Checks:** a login page, a wall, a rate limit or a checkpoint is recorded, and the page waits for its next turn. Nothing pushes past it.
+   - **Revisits:** a page is loaded again after `revisit` (24h). The wait doubles for each load in a row that met no new account, up to 16 times.
+   - **Metrics and jobs:**
+     - `igs_discovery_pages_total{kind,result}`, where result is `loaded`, `login`, `wall`, `limited`, `unavailable` or `other`;
+     - `igs_discovery_sightings_total{source="place"|"hashtag"}`;
+     - each load is a `discovery` job with `profile_ref` `x:<kind>:<key>`.
+
+6. **Intake.** Accounts found elsewhere join as candidates, vetted and scored like the ones the crawl meets: the Google discovery tool, links on Facebook pages and YouTube channels, or a list by hand.
    - Each candidate's `origins` says where it came from: `network` (met in posts igs reads) or the intake's name.
    - Intake accounts are vetted ahead of single sightings. Coming from an intake adds nothing to the score: only what the vet reads, and the Iraqi audience, decide.
    - An account already a candidate keeps its status; the intake only adds its origin.
