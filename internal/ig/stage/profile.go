@@ -20,6 +20,7 @@ import (
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/crawl/checkpoint"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/emit"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/explore"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/parse"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/task"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/topics"
@@ -70,10 +71,13 @@ func (s *ProfileStage) Run(ctx context.Context, t *igstaskv1.Task) Outcome {
 	if sc == nil {
 		return Outcome{Result: Fail, Reason: "profile task without profile scope"}
 	}
-	if sc.Vet {
-		// A vet's requests take at most discovery's share of each exit
-		// (ig.discovery.exit_share).
+	if sc.Vet || sc.ExploreKind != "" {
+		// A vet's requests, and a discovery page's, take at most
+		// discovery's share of each exit (ig.discovery.exit_share).
 		ctx = session.WithShare(ctx, session.ShareDiscovery)
+	}
+	if sc.ExploreKind != "" {
+		return s.explorePage(ctx, t, sc, c)
 	}
 	if d.Suppression.PageSuppressed(sc.UserPk) {
 		return done(map[string]int64{"profiles_suppressed": 1})
@@ -532,6 +536,107 @@ func (s *ProfileStage) readAudience(ctx context.Context, id *session.Identity, v
 		}
 	}
 	v.Audience = au
+}
+
+// explorePage loads a discovery page (D-055): a location's or a
+// hashtag's, logged out. The accounts that posted what it shows become
+// candidates seen in Iraq (iraq_context), with origin place or hashtag;
+// nothing else of the page is kept or published. A login page, a wall, a
+// rate limit or a checkpoint is recorded and ends the task: the page waits
+// for its next turn, on whatever exit, and nothing pushes past the check.
+func (s *ProfileStage) explorePage(ctx context.Context, t *igstaskv1.Task, sc *igstaskv1.ProfileScope, c map[string]int64) Outcome {
+	d := s.D
+	path := explore.PagePath(sc.ExploreKind, sc.ExploreKey)
+	if path == "" {
+		return Outcome{Result: Fail, Reason: "discovery page: unknown kind " + sc.ExploreKind, Counters: c}
+	}
+	id, err := d.identity(ctx, "profile", t.Stalls)
+	if err != nil {
+		return noIdentity(t, "", err, c)
+	}
+	defer func() { d.Pool.Release(id) }()
+	pl, err := d.load(ctx, id, strings.TrimRight(d.base(), "/")+path, t.Lane)
+	c["page_loads"]++
+	c["discovery_pages"]++
+	if pl != nil {
+		c["wire_bytes"] += pl.Bytes
+	}
+	if pl == nil {
+		// Not sent (a resting exit) or no answer: another turn, later.
+		return retry(t, "", "60s", "discovery page: "+fmt.Sprint(err), c)
+	}
+	result := "other"
+	var owners []explore.Owner
+	switch {
+	case strings.Contains(pl.URL, "/accounts/login"):
+		result = "login"
+	case pl.Class == detect.LoginWall:
+		result = "wall"
+	case pl.Class == detect.RateLimited || pl.Class == detect.Checkpoint:
+		result = "limited"
+	case pl.Class == detect.ContentUnavailable:
+		result = "unavailable"
+	case pl.Class == detect.OK:
+		// A page with no tokens still shows its posts.
+		result = "loaded"
+		owners = explore.Owners(pl.HTML)
+	}
+	added, err := s.pageSightings(ctx, sc.ExploreKind, owners)
+	if err != nil {
+		return retry(t, "", "30s", "discovery page: "+err.Error(), c)
+	}
+	metrics.DiscoveryPages.WithLabelValues(sc.ExploreKind, result).Inc()
+	c["candidates_seen"] += int64(len(owners))
+	c["candidates_new"] += int64(added)
+	if d.DB != nil {
+		if _, err := d.DB.Exec(ctx, `UPDATE discovery_pages SET loaded_at = now(), loads = loads + 1, last_class = $3,
+				last_accounts = $4, last_new = $5, empty_runs = CASE WHEN $5 = 0 THEN empty_runs + 1 ELSE 0 END,
+				due_at = now() + $6::int * interval '1 second' * power(2, least(CASE WHEN $5 = 0 THEN empty_runs + 1 ELSE 0 END, 4))
+			WHERE kind = $1 AND key = $2`, sc.ExploreKind, sc.ExploreKey, result, len(owners), added,
+			int(max(d.Cfg.IG.Discovery.Pages.Revisit, time.Hour).Seconds())); err != nil {
+			return retry(t, "", "30s", "discovery page: "+err.Error(), c)
+		}
+	}
+	return done(c)
+}
+
+// pageSightings records a discovery page's accounts as candidates seen in
+// Iraq, with origin place (a location's page) or hashtag, and returns how
+// many were new to discovery. An erased account is never a candidate.
+func (s *ProfileStage) pageSightings(ctx context.Context, kind string, owners []explore.Owner) (int, error) {
+	if s.D.DB == nil || len(owners) == 0 {
+		return 0, nil
+	}
+	origin := "hashtag"
+	if kind == explore.KindLocation {
+		origin = "place"
+	}
+	var users []string
+	var pks []int64
+	for _, o := range owners {
+		u := strings.ToLower(o.Username)
+		if !discovery.ValidUsername(u) || (o.PK != 0 && s.D.Suppression.PageSuppressed(o.PK)) {
+			continue
+		}
+		users, pks = append(users, u), append(pks, o.PK)
+	}
+	if len(users) == 0 {
+		return 0, nil
+	}
+	var added int
+	err := s.D.DB.QueryRow(ctx, `WITH up AS (
+			INSERT INTO discovery_candidates AS c (username, user_pk, iraq_context, priority, origins)
+			SELECT x.u, NULLIF(x.pk, 0), 1, 2, ARRAY[$3::text] FROM unnest($1::text[], $2::bigint[]) AS x(u, pk)
+			ON CONFLICT (username) DO UPDATE SET user_pk = COALESCE(c.user_pk, EXCLUDED.user_pk),
+				iraq_context = c.iraq_context + 1, priority = c.priority + 2, last_seen_at = now(),
+				origins = CASE WHEN $3 = ANY(c.origins) THEN c.origins ELSE c.origins || ARRAY[$3::text] END
+			RETURNING (xmax = 0) AS inserted)
+		SELECT count(*) FILTER (WHERE inserted) FROM up`, users, pks, origin).Scan(&added)
+	if err != nil {
+		return 0, err
+	}
+	metrics.DiscoverySightings.WithLabelValues(origin).Add(float64(len(users)))
+	return added, nil
 }
 
 // saveVet records what a vet read for the vetter.

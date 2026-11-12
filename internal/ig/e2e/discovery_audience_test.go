@@ -159,8 +159,15 @@ func TestDiscoveryAudienceRefusedStillDecides(t *testing.T) {
 			t.Fatalf("tagged_01_0: %q, want below (decided without a commenter sample)", st)
 		}
 	}
-	if n := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'discovery' AND profile_ref = 'u:tagged_01_0' AND status = 'completed'`); n != 1 {
-		t.Errorf("%d completed vet jobs, want 1", n)
+	// The decision can come before the finalizer closes the vet's job.
+	for deadline := time.Now().Add(time.Minute); ; time.Sleep(200 * time.Millisecond) {
+		n := count(t, s, `SELECT count(*) FROM jobs WHERE kind = 'discovery' AND profile_ref = 'u:tagged_01_0' AND status = 'completed'`)
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d completed vet jobs, want 1", n)
+		}
 	}
 	if n := count(t, s, `SELECT count(*) FROM discovery_candidates WHERE username = 'tagged_01_0' AND vet ? 'audience'
 		AND jsonb_array_length(coalesce(vet->'audience'->'commenters', '[]'::jsonb)) = 0`); n != 1 {

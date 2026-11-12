@@ -71,6 +71,14 @@ type Request struct {
 	MaxRunningPerClient int
 	// Vet makes the profile task a discovery vet (KindDiscovery).
 	Vet bool
+	// Explore makes the job a discovery page load (KindDiscovery, D-055):
+	// no profile is resolved, ProfileRef is set to x:<kind>:<key>.
+	Explore *Explore
+}
+
+// Explore is a discovery page: a location id or a hashtag.
+type Explore struct {
+	Kind, Key string
 }
 
 // PostRoot is a post task started with a job.
@@ -161,8 +169,11 @@ func (d *Dispatcher) Create(ctx context.Context, r Request) (*Job, bool, error) 
 			return j, false, nil
 		}
 	}
-	k, found := d.Resolve(ctx, r.ProfileRef)
-	if k.username == "" {
+	var k Known
+	found := false
+	if r.Explore != nil {
+		r.ProfileRef, r.Mode = "x:"+r.Explore.Kind+":"+r.Explore.Key, "full"
+	} else if k, found = d.Resolve(ctx, r.ProfileRef); k.username == "" {
 		return nil, false, ErrUnknownProfile
 	}
 	mode := r.Mode
@@ -242,6 +253,9 @@ func (d *Dispatcher) Create(ctx context.Context, r Request) (*Job, bool, error) 
 		return nil, false, fmt.Errorf("dispatch: insert job: %w", err)
 	}
 	sc := &igstaskv1.ProfileScope{Username: k.username, HighlightsHash: k.highlightsHash, RefreshProfile: r.RefreshProfile, Vet: r.Vet}
+	if r.Explore != nil {
+		sc = &igstaskv1.ProfileScope{ExploreKind: r.Explore.Kind, ExploreKey: r.Explore.Key}
+	}
 	if cm == commonv1.CrawlMode_CRAWL_MODE_INCREMENTAL && k.watermark != nil {
 		sc.Watermark = timestamppb.New(*k.watermark)
 	}

@@ -554,6 +554,20 @@ ig:
     # min_commenters or more distinct commenters are Iraqi: scheduled by
     # igs, a registered candidate, or writing in Iraqi dialect or naming
     # Iraq. share 0 = off. Needs privacy.pii_mode full.
+    # Discovery from hashtag and location pages (D-055): per_day logged-out
+    # page loads a day (0 = off), spread over the day, within the vets'
+    # exit share and holds. location: the locations in Iraq most used by
+    # stored posts (up to `locations`); hashtag: Iraq's place names from
+    # the keyword list (one-word terms) plus `hashtags`. A page waits
+    # `revisit` between loads, doubled for each load in a row that met no
+    # new account. The accounts shown become candidates seen in Iraq, with
+    # origin place or hashtag; nothing else of the page is kept.
+    pages:
+      per_day: 0
+      kinds: [location, hashtag]
+      hashtags: []
+      locations: 200
+      revisit: 24h
     audience:
       share: 0
       min_commenters: 30

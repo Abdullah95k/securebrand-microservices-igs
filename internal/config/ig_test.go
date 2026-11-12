@@ -39,6 +39,9 @@ func TestIGDefaults(t *testing.T) {
 		d.RecheckShare != 0.1 {
 		t.Fatalf("discovery: follower_rechecks %v, recheck_share %v", d.FollowerRechecks, d.RecheckShare)
 	}
+	if p := g.Discovery.Pages; p.PerDay != 0 || len(p.Kinds) != 2 || p.Locations != 200 || p.Revisit != 24*time.Hour {
+		t.Fatalf("discovery.pages %+v: want off, location and hashtag, 200 locations, 24h", p)
+	}
 	if a := g.Discovery.Audience; a.Share != 0 || a.MinCommenters != 30 || a.MinFollowers != 10000 || a.Posts != 2 || a.MaxComments != 100 {
 		t.Fatalf("discovery.audience %+v: want off, 30 commenters, 10000 followers, 2 posts, 100 comments", a)
 	}
@@ -95,6 +98,12 @@ func TestIGValidate(t *testing.T) {
 		{"reels full pass", func(c *Config) { c.IG.Schedule.ReelsFullEvery = 0 }, "ig.schedule.reels_window"},
 		{"resting share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.HoldRestingShare = 1.5 }, "ig.discovery.hold_resting_share"},
 		{"exit share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.ExitShare = -0.1 }, "ig.discovery.exit_share"},
+		{"pages kind", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.Pages.Kinds = []string{"profile"} },
+			"ig.discovery.pages.kinds"},
+		{"pages revisit", func(c *Config) {
+			c.IG.Discovery.Enabled = true
+			c.IG.Discovery.Pages.PerDay, c.IG.Discovery.Pages.Revisit = 100, 0
+		}, "ig.discovery.pages"},
 		{"recheck share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.RecheckShare = 2 }, "ig.discovery.recheck_share"},
 		{"recheck wait", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.FollowerRechecks = []time.Duration{0} },
 			"ig.discovery.follower_rechecks"},
