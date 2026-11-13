@@ -200,7 +200,7 @@ func (s *Sender) post(ctx context.Context, ref, evidence string) (result string,
 	if err != nil {
 		return "failed", false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusAccepted:
 		var out struct {
