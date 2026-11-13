@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -101,6 +102,9 @@ type IG struct {
 	// (registry.account_request.v1, REQ-019 item 4.3). Off until the
 	// owner turns it on.
 	AccountRequests IGAccountRequests `koanf:"account_requests"`
+	// FBCandidates sends the facebook.com links on monitored accounts'
+	// profiles to the Facebook collector (D-065). Off by default.
+	FBCandidates IGFBCandidates `koanf:"fb_candidates"`
 }
 
 // IGLimits are the defaults applied to jobs that do not override them.
@@ -355,6 +359,17 @@ func (c *Config) validateIG() []error {
 			errs = append(errs, errors.New("ig.discovery.audience: min_commenters, posts and max_comments must be 1 or more"))
 		}
 	}
+	if f := g.FBCandidates; f.Enabled {
+		if u, err := url.Parse(f.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, errors.New("ig.fb_candidates.url must be an http or https address"))
+		}
+		if f.Key == "" {
+			errs = append(errs, errors.New("ig.fb_candidates.key is missing (IGS_IG__FB_CANDIDATES__KEY, from its Secret)"))
+		}
+		if f.PerDay <= 0 || f.Interval <= 0 || f.Backoff <= 0 || f.Timeout <= 0 {
+			errs = append(errs, errors.New("ig.fb_candidates: per_day, interval, backoff and timeout must be > 0"))
+		}
+	}
 	if g.ExitPageLoadsPerDay < 0 {
 		errs = append(errs, errors.New("ig.exit_page_loads_per_day must not be negative"))
 	}
@@ -424,6 +439,24 @@ func (c *Config) validateIG() []error {
 // BudgetOn reports whether a daily budget is set.
 func (g IG) BudgetOn() bool {
 	return g.Budget.Enabled && (g.Budget.RequestsPerDay > 0 || g.Budget.BytesPerDay > 0)
+}
+
+// IGFBCandidates configures the hand-off of Facebook links to fbs's
+// candidate API (POST <url>/v1/discovery/candidates).
+type IGFBCandidates struct {
+	Enabled bool `koanf:"enabled"`
+	// URL is fbs's API address (scheme and host, no path).
+	URL string `koanf:"url"`
+	// Key is the bearer key. It comes from a Kubernetes Secret, through
+	// IGS_IG__FB_CANDIDATES__KEY, and is never logged.
+	Key string `koanf:"key"`
+	// PerDay is the most links sent a day (UTC).
+	PerDay int `koanf:"per_day"`
+	// Interval is how often the leader looks for new links and sends.
+	Interval time.Duration `koanf:"interval"`
+	// Backoff is how long sending waits after a 503 or a failure.
+	Backoff time.Duration `koanf:"backoff"`
+	Timeout time.Duration `koanf:"timeout"`
 }
 
 // IGAccountRequests configures the account request consumer.

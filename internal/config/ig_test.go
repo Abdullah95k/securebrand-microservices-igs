@@ -107,6 +107,9 @@ func TestIGValidate(t *testing.T) {
 		{"recheck share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.RecheckShare = 2 }, "ig.discovery.recheck_share"},
 		{"recheck wait", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.FollowerRechecks = []time.Duration{0} },
 			"ig.discovery.follower_rechecks"},
+		{"fb candidates url", func(c *Config) { c.IG.FBCandidates.Enabled, c.IG.FBCandidates.Key = true, "k" }, "ig.fb_candidates.url"},
+		{"fb candidates key", func(c *Config) { c.IG.FBCandidates.Enabled, c.IG.FBCandidates.URL = true, "https://fbs.example" },
+			"ig.fb_candidates.key"},
 		{"audience share", func(c *Config) { c.IG.Discovery.Enabled = true; c.IG.Discovery.Audience.Share = 1.5 }, "ig.discovery.audience.share"},
 		{"audience sample", func(c *Config) {
 			c.IG.Discovery.Enabled = true

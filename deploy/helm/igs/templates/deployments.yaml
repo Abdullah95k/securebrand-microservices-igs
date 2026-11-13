@@ -54,6 +54,14 @@ spec:
             - name: IGS_IG__BROWSER__REMOTE
               value: "http://127.0.0.1:{{ $root.Values.browserContainer.port }}"
             {{- end }}
+            {{- if and (eq $name "scheduler") $root.Values.fbCandidates.secretName }}
+            # The Facebook collector's key (D-065), for the scheduler alone.
+            - name: IGS_IG__FB_CANDIDATES__KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.fbCandidates.secretName }}
+                  key: {{ required "fbCandidates.secretKey" $root.Values.fbCandidates.secretKey }}
+            {{- end }}
           {{- include "igs.envFrom" (dict "root" $root "credentials" ($c.credentialsSecret | default "")) | nindent 10 }}
           ports:
             - {name: metrics, containerPort: 9090}
