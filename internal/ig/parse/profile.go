@@ -3,6 +3,8 @@ package parse
 import (
 	"crypto/sha256"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -127,8 +129,12 @@ func Profile(parts []gjson.Result) (ProfileResult, walk.Report) {
 	p.Pronouns = strings.Join(pronouns, "/")
 	if pic := walk.First(u, "hd_profile_pic_url_info.url", "profile_pic_url_hd", "profile_pic_url").String(); pic != "" {
 		p.ProfilePic = &commonv1.ImageRef{Url: pic}
+		// The picture's media id follows the picture itself (its file name),
+		// so a changed picture is a new medium, downloaded again; the slot
+		// (SourceMediaId) stays the account's.
+		slot := "profile:" + strconv.FormatInt(pk, 10)
 		res.Media = append(res.Media, &igv1.Media{
-			MediaId: MediaID("profile:"+strconv.FormatInt(pk, 10), "original"), SourceMediaId: "profile:" + strconv.FormatInt(pk, 10),
+			MediaId: MediaID(slot+picAsset(pic), "original"), SourceMediaId: slot,
 			Kind: commonv1.MediaKind_MEDIA_KIND_PROFILE_PIC, Variant: "original", OwnerType: "profile", UserPk: pk,
 			SourceUrl: pic, SourceExpiresAt: walk.URLExpiry(pic),
 		})
@@ -164,4 +170,17 @@ func Profile(parts []gjson.Result) (ProfileResult, walk.Report) {
 	}
 	res.Profile = p
 	return res, rep
+}
+
+// picAsset is ":" and the file name of a profile picture's URL (without its
+// signed, expiring query), or "" when the URL has none.
+func picAsset(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if b := path.Base(u.Path); b != "" && b != "." && b != "/" {
+		return ":" + b
+	}
+	return ""
 }
