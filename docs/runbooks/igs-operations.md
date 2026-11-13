@@ -354,6 +354,15 @@ kubectl -n igs exec deploy/igs-api -- igsctl discovery keywords list --group erb
 - a change to `iraq.yaml` or to the spelling fold (`internal/keywords/normalize.go`, fbs's `internal/discovery/normalize.go`) belongs in both repositories;
 - a spelling igs needs first goes in `iraq-igs.yaml`; propose it to fbs as a patch ([`UPSTREAM.md`](../../UPSTREAM.md)), and delete it from `iraq-igs.yaml` once fbs has it.
 
+## Facebook links for fbs (D-065)
+
+The scheduler's leader sends the facebook.com links on monitored accounts' profiles (bio text, bio links, website, linked page) to the Facebook collector, once per link and again when that account's bio changes. They are kept in `ig.fb_candidates`; an erased account's go with it.
+
+- **Turn on:** `config.ig.fb_candidates.enabled: true`, `url:` fbs's API address, and `fbCandidates.secretName` (and `secretKey`, default `api-key`) naming the Secret with the key. The scheduler refuses to start when it is on without a key.
+- **Ceiling:** `per_day` (200) links a day, UTC; the rest wait for the next day.
+- **Read:** `sum by (result) (increase(igs_fb_candidates_total[1h]))`. `unavailable` is fbs's 503 (its mentions off) or 429, `refused` a 401 or 403 (check the key), `failed` a network error or 5xx: each pauses sending for `backoff` (30 minutes). `invalid` is another 4xx; that link isn't sent again.
+- **Network:** HTTPS (443) is allowed; an fbs address inside the cluster on another port needs its namespace in `networkPolicy.egress.namespaces`.
+
 ## Block storm (block rate > 10%)
 
 The fleet reacts on its own at four levels:

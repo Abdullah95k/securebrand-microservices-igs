@@ -426,6 +426,11 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
          - Iraqi locations from stored posts, and Iraq's place names as hashtags.
          - One page load every 14.4 minutes, within discovery's exit share and holds.
          - The accounts shown become candidates seen in Iraq (origin `place` or `hashtag`) and are vetted as usual. Nothing else of the page is kept.
+  - **The owner's D-065 (13 Nov), "activate Facebook discovery":** the facebook.com links on monitored accounts' profiles go to the Facebook collector.
+    - Links come from the bio text, the bio links, the website and the linked Facebook page.
+    - Each is sent once to fbs's `POST /v1/discovery/candidates` (`source: igs`), and again only when that account's bio changes. The profile goes as `evidence_url`, except a private one's.
+    - Off by default: `ig.fb_candidates` (`enabled`, `url`, `per_day: 200`); the key comes from the Secret in `fbCandidates.secretName`/`secretKey`.
+    - A 503 (fbs's mentions off), a refused key or a failure pause sending for 30 minutes; the links wait. Results are counted in `igs_fb_candidates_total{result}`.
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 

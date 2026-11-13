@@ -351,6 +351,18 @@ ig:
   account_requests:
     enabled: false
     client: registry
+  # The facebook.com links on monitored accounts' profiles (bio text, bio
+  # links, website, linked page), each sent once to the Facebook
+  # collector's candidate API, and again only when the bio changes (D-065).
+  # Off until the platform sets the address and the key's Secret.
+  fb_candidates:
+    enabled: false
+    url: ""
+    key: ""       # IGS_IG__FB_CANDIDATES__KEY, from a Secret; never logged
+    per_day: 200  # links sent a day (UTC)
+    interval: 1m
+    backoff: 30m  # after a 503 (fbs's mentions off) or a failure
+    timeout: 10s
   registry_seed: "ig/queries.seed.yaml"
   registry_refresh: 30s
   fingerprint_profile: chrome_152

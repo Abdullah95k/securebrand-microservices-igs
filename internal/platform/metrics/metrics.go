@@ -156,6 +156,11 @@ var (
 	// (D-055) by kind and result: loaded, login, wall, limited,
 	// unavailable, other.
 	DiscoveryPages = counterVec("discovery_pages_total", "Discovery's hashtag and location page loads, by kind (location, hashtag) and result (loaded, login, wall, limited, unavailable, other).", "kind", "result")
+	// FBCandidates counts the Facebook links sent to fbs's candidate API
+	// (D-065), by result: fbs's answer (queued, on_list, added,
+	// public_waiting, checked_recently, ignored, other) or unavailable (503
+	// or 429), refused (401 or 403), invalid (another 4xx) or failed.
+	FBCandidates = counterVec("fb_candidates_total", "Facebook links sent to the Facebook collector's candidate API, by result (fbs's answer, or unavailable, refused, invalid, failed).", "result")
 	// DiscoveryRechecks counts re-vets started for candidates kept as
 	// small (under ig.discovery.min_followers).
 	DiscoveryRechecks = counter("discovery_rechecks_total", "Re-vets started for discovery candidates kept for having too few followers (small).")

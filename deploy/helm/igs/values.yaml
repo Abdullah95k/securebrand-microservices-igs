@@ -243,6 +243,13 @@ paused: false
 #   components: {scheduler: {podAnnotations: {igs/proxies-added: "2026-11-07"}}}
 podAnnotations: {}
 
+# The Facebook collector's key (D-065): the Secret and its key the
+# scheduler reads IGS_IG__FB_CANDIDATES__KEY from. Set them with
+# config.ig.fb_candidates (enabled, url, per_day); empty, no key is read.
+fbCandidates:
+  secretName: ""
+  secretKey: api-key
+
 # A component's own credentials (REQ-008 fix 22b): set
 #   components: {<name>: {credentialsSecret: igs-<name>-credentials}}
 # and its pods also read that Secret, after platformCredentials, with the

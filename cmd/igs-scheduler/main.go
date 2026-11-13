@@ -9,6 +9,7 @@ import (
 	"context"
 	"flag"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	igapp "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/app"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/discovery"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/dispatch"
+	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/fbcand"
 	iggdpr "github.com/abdullah95k/securebrand-microservices-igs/internal/ig/gdpr"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/requests"
 	"github.com/abdullah95k/securebrand-microservices-igs/internal/ig/scheduler"
@@ -128,6 +130,11 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 			return err
 		}
 		loops = append(loops, c.Run)
+	}
+	if f := cfg.IG.FBCandidates; f.Enabled {
+		// Facebook links for the Facebook collector (D-065).
+		s := &fbcand.Sender{DB: db, Cfg: f, HTTP: &http.Client{Timeout: f.Timeout}}
+		loops = append(loops, func(ctx context.Context) error { return scheduler.Every(ctx, "fb-candidates", f.Interval, s.Tick) })
 	}
 	if cfg.IG.BudgetOn() {
 		budget := ratelimit.NewBudgetController(rdb, cfg.Kafka.TopicPrefix, cfg.IG.Budget)
