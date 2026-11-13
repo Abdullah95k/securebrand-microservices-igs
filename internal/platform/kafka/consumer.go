@@ -64,7 +64,12 @@ type Consumer struct {
 	// or the drain timeout gave up on them): what is still pending will
 	// never be done, so the revoke of leaving the group does not wait for it.
 	drained atomic.Bool
+	ran     atomic.Bool
 }
+
+// ErrConsumerRan is a second Run's error: Run closes the consumer's client,
+// so each run needs a new Consumer.
+var ErrConsumerRan = errors.New("kafka: consumer already ran; make a new one")
 
 type drainKey struct{}
 
@@ -140,7 +145,11 @@ func (c *Consumer) Client() *kgo.Client { return c.cl }
 
 // Run consumes until ctx is cancelled, then drains in-flight records,
 // commits and leaves the group.
+// A Consumer runs once; a second Run returns ErrConsumerRan.
 func (c *Consumer) Run(ctx context.Context) error {
+	if !c.ran.CompareAndSwap(false, true) {
+		return ErrConsumerRan
+	}
 	handlerCtx, cancelHandlers := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelHandlers()
 	handlerCtx = WithDrain(handlerCtx, c.drainCh)

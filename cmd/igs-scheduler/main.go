@@ -123,13 +123,17 @@ func runScheduler(ctx context.Context, cfg *config.Config) error {
 	if cfg.IG.AccountRequests.Enabled {
 		// The platform's account requests (REQ-019 item 4.3), applied by the
 		// leader alone, one at a time.
+		// A consumer runs once (Run closes it), and the loops start again
+		// each time the lease comes back: each term gets its own consumer.
 		h := &requests.Handler{DB: db, Dispatch: disp, Cfg: cfg}
-		c, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: requests.Group,
-			Topics: []string{topics.RegistryAccountRequest}, MaxInflight: 1, DrainTimeout: 20 * time.Second}, h.Handle)
-		if err != nil {
-			return err
-		}
-		loops = append(loops, c.Run)
+		loops = append(loops, func(ctx context.Context) error {
+			c, err := kafka.NewConsumer(kafka.ConsumerConfig{ClientConfig: kcfg, Group: requests.Group,
+				Topics: []string{topics.RegistryAccountRequest}, MaxInflight: 1, DrainTimeout: 20 * time.Second}, h.Handle)
+			if err != nil {
+				return err
+			}
+			return c.Run(ctx)
+		})
 	}
 	if f := cfg.IG.FBCandidates; f.Enabled {
 		// Facebook links for the Facebook collector (D-065).
