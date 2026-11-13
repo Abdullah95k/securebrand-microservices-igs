@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -117,5 +118,29 @@ func TestRevokeStopsWaitingRecordsFromStarting(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the revoke did not end once the running record was done")
+	}
+}
+
+// A consumer runs once: Run closes its client. A second Run (a leader
+// loop started again after its lease came back, 13 Nov 2026) returns
+// ErrConsumerRan instead of panicking on the closed drain channel.
+func TestConsumerRunsOnce(t *testing.T) {
+	b := os.Getenv("IGS_TEST_KAFKA_BROKERS")
+	if b == "" {
+		t.Skip("IGS_TEST_KAFKA_BROKERS not set")
+	}
+	cfg := ClientConfig{Brokers: strings.Split(b, ","), TopicPrefix: fmt.Sprintf("t%d.", time.Now().UnixNano())}
+	c, err := NewConsumer(ConsumerConfig{ClientConfig: cfg, Group: "once", Topics: []string{"igs.test.once"}, DrainTimeout: time.Second},
+		func(context.Context, *kgo.Record) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := c.Run(ctx); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if err := c.Run(context.Background()); !errors.Is(err, ErrConsumerRan) {
+		t.Fatalf("second run: %v, want ErrConsumerRan", err)
 	}
 }

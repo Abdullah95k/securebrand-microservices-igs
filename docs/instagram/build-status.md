@@ -431,6 +431,10 @@ From the readiness pack (2026-11-05, a read-only review for the master session; 
     - Each is sent once to fbs's `POST /v1/discovery/candidates` (`source: igs`), and again only when that account's bio changes. The profile goes as `evidence_url`, except a private one's.
     - Off by default: `ig.fb_candidates` (`enabled`, `url`, `per_day: 200`); the key comes from the Secret in `fbCandidates.secretName`/`secretKey`.
     - A 503 (fbs's mentions off), a refused key or a failure pause sending for 30 minutes; the links wait. Results are counted in `igs_fb_candidates_total{result}`.
+  - **Scheduler restarts (13 Nov, about 21:00 to 23:00Z):** exit code 2, a panic, "close of closed channel".
+    - The shared PostgreSQL dropped connections (08P01), so the scheduler's lease kept lapsing: 305 times in 6 hours. Each time, the leader's loops start again when the lease comes back.
+    - The account-request consumer (on in production) was made once, so its second run closed an already-closed channel.
+    - Now each leadership term makes its own consumer, and a second run returns an error instead of panicking.
   - **Coverage plan:** for the owner's D-054 (every Iraqi account, and every one Iraqi audiences engage with), the scope, cost per account and three tiers are in [`igs-coverage-plan.md`](../master/igs-coverage-plan.md). It finds that one IP safely carries about 50 to 100 accounts at today's intervals.
   - **Still open:** the read-only check for highlight items as story posts.
 
